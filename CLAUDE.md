@@ -51,19 +51,20 @@ clang-format -i src/**/*.{cpp,h}
 
 ## Repository State
 
-The `.claude/` rules and agents are complete. **No source code exists yet.**
-Everything under `src/`, `tests/`, and `CMakeLists.txt` needs to be created, starting at Step 2.
+> **CURRENT: Step 3 — chowdsp_wdf smoke test**
+
+The `.claude/` rules and agents are complete. The Step 2 JUCE CMake scaffold is in place
+under `src/`, `CMakeLists.txt`, `.clang-format`, and `.clang-tidy`.
 
 ---
 
 ## Build Sequence — Do Not Skip Ahead
 
 1. ✅ **Schematic analysis** — complete. All circuit values verified, MA856 validated, Hi Gain mod characterised.
-2. **JUCE CMake scaffold** ← CURRENT STEP
-   - Create `CMakeLists.txt`, `PluginProcessor.h/.cpp`, `PluginEditor.h/.cpp`
-   - Wire up APVTS with all parameters from `architecture.md`
-   - Gate: AU and VST3 both scan and load in a DAW (Logic or Reaper)
-3. **chowdsp_wdf smoke test**
+2. ✅ **JUCE CMake scaffold** — complete. CMakeLists.txt, PluginProcessor, PluginEditor, full
+   APVTS parameter layout, MonarchChannel stub, and TaperUtils all in place. AU validated
+   with `auval` and all 18 parameters confirmed present with correct defaults.
+3. **chowdsp_wdf smoke test** ← CURRENT STEP
    - Implement a trivial RC lowpass using `chowdsp::wdft`, verify -3dB point matches theory
    - Gate: correct -3dB point confirmed
 4. **Stage-by-stage DSP** — implement and validate each before moving on:
