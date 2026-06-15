@@ -28,11 +28,11 @@ parts list. Values are by function, not by reference designator.
 | VCC filter cap | C2 | 100µF | C21/C22 | 100µF | MATCH | excluded (bias) |
 | Input pulldown R | R5 | 1M | RPD1 | 1M | MATCH | 1M |
 | **Input coupling cap** | **C3** | **10nF (0.01µF)** | **C1** | **22nF** | **DIFFERS** | **10nF (matsumin primary)** |
-| Input shunt cap at pin3(+) | C6 | 10nF | C3/C4 | 10nF | MATCH | 10nF |
-| Input filter cap (upper) | C5 | 10nF | C3/C4 | 10nF | MATCH | 10nF |
-| Stage 1 upper feedback R | R7 | 33k | R5 | 33k | MATCH | 33k |
-| Stage 1 lower feedback R | R8 | 27k | R4 | 27k | MATCH | 27k |
-| Stage 1 DC bias R at pin2(–) | R4 | 1M | R1 | 1M | MATCH | 1M |
+| Stage 1 Z_lower Branch2 cap | C6 | 10nF | C3/C4 | 10nF | MATCH | 10nF |
+| Stage 1 Z_lower Branch1 cap | C5 | 10nF | C3/C4 | 10nF | MATCH | 10nF |
+| Stage 1 Z_lower Branch1 R | R7 | 33k | R5 | 33k | MATCH | 33k |
+| Stage 1 Z_lower Branch2 R | R8 | 27k | R4 | 27k | MATCH | 27k |
+| Pin3(+) DC bias R (input network) | R4 | 1M | R1 | 1M | MATCH | 1M |
 | Stage 1 HF feedback cap | C4 | 100pF | C2 | 100pF | MATCH | 100pF |
 | Stage 1 DRIVE floor R | R6 | 10k | R6 | 10k | MATCH | 10k |
 | DRIVE pot | DRIVE | 100kB | DRIVE | 100kB | MATCH | 100kB linear |
@@ -74,11 +74,16 @@ Virtually the entire guitar range receives full Stage 2 gain.
 The matsumin schematic shows C3 = 0.01µF (10nF). The Theseus uses C1 = 22nF.
 This is a genuine design difference — the Theseus is a slightly modified clone.
 
-- matsumin 10nF: f_c ≈ 590 Hz with R8 (27k) — tighter low end, more bass rolloff
-- Theseus 22nF: f_c ≈ 268 Hz — fuller low end, closer to Bluesbreaker original
+> **CORRECTED 2026-06-15:** C3 forms a simple DC-blocking pole with R4 (1M to BIAS at
+> pin 3+), not with R8 (see Section 5). R8 is part of Stage 1's feedback network (Section 6).
+
+- matsumin 10nF: f_c = 1/(2π × R4 × C3) ≈ 15.9 Hz with R4 (1M) — DC blocking only
+- Theseus 22nF: f_c ≈ 7.2 Hz with R4 (1M) — also DC blocking only; difference is negligible
+  at audio frequencies either way
 
 **Decision:** Use **10nF** (matsumin primary source) for the 1:1 KOT Ver2 clone.
-The 22nF variant may be offered as a "Theseus" mode in future if desired.
+The 22nF variant may be offered as a "Theseus" mode in future if desired, though the
+audible difference is minimal given both values are far below the guitar's range.
 
 ### Op-amp (JRC4558D vs JRC4580D)
 
@@ -138,116 +143,159 @@ BIAS = VCC/2 = 4.5V = DSP signal ground (0V in model).
 
 ## 5. Input Network
 
+> **CORRECTED 2026-06-15** — the previous version of this section (R7/R8 resistive divider
+> driving pin3, C5/C6 as input shunt caps) was traced incorrectly. Re-verified directly from
+> `king_of_tone_schematic.png` (crop shows J1 → R5/C3 → pin3, and R4 to BIAS below pin3).
+> C5, C6, R7, R8 are **not** part of the input network — they belong to Stage 1's feedback
+> network (Section 6).
+
 **Components (from matsumin schematic, verified against Theseus):**
 
 | Component | Value | Connection |
 |-----------|-------|-----------|
-| R5 | 1M | Input jack to GND (pulldown, prevents bypass thump) |
-| C3 | 10nF | Input jack to node_IN (series coupling/HPF cap) |
-| C5 | 10nF | node_IN to GND (shunt, top of input filter) |
-| R7 | 33k | node_IN to IC_A pin 2(–) (upper path toward Stage 1 feedback) |
-| R8 | 27k | node_IN to IC_A pin 3(+) (lower path, non-inverting input) |
-| C6 | 10nF | IC_A pin 3(+) node to BIAS (shunt cap, AC grounds pin 3 ref) |
+| R5 | 1M | Input jack (node_IN) to GND (pulldown, prevents bypass thump) |
+| C3 | 10nF | Input jack (node_IN) to IC_A pin 3(+) (series coupling/DC-block cap) |
+| R4 | 1M | IC_A pin 3(+) to BIAS (DC bias / return path for pin 3) |
 
 **Signal flow:**
-R5 (1M) is a bleed to GND — negligible at audio frequencies, keeps input at DC ground when
-unconnected. C3 (10nF) blocks DC, forms HPF with the downstream network.
 
-The input then splits: R7 (33k) goes toward the Stage 1 feedback node (pin 2–) and R8 (27k)
-drives pin 3(+) directly. C6 (10nF) shunts the pin 3(+) node to BIAS, acting as a bypass cap
-ensuring the non-inverting input reference is clean.
+```
+J1 INPUT ── node_IN ──────────────────────── C3 (10nF) ──── IC_A pin 3(+)
+              │                                                  │
+            R5 (1M)                                         R4 (1M)
+              │                                                  │
+             GND                                               BIAS
+```
 
-The combined input HPF corner frequency is primarily set by C3 and the parallel combination
-of R7 and R8 as seen from the input:
+R5 (1M) is a bleed to GND — negligible at audio frequencies, keeps the input jack at DC
+ground when unconnected (true-bypass thump suppression). C3 (10nF) blocks DC and couples
+the AC signal to pin 3(+). R4 (1M) sets pin 3(+) to BIAS at DC and provides the return path
+for C3's bias current.
 
-    f_c ≈ 1 / (2π × R8 × C3) = 1 / (2π × 27k × 10nF) ≈ **590 Hz**
+**Input HPF (DC blocking only):**
 
-This rolls off sub-bass below guitar's useful range. The dual-R input network (R7 to feedback,
-R8 to signal input) is the Bluesbreaker topology — R7 forms a frequency-dependent gain-setting
-path to the feedback node, contributing to the gain peak at ~4194 Hz.
+    f_c = 1 / (2π × R4 × C3) = 1 / (2π × 1M × 10nF) ≈ **15.9 Hz**
 
-**WDF model:** Series C3, then R7 and R8 as a resistive divider to pin 3(+), with C5 shunt
-at node_IN and C6 shunt at pin 3(+). R5 shunt at input node to GND.
+This is far below the guitar's range — it is DC blocking, not a tone-shaping filter. There
+is **no meaningful input HPF** in this circuit; all of the gain stage's frequency-dependent
+behaviour comes from Stage 1's feedback network (Section 6).
+
+**WDF model:** Series C3 from node_IN to pin 3(+), R5 shunt at node_IN to GND, R4 shunt at
+pin 3(+) to BIAS. This is a simple linear series/shunt tree — no R-type adaptor needed for
+the input network itself (pin 3 is a non-inverting input, draws no current in the ideal
+op-amp model).
 
 ---
 
 ## 6. Stage 1 — IC_A (Non-Inverting Amplifier)
 
+> **CORRECTED 2026-06-15** — re-traced directly from `king_of_tone_schematic.png`. The
+> previous version of this section misidentified R7/R8/C4 placement and the role of the
+> DRIVE pot. Two crops confirm the corrected topology below:
+> 1. A crop showing C5+R7 and C6+R8 as two series branches in parallel, both running from
+>    a GND node on the left to a shared junction (= IC_A pin 2(–), "NodeF") on the right.
+>    NodeF also connects to C4 (100pF) and to R6(10k)+DRIVE(100k-B) on the top rail.
+> 2. A crop showing the top rail continues from NodeF through R6(10k) then the DRIVE pot
+>    (100k-B, used as a 2-terminal variable resistor — the wiper arrow is just the pot
+>    symbol, not a third connection) to NodeG. NodeG = C4's other terminal = IC_A pin 1
+>    (output), and NodeG feeds directly into R9(10k) → C7(100nF) → Stage 2 pin 6(–).
+
 **Components (from matsumin schematic):**
 
 | Component | Value | Connection |
 |-----------|-------|-----------|
-| IC_A | JRC4580D (half) | Non-inverting amp; pin 3(+) = signal in, pin 2(–) = feedback, pin 1 = output |
-| R4 | 1M | IC_A pin 2(–) to BIAS (DC bias resistor) |
-| R8 | 27k | IC_A pin 2(–) to BIAS (lower feedback; **also** in input network — same node) |
-| R7 | 33k | IC_A pin 2(–) toward DRIVE pot pin 3 (upper feedback) |
-| C4 | 100pF | In parallel with R7 (HF compensation cap in feedback) |
-| R6 | 10k | Between DRIVE pot pin 3 and the R7/C4 network (floor gain resistor) |
+| IC_A | JRC4580D (half) | Non-inverting amp; pin 3(+) = signal in (Section 5), pin 2(–) = feedback node ("NodeF"), pin 1 = output ("NodeG") |
+| C5 | 10nF | NodeF to GND, in series with R7 (Branch 1) |
+| R7 | 33k | NodeF to GND, in series with C5 (Branch 1) |
+| C6 | 10nF | NodeF to GND, in series with R8 (Branch 2) |
+| R8 | 27k | NodeF to GND, in series with C6 (Branch 2) |
+| C4 | 100pF | NodeF to NodeG (directly across the feedback path) |
+| R6 | 10k | NodeF to NodeG, in series with DRIVE pot (in parallel with C4) |
+| DRIVE | 100kB | NodeF to NodeG, in series with R6 (2-terminal variable resistor, in parallel with C4) |
 
-> **Node identity:** IC_A pin 2(–) connects to R8 (27k to BIAS), R4 (1M to BIAS), and R7
-> (33k toward DRIVE). R8 is shared between the input network and Stage 1 feedback — the
-> same physical node. This is the Bluesbreaker's characteristic input/feedback coupling.
+> **Node identity:** NodeF = IC_A pin 2(–). NodeG = IC_A pin 1 (output) = input to R9/C7
+> (Stage 2). DRIVE is used as a simple 0–100kΩ rheostat in series with R6 — it has **no**
+> separate wiper tap feeding Stage 2; Stage 2 is driven directly from the Stage 1 op-amp
+> output via R9/C7 (see Section 7).
 
-**Stage 1 gain (non-inverting):**
+**Stage 1 gain (non-inverting, frequency-dependent):**
 
-    Av = 1 + Z_upper / Z_lower
+    Av(s) = 1 + Z_upper(s) / Z_lower(s)
 
-Z_lower = R8 (27k) ∥ R4 (1M) ≈ 26.3k
+**Z_lower(s)** — NodeF to GND — two series R+C branches in parallel:
 
-Z_upper = R6 (10k) + R_drive_upper + R7 (33k) with C4 (100pF) in parallel
-- R_drive_upper = 0k at DRIVE max (wiper at pin 3), = 100k at DRIVE min (wiper at GND)
-- R6 (10k) is always in series — it is the minimum gain floor
+    Branch1(s) = R7 + 1/(sC5)     (33k + 10nF series)   → corner f1 = 1/(2π·R7·C5) ≈ 482 Hz
+    Branch2(s) = R8 + 1/(sC6)     (27k + 10nF series)   → corner f2 = 1/(2π·R8·C6) ≈ 590 Hz
+    Z_lower(s) = Branch1(s) ∥ Branch2(s)
 
-    Av_min (DRIVE=max): Z_upper = R6 + 0 + R7 = 10k + 33k = 43k
-    Av_min = 1 + 43k / 26.3k ≈ **2.6×** (8.4 dB)
+Both branches are high-impedance (capacitive) at DC and low/mid frequencies, becoming
+resistive (R7∥R8 ≈ 14.85k) above their corner frequencies. **Z_lower → ∞ at DC** (both
+branches are blocked by series caps).
 
-    Av_max (DRIVE=min): Z_upper = R6 + 100k + R7 = 10k + 100k + 33k = 143k
-    Av_max = 1 + 143k / 26.3k ≈ **6.4×** (16.2 dB)
+**Z_upper(s)** — NodeF to NodeG — R6 + DRIVE in series, in parallel with C4:
 
-Stage 1 gain **decreases** as DRIVE increases (DRIVE pot reduces Z_upper via R_drive_upper
-going toward 0).
+    Z_upper(s) = (R6 + R_drive) ∥ 1/(sC4)     where R_drive ∈ [0, 100k]
+    corner f_u = 1/(2π·(R6+R_drive)·C4): 14.5 kHz (R_drive=100k) to 159 kHz (R_drive=0)
 
-**C4 (100pF) HF pole:**
-C4 shorts R7 at high frequencies. Pole: f = 1/(2π × R7 × C4) = 1/(2π × 33k × 100pF) ≈ **48.2 kHz**
+**Z_upper is finite (≈ R6+R_drive) at DC**, since C4 is open at DC.
 
-This pole is above audible range in isolation. Combined with R7's role in the input network
-and Stage 2's transfer function, the system produces the measured gain peak near **~4194 Hz**
-(CCRMA paper, Fig. 6, measured at mid-DRIVE).
+**DC behaviour:** Since Z_lower(0) = ∞, pin 2(–) has no DC path to ground except through
+Z_upper to the output — this is the classic op-amp DC servo. At DC, V(pin2-) = V(out), and
+by the virtual-short V(pin2-) = V(pin3+) = V(BIAS) = 0. So **DC gain = 1** (output sits at
+BIAS, as required for DC blocking into Stage 2).
+
+**Mid/high-frequency behaviour:** Above ~600 Hz both Branch1 and Branch2 become resistive
+(Z_lower → R7∥R8 ≈ 14.85k), while Z_upper is still dominated by R6+R_drive (10k–110k, since
+its own corner is much higher, 14.5–159 kHz). In this band:
+
+    Av ≈ 1 + (R6 + R_drive) / (R7 ∥ R8) ≈ 1 + (R6+R_drive) / 14.85k
+
+ranging from ≈1.67× (R_drive=0) to ≈8.4× (R_drive=100k) before C4 begins to roll Z_upper
+off at higher frequencies. The exact gain-peak frequency (~4194 Hz per CCRMA, measured at
+mid-DRIVE) emerges from the interaction of the Z_lower corners (~482/590 Hz, rising) and
+the Z_upper corner (~14.5–159 kHz, falling) — **measure this from the implemented WDF model
+via a frequency-response test**, do not assume the exact peak frequency/gain numbers above
+are precise until validated.
 
 **No PolarityInverterT** — Stage 1 is non-inverting.
 
 **Hi Gain mod (SW-3):**
-Switches R29 (22k) in parallel with R8 (27k), via R27 (47R protection) in series.
-R8_eff = 27k ∥ 22k + 47R ≈ **12.17k**
-Z_lower_hi = R8_eff ∥ R4 ≈ 11.9k
-Stage 1 gain range shifts to ~3.8–12.2× (+4 dB throughout DRIVE sweep).
+Switches R29 (22k) in parallel with R8 (27k), via R27 (47R protection) in series, within
+Branch 2 (the R8+C6 series branch):
 
-**WDF model:** R-type adaptor at IC_A pin 2(–). Ports: R4 (1M), R8 (27k; or 12.17k Hi Gain),
-R7 (33k) ∥ C4 (100pF), R6 (10k) + DRIVE R_upper (0–100k variable).
-Precompute two scattering matrices: standard and Hi Gain.
+    R8_eff = (R8 ∥ R29) + R27 = (27k ∥ 22k) + 47 ≈ **12.17k**
+    Branch2_hi(s) = R8_eff + 1/(sC6)   → new corner f2_hi = 1/(2π·R8_eff·C6) ≈ 1308 Hz
+
+A smaller R8_eff makes Branch2 more resistive at lower frequencies, reducing Z_lower in the
+mid/high band and therefore **increasing** Av(s) — consistent with the documented +4 dB
+Hi Gain shift. Re-measure the exact shift from the implemented model.
+
+**WDF model:** R-type adaptor at NodeF (IC_A pin 2(–)). Ports: Branch1 = R7 series C5,
+Branch2 = R8 (or R8_eff Hi Gain) series C6, Z_upper = C4 ∥ (R6 + R_drive). NodeG (pin 1,
+op-amp output) feeds R9/C7 toward Stage 2. Precompute two scattering matrices (standard /
+Hi Gain) differing only in Branch2's resistor value; switch via `setSMatrixData()`.
 
 ---
 
-## 7. DRIVE Pot — Cross-Stage Gain Control
+## 7. DRIVE Pot — Stage 1 Feedback Control
 
-**Components:** DRIVE = 100kB (linear taper)
-- Pin 3 (CW/high): IC_A pin 1 (output) — through R6 (10k) to feedback node
-- Pin 1 (CCW/low): BIAS (signal ground)
-- Pin 2 (wiper): to C7 (100nF) → R9 (10k) → IC_B pin 6(–)
+> **CORRECTED 2026-06-15** — re-traced from the schematic. DRIVE is used as a simple
+> 2-terminal variable resistor (rheostat) entirely inside Stage 1's feedback network
+> (Z_upper, Section 6). It does **not** have a separate wiper tap feeding Stage 2 — Stage 2
+> is driven directly from the Stage 1 op-amp output (NodeG) via R9/C7.
 
-The wiper simultaneously:
-1. **Sets Stage 1 feedback Z_upper** via R_drive_upper (wiper to pin 3) through R6 and R7
-2. **Sets Stage 2 input signal level** via R_drive_lower (wiper to BIAS) as voltage divider
+**Components:** DRIVE = 100kB (linear taper), wired as a 0–100kΩ rheostat in series with
+R6 (10k), this combination in parallel with C4 (100pF), between NodeF (pin 2–) and NodeG
+(pin 1, output).
 
-As DRIVE increases (wiper toward pin 3):
-- R_drive_upper → 0k: Z_upper decreases → Stage 1 gain decreases
-- V_wiper → V_stage1_out: full Stage 1 output reaches Stage 2
+As DRIVE increases (R_drive: 0 → 100k):
+- Z_upper's resistive component (R6 + R_drive) increases from 10k to 110k.
+- Since Av ≈ 1 + Z_upper/Z_lower in the mid/high band, **Stage 1 gain increases with
+  DRIVE** (the opposite of the previous, incorrect documentation).
 
-Net result: total system gain increases with DRIVE. Stage 1 reduces but Stage 2 receives
-more signal. Combined two-stage gain still rises monotonically across most of the DRIVE range.
-
-**WDF note:** Use `ScopedDeferImpedancePropagation` when updating DRIVE — Stage 1 R_upper
-and Stage 2 input R_lower both change from the same pot movement.
+**WDF note:** DRIVE only affects Stage 1's R-type adaptor (the R6+R_drive leg of Z_upper).
+No cross-stage impedance propagation is needed — Stage 2's input network (R9/C7) is fixed
+and independent of DRIVE.
 
 ---
 
@@ -414,41 +462,38 @@ Audio taper: `R_lower = 100k × pow(10, 2×x - 2)` where x ∈ [0,1].
 
 ## 13. Full Per-Channel Signal Flow (Node-by-Node)
 
+> **CORRECTED 2026-06-15** — input network and Stage 1 feedback network re-traced from
+> the schematic (see Sections 5–7). Updated below.
+
 ```
 Guitar IN (AC, ±0.1–1V at BIAS=0V reference)
   │
-  ├─ R5 (1M) → GND                       [input bleed, negligible loading]
-  │
-  C3 (10nF)                              [HPF, couples AC only]
-  │
 node_IN ──────────────────────────────────────────────────────────
-  ├─ C5 (10nF) → GND                     [input shunt cap]
-  ├─ R7 (33k) → IC_A pin 2(–)           [feeds Stage 1 feedback node]
-  └─ R8 (27k) → IC_A pin 3(+)           [drives non-inverting input]
-                  └─ C6 (10nF) → BIAS    [pin3 shunt/bypass cap]
+  ├─ R5 (1M) → GND                       [input bleed, negligible loading]
+  └─ C3 (10nF) → IC_A pin 3(+)           [DC block / couples AC only]
 
-IC_A pin 2(–) feedback node:
-  ├─ R4 (1M) → BIAS                      [DC bias]
-  ├─ R8 (27k) → BIAS (same R8 as above — shared node)
-  ├─ R7 (33k) → node_IN (same R7 as above — shared node)
-  └─ R6 (10k) → DRIVE pot pin 3          [floor gain R + connects to DRIVE]
-      └─ in parallel: C4 (100pF) across R7 [HF feedback pole]
+IC_A pin 3(+):
+  └─ R4 (1M) → BIAS                      [DC bias return for pin 3]
 
 IC_A (non-inverting, no PolarityInverterT)
-  pin 3(+) = signal, pin 2(–) = feedback node above, pin 1 = output
+  pin 3(+) = signal in (above), pin 2(–) = NodeF (feedback, below), pin 1 = NodeG (output)
+
+NodeF (IC_A pin 2–) — Z_lower to GND:
+  ├─ R7 (33k) + C5 (10nF) series → GND   [Branch1, corner ≈482 Hz]
+  └─ R8 (27k) + C6 (10nF) series → GND   [Branch2, corner ≈590 Hz; Hi Gain: R8→R8_eff≈12.17k]
+
+NodeF to NodeG — Z_upper (feedback):
+  ├─ C4 (100pF)                          [HF feedback path]
+  └─ R6 (10k) + DRIVE (0–100k) series    [in parallel with C4]
+
+NodeG (IC_A pin 1, output)
   │
-DRIVE pin 3 (= IC_A output through R6)
-  DRIVE (100kB, 0–100k)
-  ├─ Pin 3: IC_A output (via R6)
-  ├─ Pin 1: BIAS
-  └─ Pin 2 (wiper): V_wiper
-              ├─ [feeds back to Stage 1 R-type via R_drive_upper segment]
-              └─ C7 (100nF) [Stage 2 HPF, f_c = 159 Hz]
-                  │
-                  R9 (10k)
-                  │
+  R9 (10k)
+  │
+  C7 (100nF) [Stage 2 HPF, f_c = 159 Hz]
+  │
 IC_B pin 6(–) feedback node:
-  ├─ R9 (10k) → C7 → DRIVE wiper        [signal input]
+  ├─ R9 (10k) → C7 → NodeG              [signal input]
   ├─ R10 (220k) → IC_B pin 7 (output)   [feedback]
   └─ [SW-1 ON: MA856×4 DiodePairT×2 in WDFParallelT, also IC_B pin7 ↔ pin6]
 
@@ -488,18 +533,19 @@ node_T_out
 
 Using **functional names** to avoid confusion between schematic numbering systems.
 
+> **CORRECTED 2026-06-15** — input network and Stage 1 feedback network entries updated
+> per Sections 5–7.
+
 | Functional Name | matsumin ref | Value | Stage | Transfer function |
 |----------------|-------------|-------|-------|-------------------|
-| Input pulldown | R5 | 1M | Input | — |
-| Input coupling | C3 | **10nF** | Input | HPF f_c ≈ 590 Hz (w/ R8=27k) |
-| Input shunt cap | C5 | 10nF | Input | — |
-| Non-inv input feed R | R7 | 33k | Stage 1 | Part of gain network + gain peak |
-| Non-inv input R | R8 | 27k | Stage 1 | Also lower feedback R |
-| Stage 1 DC bias | R4 | 1M | Stage 1 | DC bias at pin 2(–) |
-| Stage 1 HF cap | C4 | 100pF | Stage 1 | f_pole = 48.2 kHz w/ R7 |
-| Stage 1 pin3 shunt | C6 | 10nF | Stage 1 | AC ref at pin 3(+) |
-| DRIVE floor R | R6 | 10k | Stage 1 | Min feedback Z floor |
-| DRIVE pot | DRIVE | 100kB | Both | Linear taper; cross-stage |
+| Input pulldown | R5 | 1M | Input | node_IN to GND |
+| Input coupling | C3 | **10nF** | Input | DC block; HPF f_c ≈ 15.9 Hz w/ R4 |
+| Pin3 bias R | R4 | 1M | Input | pin3(+) to BIAS; DC block w/ C3 |
+| Stage 1 Z_lower Branch1 | R7 (33k) + C5 (10nF) | series | Stage 1 | NodeF→GND; corner ≈482 Hz |
+| Stage 1 Z_lower Branch2 | R8 (27k) + C6 (10nF) | series | Stage 1 | NodeF→GND; corner ≈590 Hz (Hi Gain: R8→12.17k) |
+| Stage 1 HF feedback cap | C4 | 100pF | Stage 1 | NodeF↔NodeG (Z_upper, ∥ R6+DRIVE) |
+| DRIVE floor R | R6 | 10k | Stage 1 | NodeF↔NodeG, series w/ DRIVE (Z_upper) |
+| DRIVE pot | DRIVE | 100kB | Stage 1 | Linear taper; 2-terminal rheostat in Z_upper only |
 | Stage 2 coupling | C7 | **100nF** | Stage 2 | HPF f_c = **159 Hz** w/ R9 |
 | Stage 2 input R | R9 | 10k | Stage 2 | Av = –R10/R9 = –22 |
 | Stage 2 feedback R | R10 | 220k | Stage 2 | — |
@@ -522,14 +568,18 @@ Using **functional names** to avoid confusion between schematic numbering system
 
 ## 15. Key Transfer Functions
 
+> **CORRECTED 2026-06-15** — Stage 1 entries updated per Sections 5–7.
+
 | Network | f_c | Notes |
 |---------|-----|-------|
-| Input HPF (C3 + R8) | 590 Hz | Tight low-end; sub-bass rolloff |
+| Input DC block (C3 + R4) | ≈15.9 Hz | DC blocking only, not tone-shaping |
+| Stage 1 Z_lower Branch1 (R7+C5) | ≈482 Hz | NodeF→GND |
+| Stage 1 Z_lower Branch2 (R8+C6) | ≈590 Hz | NodeF→GND (Hi Gain: ≈1308 Hz w/ R8_eff≈12.17k) |
+| Stage 1 Z_upper corner (C4 ∥ (R6+R_drive)) | 14.5–159 kHz | Depends on DRIVE (R_drive 0–100k) |
 | Stage 2 input HPF (C7 + R9) | 159 Hz | C7=100nF; near full-range gain |
-| Stage 1 feedback pole (C4 ∥ R7) | 48.2 kHz | Contributes to ~4194 Hz two-stage gain peak |
 | Stage 2 gain (SW-1 OFF) | –22× (26.8 dB) | Inverting |
 | Tone LPF @ max TONE (25k) | 637 Hz | Heavy treble cut |
-| Gain peak (two-stage system) | ~4194 Hz | Measured at mid-DRIVE (CCRMA paper) |
+| Gain peak (two-stage system) | ~4194 Hz (CCRMA, mid-DRIVE) | **Re-measure from implemented WDF model** — not yet validated against corrected topology |
 | Output HPF (C11 + R14) | 0.16 Hz | DC block only |
 
 ---

@@ -30,8 +30,8 @@ monarch-pedal/
 │   ├── PluginEditor.h / .cpp
 │   ├── dsp/
 │   │   ├── MonarchChannel.h         ← top-level single-channel DSP (instantiated twice)
-│   │   ├── InputFilter.h            ← C5/C6/R5/R7/R8 input HPF network (linear WDF)
-│   │   ├── Stage1.h                 ← IC_A non-inverting amp; R-type at pin 2 (linear WDF)
+│   │   ├── Stage1.h                 ← IC_A non-inverting amp incl. input network (C3/R4/R5)
+│   │   │                              and feedback R-type at pin 2 (linear WDF)
 │   │   ├── Stage2.h                 ← IC_B inverting amp; R-type at pin 2 (linear WDF)
 │   │   ├── SW1SoftClip.h            ← MA856×4 in parallel with R10 (nonlinear WDF)
 │   │   ├── SW2HardClip.h            ← 1S1588×2 shunt via R11 (nonlinear WDF)
@@ -52,8 +52,8 @@ monarch-pedal/
 │   └── chowdsp_wdf/
 └── tests/
     ├── SmokeTest_RC.cpp
-    ├── InputFilter_FreqResponse.cpp  ← HPF corner ~590 Hz (C3=10nF coupling, R8=27k)
-    ├── Stage1_FreqResponse.cpp       ← gain peak ~4194 Hz at mid-DRIVE (CCRMA)
+    ├── Stage1_FreqResponse.cpp       ← combined input network + feedback network; gain
+    │                                    peak near ~4194 Hz at mid-DRIVE (CCRMA), measured
     ├── Stage1_HiGain.cpp             ← verify +4 dB gain shift in Hi Gain mode
     ├── Stage2_Gain.cpp               ← DC gain = –22; HPF corner 159 Hz (C7=100nF)
     ├── SW1SoftClip_Sine.cpp          ← MA856 symmetric soft clip; Vf ~0.82V onset
@@ -126,10 +126,11 @@ WarningsAsErrors: ""
 
 - Step 2: AU and VST3 scan and load in a DAW
 - Step 3: RC lowpass smoke test — correct -3dB point
-- Step 4a: Input filter HPF — corner ~590 Hz (C3=10nF, R8=27k)
-- Step 4b: Stage 1 frequency response — gain peak ~4194 Hz at mid-DRIVE (CCRMA Fig. 6)
-- Step 4c: Stage 1 Hi Gain — verify +4 dB gain range shift vs standard mode
-- Step 4d: Stage 2 — DC gain = ×22 inverting (R10/R9 = 220k/10k); HPF corner **159 Hz** (C7=100nF, R9=10k)
+- Step 4a: Stage 1 (combined input network + feedback network) frequency response — verify
+  Av(s) shape (DC gain ≈1, gain peak in the few-kHz region per CCRMA Fig. 6 at mid-DRIVE;
+  measure and record the actual peak frequency/gain from the implemented model)
+- Step 4b: Stage 1 Hi Gain — verify gain increase (~+4 dB target) vs standard mode
+- Step 4c: Stage 2 — DC gain = ×22 inverting (R10/R9 = 220k/10k); HPF corner **159 Hz** (C7=100nF, R9=10k)
 - Step 5a: SW-1 soft-clip — symmetric sine clipping; onset ~0.82V (MA856 Vf @ ~3.7µA through R10)
 - Step 5b: SW-2 hard-clip — symmetric sine clipping; onset ~0.584V (1S1588 Vf); harder knee than SW-1
 - Step 6: All 8 mode combinations verified per channel (Boost/OD/Dist/Both × standard/HiGain)

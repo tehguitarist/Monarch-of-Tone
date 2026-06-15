@@ -68,9 +68,11 @@ chowdsp_wdf smoke test are both in place and verified.
    lowpass via `chowdsp::wdft` (double precision); measured -3.018 dB at the theoretical
    -3dB corner, confirmed PASS.
 4. **Stage-by-stage DSP** ← CURRENT STEP — implement and validate each before moving on:
-   - `InputFilter` — HPF corner ~590 Hz (C3=10nF, R8=27k)
-   - `Stage1` (IC_A, non-inverting) — gain peak ~4194 Hz at mid-DRIVE
-   - `Stage1` Hi Gain (SW-3) — +4 dB gain range shift (R8_eff=12.17k vs 27k)
+   - `Stage1` (IC_A, non-inverting) — combined input network (C3/R4/R5) + feedback network
+     (Z_lower = (R7+C5)∥(R8+C6), Z_upper = C4∥(R6+DRIVE)); verify Av(s) shape and gain peak
+     near ~4194 Hz at mid-DRIVE (re-measure exact value from the implemented model — see
+     circuit.md Section 6)
+   - `Stage1` Hi Gain (SW-3) — +4 dB gain range shift (Z_lower Branch2: R8_eff≈12.17k vs R8=27k)
    - `Stage2` (IC_B, inverting) — DC gain –22, HPF 159 Hz (C7=100nF, R9=10k)
    - `SW1SoftClip` (MA856×4 ∥ R10) — symmetric clipping, Vf ~0.82V onset
    - `SW2HardClip` (1S1588×2 shunt via R11) — symmetric clipping, Vf ~0.584V onset
@@ -98,15 +100,16 @@ chowdsp_wdf smoke test are both in place and verified.
 | Soft-clip diodes SW-1 | MA856 ×4; two `DiodePairT` in ∥ with R10; Is=7.74e-13, n=1.512 |
 | Hard-clip diodes SW-2 | 1S1588 ×2; one `DiodePairT` shunt via R11=6.8k; Is=2.52e-9, n=1.752 |
 | Diode topology | **Symmetric pairs** — `DiodePairT` only, never `DiodeT` |
-| Hi Gain SW-3 | R29=22k ∥ R8=27k → R8_eff≈12.17k; Stage 1 +4 dB gain shift |
-| DRIVE taper | 100kB **linear** |
+| Hi Gain SW-3 | R29=22k ∥ R8=27k → R8_eff≈12.17k in Z_lower Branch2; Stage 1 +4 dB gain shift |
+| Stage 1 feedback | Z_lower=(R7+C5)∥(R8+C6); Z_upper=C4∥(R6+DRIVE 0-100k); Av(s)=1+Zupper/Zlower |
+| DRIVE taper | 100kB **linear**; 2-terminal rheostat inside Stage 1 Z_upper only |
 | TONE taper | 25kB **linear** |
 | VOL taper | 100kA **audio** (`pow(10, 2x-2)`) |
 | Presence taper | 50kB **linear**; default fully CCW |
 | Tone stage | Passive RC only — no diodes |
 | Channel routing | A → B in series; independently bypassable |
 | Default mode | Overdrive (SW-1 ON, SW-2 OFF, SW-3 OFF) |
-| Gain peak | ~4194 Hz at mid-DRIVE |
+| Gain peak | ~4194 Hz at mid-DRIVE (re-measure from corrected Stage 1 model) |
 | Oversampling live | 1x/2x/4x/8x; default **4x**; bypassed channels skip oversampler |
 | Oversampling render | 1x/2x/4x/8x; default **8x**; auto via `isNonRealtime()` |
 

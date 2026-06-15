@@ -96,8 +96,7 @@ Both channels are identical circuits. Implement a single `MonarchChannel` class 
 
 ```cpp
 class MonarchChannel {
-    InputFilter     inputFilter;
-    Stage1          stage1;       // IC_A non-inverting
+    Stage1          stage1;       // IC_A non-inverting; includes input network (C3/R4/R5)
     Stage2          stage2;       // IC_B inverting + clipping
     ToneStage       tone;         // passive RC
     VolumePot       volume;
@@ -135,12 +134,15 @@ Each channel has independent APVTS parameters (e.g., `drive_a`, `drive_b`, `tone
 
 ## Hi Gain Mod — Stage 1 Scattering Matrix Switch
 
-SW-3 (Hi Gain) switches R29 (22k) in parallel with R8 (27k) in Stage 1's lower feedback
-network. Stage 1 is linear — no NR, no oversampling involved. Only the Stage 1 R-type
-scattering matrix changes.
+> **CORRECTED 2026-06-15** — see circuit.md Section 6. R8 is part of Stage 1's Z_lower
+> Branch2 (R8 + C6 in series, NodeF to GND), not a direct feedback resistor to BIAS.
+
+SW-3 (Hi Gain) switches R29 (22k) in parallel with R8 (27k) within Stage 1's Z_lower
+Branch2 (R8 + C6 series). Stage 1 is linear — no NR, no oversampling involved. Only the
+Stage 1 R-type scattering matrix changes (Branch2's resistor value).
 
 ```cpp
-// Hi Gain OFF: R8 = 27k (standard lower feedback)
+// Hi Gain OFF: R8 = 27k (standard Branch2 resistor, in series with C6)
 constexpr double R8_standard = 27.0e3;
 
 // Hi Gain ON: R8 ∥ R29, plus R27 (47Ω protection) in series in the switch leg
@@ -149,14 +151,16 @@ constexpr double R8_hi_gain = (27.0e3 * 22.0e3) / (27.0e3 + 22.0e3) + 47.0; // �
 ```
 
 Precompute two Stage 1 scattering matrices in `prepareToPlay`:
-1. **Standard** (Hi Gain OFF): Z_lower built with R8 = 27k
-2. **Hi Gain** (Hi Gain ON): Z_lower built with R8_eff ≈ 12168 Ω
+1. **Standard** (Hi Gain OFF): Z_lower Branch2 = R8 (27k) + C6 in series
+2. **Hi Gain** (Hi Gain ON): Z_lower Branch2 = R8_eff (≈12168 Ω) + C6 in series
 
 Switch at block start via `setSMatrixData()` when `pendingHiGainA/B` changes. No tree reconstruction.
 
 **Effect on Stage 1 gain range:**
-- Hi Gain OFF: Stage 1 Av sweeps ~2.3–6.1× across DRIVE range
-- Hi Gain ON: Stage 1 Av sweeps ~3.8–12.2× across DRIVE range (+4 dB shift)
+A smaller Branch2 resistor reduces Z_lower in the mid/high band, increasing
+Av(s) = 1 + Z_upper(s)/Z_lower(s) — targeting the documented +4 dB shift. Measure the
+actual shift from the implemented model via the frequency-response test; do not assume
+specific Av values until validated.
 
 The Hi Gain and clipping mode changes are independent — both can change simultaneously
 within the same block start check. Handle them as separate atomic flags.
@@ -172,23 +176,28 @@ Never apply audio taper to DRIVE, TONE, or PRESENCE. Never apply linear taper to
 
 ## Component Values
 
+> **CORRECTED 2026-06-15** — Stage 1 / input network values updated per circuit.md
+> Sections 5–7.
+
 See `circuit.md` for full table with schematic reference designators. Key values per channel
 (using matsumin schematic refs as primary):
-- R8 = 27k (Stage 1 lower feedback; Hi Gain: ∥ R29=22k → 12.1k effective)
-- R7 = 33k (Stage 1 upper feedback; C4 100pF in parallel)
-- R4 = 1M (Stage 1 DC bias at pin 2)
+- C3 = 10nF (input coupling cap; series from input to pin3+, DC block w/ R4)
+- R4 = 1M (pin3+ to BIAS; DC bias / return for C3)
+- R5 = 1M (input pulldown to GND)
+- R7 = 33k, C5 = 10nF (Stage 1 Z_lower Branch1: NodeF→GND, series)
+- R8 = 27k, C6 = 10nF (Stage 1 Z_lower Branch2: NodeF→GND, series; Hi Gain: R8→R8_eff≈12.17k)
+- C4 = 100pF (Stage 1 Z_upper: NodeF↔NodeG, parallel with R6+DRIVE)
+- R6 = 10k, DRIVE = 100kB (Stage 1 Z_upper: NodeF↔NodeG, series, in parallel with C4)
 - R9 = 10k (Stage 2 input resistor; Av = –R10/R9 = –22)
 - R10 = 220k (Stage 2 feedback resistor)
 - R11 = 6.8k (hard-clip shunt series R; always in signal path)
 - R12 = 1k (Tone stage series R)
 - R13 = 6.8k (Presence network series R)
 - R14 = 1M (output bleed)
-- C3 = 10nF (input coupling cap, matsumin ref)
-- C4 = 100pF (Stage 1 feedback HF cap)
-- C7 = **100nF** (Stage 2 input coupling; confirmed from BOTH schematics — previous 10nF was wrong)
+- C7 = **100nF** (Stage 2 input coupling; confirmed from BOTH schematics)
 - C8, C9 = 10nF (tone stage caps)
 - C11 = 1µF (output coupling)
-- DRIVE = 100kB, TONE = 25kB, VOL = 100kA, Trim = 50kB
+- TONE = 25kB, VOL = 100kA, Trim = 50kB
 
 ## Signal Calibration
 
