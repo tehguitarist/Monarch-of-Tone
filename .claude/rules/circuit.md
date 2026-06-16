@@ -222,6 +222,40 @@ BIAS = VCC/2 = 4.5V = DSP signal ground (0V in model).
 - D1 (1N4001 in matsumin; 1N5817 in Theseus): reverse polarity protection on DC jack
 - **DSP model:** BIAS = 0V. Exclude all power supply and bias components.
 
+### Verified 2026-06-16 — single 9V supply, NO charge pump / voltage doubler
+
+Both schematics confirm a plain single-rail 9V supply with a 4.5V bias divider — there is
+**no voltage doubler, charge pump, or any voltage-multiplication stage** anywhere in the KOT.
+
+- **matsumin:** 006P (9V) battery → D1 (1N4001) → VCC 9V rail → R1/R2 (47k/47k) divider →
+  BIAS 4.5V, filtered by C1/C2 (100µF). LEDs (D8/D9) via R15 (2.2k) for bypass indication.
+- **Theseus measured pin voltages** (prototype, 9.60V supply — authoritative for operating
+  points): op-amp **pin 8 (V+) = 9.15V**, **pin 4 (V−) = 0V**, all input/output/bias pins
+  **≈ 4.5–4.66V**. The "charge pumps and delay chips" line in the Theseus doc is a generic
+  8-pin-IC identification glossary, **not** a KOT feature.
+
+### Op-amp output headroom — matters ONLY for Boost mode
+
+- Op-amps (JRC4580D) run **V+ ≈ 9.15V, V− = 0V, bias ≈ 4.5V**. Realistic JRC4580 output
+  swing saturates ~1.3–1.5V from each rail, giving a usable swing of roughly **±3.3V around
+  bias** (≈ +13.3 dBu peak). The saturation knee is **gradual/soft**, not a hard comparator
+  clip.
+- **In bipolar model terms: op-amp output clip ceiling ≈ ±3.3V.**
+- **Clipping-mode interaction (the key point):**
+  - SW-1 soft (MA856 back-to-back, n_eff): effective feedback-node threshold ≈ ±1.64V.
+  - SW-2 hard (1S1588): clamps node_HC to ≈ ±0.584V.
+  - Both diode clamps are **far below the ±3.3V op-amp rails**, so in **Overdrive /
+    Distortion / Both** the diodes always clip first and the op-amp rails are never reached
+    → the ideal-op-amp model is exact for tone in those modes.
+  - **Boost mode (SW-1 OFF, SW-2 OFF) has no diodes — the op-amp rails ARE the only
+    clipping.** An ideal (infinite-swing) op-amp would make Boost an impossibly clean boost.
+    The Theseus manual confirms the hardware clips: *"not a perfectly clean boost… the
+    op-amp itself will eventually clip at higher gain settings."*
+- **Required correction (tone-safe):** model JRC4580 output saturation at ≈ ±3.3V so Boost
+  mode clips like the hardware. Because it only engages above ±3.3V — a level the diode
+  modes never reach — **adding it does not alter the tone of any diode-clipping mode.** See
+  dsp.md ("Op-amp rail saturation") for the implementation requirement.
+
 ---
 
 ## 5. Input Network

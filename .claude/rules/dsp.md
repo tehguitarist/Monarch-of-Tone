@@ -7,7 +7,10 @@
 - **Use `double` precision for all WDF types** — `float` causes audible errors in NR iteration for diode models at audio frequencies
 - All passive networks modelled as WDF port trees
 - Nonlinear elements use explicit per-component datasheet parameters — never generic defaults
-- Op-amp stages use ideal op-amp WDF model (JRC4580D; neither stage clips rails under normal use)
+- Op-amp stages use ideal op-amp WDF model (JRC4580D) for the linear gain solve, **plus an
+  explicit output rail saturation** (see "Op-amp Rail Saturation" below) — required for
+  correct Boost-mode behaviour. In diode-clipping modes the diodes clip well before the
+  rails, so the saturation never engages and tone is unchanged.
 - R-type adaptors required for feedback topologies — derive scattering matrix from nodal equations
 - **Never reconstruct the WDF tree at runtime for switch changes** — precomputed scattering matrices, switch via `setSMatrixData()`
 - VREF (VB) treated as signal ground throughout — model bipolar
@@ -208,10 +211,43 @@ See `circuit.md` for full table with schematic reference designators. Key values
 - C11 = 1µF (output coupling)
 - TONE = 25kB (3-terminal pot tap, R-type adaptor), VOL = 100kA, Trim = 50kB (2-terminal rheostat)
 
+## Op-amp Rail Saturation (9V supply — verified, no charge pump)
+
+> **Added 2026-06-16.** The KOT runs on a single **9V** supply (no doubler/charge pump;
+> verified from both schematics + Theseus measured pin voltages: V+ ≈ 9.15V, V− = 0V, bias
+> ≈ 4.5V). See circuit.md Section 4. The op-amps are NOT rail-to-rail.
+
+- After each op-amp stage's linear WDF solve, **clamp the op-amp output to its supply rails**:
+  realistic JRC4580 swing saturates ~1.3–1.5V from each rail → usable swing ≈ **±3.3V around
+  bias**. In the bipolar (BIAS = 0V) model this is an **output ceiling of ≈ ±3.3V**.
+- Use a **soft/gradual saturation** (e.g. a tanh-like or diode-to-rail soft knee centred so
+  the linear region is untouched and the knee begins near ±3.0–3.3V), **not** a hard clip —
+  the JRC4580 saturates gently.
+- **Why it is required and why it is tone-safe:**
+  - **Boost mode** (SW-1 OFF, SW-2 OFF) has no diodes; the rails are the *only* nonlinearity.
+    Without this, Boost is an unphysical infinite-headroom clean boost. The Theseus manual
+    confirms the hardware clips at high gain.
+  - **Overdrive / Distortion / Both:** the diodes clamp at ≈ ±1.64V (SW-1) / ≈ ±0.584V
+    (SW-2), far below ±3.3V, so the rail saturation **never engages** → **no tone change** in
+    any diode mode. This is the guarantee that adding rail saturation does not affect tone.
+- Apply per stage if Stage 1 can also rail at extreme DRIVE; in practice Stage 1's gain
+  (≤ ~8×) rarely rails on its own, but Stage 2 (×22) reaches the rails in Boost. Validate the
+  onset in the Boost-mode test (Step 6); measure, don't assume the exact knee.
+
 ## Signal Calibration
 
 - Internal nominal: **-12 dBu**
-- Input trim and output trim on the plugin (not on the original pedal)
+- **Internal WDF voltages are REAL circuit volts**, not normalised. This is essential: the
+  diode thresholds (≈0.584V / ≈1.64V) and op-amp rails (≈±3.3V) must be hit at the correct
+  *absolute* signal levels, or the clipping onset/feel will be wrong. Do not normalise to
+  ±1.0 internally.
+- The plugin input maps the host signal to absolute volts at the circuit input. A real guitar
+  runs ~0.1–0.3 Vpk (single-coil) up to ~1 Vpk (hot humbucker, hard transients); -12 dBu ≈
+  0.275 Vpk sits in this range. Calibrate so -12 dBu lands at a realistic instrument level
+  relative to the gain stages.
+- **Input trim (±12 dB)** absorbs hotter/quieter pickups — mirroring how a player sets guitar
+  volume / pedal placement to position the clipping. **Output trim** rematches level after.
+  No tone-shaping in the trims; they only set where the (fixed-threshold) nonlinearities sit.
 - Input trim → VU meter → Channel A → Channel B → VU meter → Output trim
 
 ## processBlock Structure (per channel)

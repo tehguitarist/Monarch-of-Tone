@@ -136,7 +136,10 @@ WarningsAsErrors: ""
   back-to-back series-string diode network in series with R11, ∥ R10)
 - Step 5b: SW-2 hard-clip — symmetric sine clipping; onset ~0.584V (1S1588 Vf, true
   antiparallel pair shunting node_HC via always-present R12); harder knee than SW-1
-- Step 6: All 8 mode combinations verified per channel (Boost/OD/Dist/Both × standard/HiGain)
+- Step 6: All 8 mode combinations verified per channel (Boost/OD/Dist/Both × standard/HiGain).
+  **Boost mode must clip on the op-amp rails (≈±3.3V, soft knee) — not stay infinitely clean.**
+  Diode modes must clip at the diode thresholds (≈±1.64V / ≈±0.584V), proving the rail
+  saturation never engages there (tone-safe). See dsp.md "Op-amp Rail Saturation".
 - Step 7: Both channels in series — verify gain stacking, independent bypass, clipping interactions
 - Step 8: Oversampling — confirm 4x live / 8x render split; bypassed channel skips oversampler
 - Step 9: Full control sweep both channels, no instability, clicks, or NaN
