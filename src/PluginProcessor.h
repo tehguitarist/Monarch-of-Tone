@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include "dsp/MonarchChannel.h"
@@ -39,24 +41,42 @@ public:
 
     juce::AudioProcessorValueTreeState apvts;
 
-private:
-    // Two series channels, identified externally by LED colour. The Theseus Hi-Gain mod is a
-    // FIXED part of the Red channel's Stage 1 (passed at construction), not a runtime toggle.
-    monarch::MonarchChannel channelYellow { false }; // stock Stage 1
-    monarch::MonarchChannel channelRed { true };     // fixed Hi-Gain Stage 1
-
+    // Meter levels (post-trim), written by the audio thread, read by the UI timer.
     std::atomic<float> inputLevelL { 0.0f };
     std::atomic<float> inputLevelR { 0.0f };
     std::atomic<float> outputLevelL { 0.0f };
     std::atomic<float> outputLevelR { 0.0f };
 
-    std::atomic<bool> bypassedYellow { false };
-    std::atomic<bool> bypassedRed { false };
+private:
+    // Signal calibration: host full-scale (±1.0 float) maps to ±1.0 absolute circuit volt — a
+    // hot-humbucker transient level. Typical recorded guitar then sits at realistic instrument
+    // volts; the diode/rail thresholds (real volts) are hit correctly. Input/output trim (±12 dB)
+    // and the Drive knob position the clipping from there. See dsp.md "Signal Calibration".
+    static constexpr float circuitVoltsPerFS = 1.0f;
 
-    std::atomic<int> pendingClippingModeYellow { 1 };
-    std::atomic<int> pendingClippingModeRed { 1 };
+    // One dual-mono pedal per audio channel (index 0 = L, 1 = R). Each strip is the full
+    // Yellow → Red series chain; both strips share the same knob settings. Hi Gain is fixed
+    // per channel via the MonarchChannel ctor flag (Yellow stock, Red Hi-Gain).
+    struct ChannelStrip
+    {
+        monarch::MonarchChannel yellow { false };
+        monarch::MonarchChannel red { true };
+        juce::SmoothedValue<float> wetYellow; // bypass crossfade: 1 = active, 0 = bypassed (dry)
+        juce::SmoothedValue<float> wetRed;
+    };
+    std::array<ChannelStrip, 2> strips;
 
-    std::atomic<int> pendingOversamplingFactor { 0 };
+    // Cached APVTS raw parameter pointers (atomic<float>*), fetched once in the constructor.
+    struct ParamPtrs
+    {
+        std::atomic<float>*drive {}, *tone {}, *volume {}, *presence {}, *clip {}, *bypass {};
+    };
+    ParamPtrs pYellow, pRed;
+    std::atomic<float>* pInputTrim {};
+    std::atomic<float>* pOutputTrim {};
+
+    void cacheParamPointers();
+    void pushParams(); // read APVTS → set per-block knob values on both strips
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MonarchAudioProcessor)
 };

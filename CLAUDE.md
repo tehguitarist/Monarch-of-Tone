@@ -54,10 +54,13 @@ clang-format -i src/**/*.{cpp,h}
 
 ## Repository State
 
-> **CURRENT: Step 4 — Stage-by-stage DSP**
+> **CURRENT: Step 7/8 — oversampling + UI (DSP chain complete & audible)**
 
-The `.claude/` rules and agents are complete. The Step 2 JUCE CMake scaffold and Step 3
-chowdsp_wdf smoke test are both in place and verified.
+All per-channel DSP stages are implemented and individually validated, integrated into
+`MonarchChannel`, and wired through `processBlock` (APVTS params, ±12 dB input/output trim with
+the 1 V/FS calibration, per-channel bypass crossfade, meters, dual-mono stereo). The AU passes
+`auval` (loads, all 16 params, renders without NaN). **Remaining:** oversampling/ADAA on the clip
+stages (Step 7) and the UI (Step 9).
 
 ---
 
@@ -124,9 +127,11 @@ chowdsp_wdf smoke test are both in place and verified.
      routing. `tests/FullChain_DualChannel.cpp`: all 4 modes both channels, clipping hierarchy
      Boost>OD>Dist>Both, Boost on rails, Red hotter, Yellow→Red series stable, no NaN.
 7. **Oversampling + ADAA** on both clipping stages — verify aliasing reduction
-8. **Dual-channel integration** — Yellow→Red in series, independent bypass; Hi Gain fixed on Red.
-   DSP chain done (`MonarchChannel`, validated). **Remaining:** APVTS-driven `processBlock`
-   (input/output trim calibration, per-channel bypass crossfade, meters) to make it audible.
+8. ✅ **Dual-channel integration** — **DONE (audible; auval PASS).** `processBlock` wires
+   APVTS → both channels, ±12 dB input/output trim (1 V/FS calibration, `circuitVoltsPerFS`),
+   per-channel ~5 ms bypass crossfade, peak meters, and **dual-mono stereo** (a `ChannelStrip`
+   {Yellow,Red} per audio channel). Params read once per block via cached APVTS atomic pointers;
+   Yellow→Red in series. Oversampling not yet wrapped (Step 7).
 9. **UI implementation** — both channel panels (Yellow/Red, no Hi Gain toggle), oversampling controls
 10. **Final sweep** — all controls full range, no instability, clicks, or NaN output
 

@@ -122,6 +122,25 @@ All of the following in `prepareToPlay(sampleRate, samplesPerBlock)`:
 
 ## processBlock Structure
 
+> **IMPLEMENTED 2026-06-18 (auval PASS) — what the shipped `processBlock` actually does, where
+> it differs from the original plan below:**
+> - **Params read directly from cached APVTS atomic pointers** (`getRawParameterValue`) once per
+>   block, not via separate `pending*` atomics. Tapers are applied inside each stage (VOL audio
+>   taper in `VolumePot`, DRIVE/TONE/PRESENCE linear in their stages), so there is no separate
+>   taper step. Clipping mode is pushed per block via `MonarchChannel::setClippingMode` (no
+>   scattering swap needed — the soft/hard clip stages are structural).
+> - **Dual-mono stereo:** one `ChannelStrip {MonarchChannel yellow, red}` per audio channel
+>   (array of 2), so L/R have independent WDF state but share knob settings.
+> - **Calibration:** host float ×`circuitVoltsPerFS` (1 V/FS) → absolute circuit volts; input/
+>   output trim in dB around that. Meters are peak, post-trim.
+> - **Bypass:** click-free ~5 ms crossfade per channel (`juce::SmoothedValue` wet 1→0). Current
+>   build crossfades wet/dry every sample (always processes); the "skip DSP when bypassed" CPU
+>   optimisation lands with oversampling (Step 7/8), where it matters.
+> - **Oversampling not yet wrapped** — the chain currently runs at base rate (linear stages are
+>   accurate at base rate; clip-stage anti-aliasing is the Step 7 add).
+
+The original planned structure (target once oversampling + smoothing land):
+
 ```
 1. Determine active oversampling factor:
    isNonRealtime() ? oversampling_render : oversampling_realtime (read from APVTS)
