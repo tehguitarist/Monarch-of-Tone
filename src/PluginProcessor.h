@@ -43,6 +43,10 @@ public:
 
     juce::AudioProcessorValueTreeState apvts;
 
+    // Meter accessors for the UI timer (message thread). ch 0 = L, 1 = R.
+    float getInputLevel (int ch) const noexcept { return (ch == 0 ? inputLevelL : inputLevelR).load(); }
+    float getOutputLevel (int ch) const noexcept { return (ch == 0 ? outputLevelL : outputLevelR).load(); }
+
     // Meter levels (post-trim), written by the audio thread, read by the UI timer.
     std::atomic<float> inputLevelL { 0.0f };
     std::atomic<float> inputLevelR { 0.0f };

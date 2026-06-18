@@ -28,7 +28,7 @@ juce_add_plugin(Monarch
     PLUGIN_MANUFACTURER_CODE LeP1
     PLUGIN_CODE Mon1
     VERSION ${PROJECT_VERSION}
-    FORMATS AU
+    FORMATS AU Standalone
     PRODUCT_NAME "Monarch of Tone"
     COPY_PLUGIN_AFTER_BUILD TRUE
 )
@@ -37,6 +37,7 @@ target_sources(Monarch
     PRIVATE
         src/PluginProcessor.cpp
         src/PluginEditor.cpp
+        src/ui/MonarchLookAndFeel.cpp
 )
 
 target_include_directories(Monarch
@@ -183,4 +184,33 @@ target_link_libraries(SW2HardClip_Sine
 target_compile_options(SW2HardClip_Sine
     PRIVATE
         -Wall -Wextra
+)
+
+# ---- Headless UI snapshot tool (renders the editor to /tmp/monarch_ui.png; no display needed) ----
+juce_add_console_app(UISnapshot PRODUCT_NAME "UISnapshot")
+
+target_sources(UISnapshot
+    PRIVATE
+        tools/UISnapshot.cpp
+        src/PluginProcessor.cpp
+        src/PluginEditor.cpp
+        src/ui/MonarchLookAndFeel.cpp
+)
+
+target_include_directories(UISnapshot PRIVATE src)
+
+target_compile_definitions(UISnapshot
+    PRIVATE
+        "JucePlugin_Name=\"Monarch of Tone\""
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0
+)
+
+target_link_libraries(UISnapshot
+    PRIVATE
+        xsimd::xsimd
+        chowdsp::chowdsp_wdf
+        juce::juce_audio_utils
+        juce::juce_dsp
+        juce::juce_recommended_config_flags
 )

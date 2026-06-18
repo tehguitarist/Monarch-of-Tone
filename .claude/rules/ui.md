@@ -1,5 +1,26 @@
 # UI Rules
 
+> **IMPLEMENTED 2026-06-18 — peripheral elements (shared-look, match a sibling plugin).** The
+> authoritative spec for these is the project brief; they live in `src/ui/`:
+> - `MonarchLookAndFeel.{h,cpp}` — the **shared-look colour palette** (`cBackground`, `cTrim*`,
+>   `cMeter*`, `cOS*`, `cKnob*`, `cBypassLabel`, as `static constexpr juce::uint32`; use
+>   `juce::Colour(MonarchLookAndFeel::cFoo)` at call sites). Overrides: halo trim knob
+>   (`drawRotarySlider`, componentID "trim"), OS combo boxes (`drawComboBox` + fonts), bypass
+>   footswitch (`drawButtonBackground`, componentID "bypass" — octagon nut + socket + dome),
+>   scaling text-button font.
+> - `VUMeter.h` (22-segment, 3 red/5 yellow/14 green, ~60% at −12 dBu, 33 fps ~300 ms release
+>   driven by the editor timer) and `LEDIndicator.h` (green core + glow, read bypass param).
+> - `PluginEditor.{h,cpp}` — Input/Output side panels (trim halo + TRIM label + VU), the
+>   oversampling strip (LIVE/RENDER combos bound to `oversampling_realtime`/`oversampling_render`
+>   + UI-size scale button), and the **resizable, aspect-locked** window (base 694×354, 0.5–2.5×)
+>   with per-session (APVTS `uiScale`) + cross-session (`ApplicationProperties` `defaultScale`)
+>   scale persistence. `refreshFonts(sc)` rescales every label font in `resized()`.
+>
+> The colour-scheme block further down (`colourBackground`, etc.) is the ORIGINAL plan; the
+> shared-look palette above is what the peripheral elements actually use. The **pedal face**
+> (below) is still to build and reuses the bypass-footswitch L&F + `LEDIndicator` per channel.
+> Visual check: build/run `UISnapshot` (headless editor → /tmp/monarch_ui.png) or the Standalone.
+
 ## General
 
 - Custom `LookAndFeel` subclass — no default JUCE styling anywhere

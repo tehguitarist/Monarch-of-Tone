@@ -54,15 +54,22 @@ clang-format -i src/**/*.{cpp,h}
 
 ## Repository State
 
-> **CURRENT: Step 9 — UI (audio engine complete & validated)**
+> **CURRENT: Step 9 — UI (peripheral elements done; pedal face next)**
 
-The full audio engine is done: all per-channel DSP stages implemented and individually
-validated, integrated into `MonarchChannel`, wired through `processBlock` (APVTS params, ±12 dB
-trim with the 1 V/FS calibration, per-channel bypass crossfade, meters, dual-mono stereo), and
-oversampled (1x/2x/4x/8x, IIR live / FIR render, clip-span only so voicing is OS-independent —
-dsp-validator PASS). The AU passes `auval`. **Remaining:** ADAA (optional refinement on the clip
-stages) and the UI (Step 9). Next up per the user: peripheral UI (trim, OS, resizing) then the
-pedal face.
+The full audio engine is done & validated (all stages, `MonarchChannel`, `processBlock`,
+oversampling — see Step 7/8). **UI peripheral elements are now implemented** (shared-look,
+matching a sibling plugin): `MonarchLookAndFeel` (palette + halo trim knob + OS combo boxes +
+bypass footswitch + scaling button font), `VUMeter`, `LEDIndicator`, the Input/Output side
+panels (trim halo + TRIM label + VU), the oversampling strip (LIVE/RENDER combos bound to the
+existing `oversampling_realtime`/`oversampling_render` params + UI-size scale button), and a
+resizable/aspect-locked window with per-session (APVTS `uiScale`) + cross-session
+(`ApplicationProperties` `defaultScale`) persistence. Verified by headless render
+(`UISnapshot` tool → /tmp/monarch_ui.png) and `auval` (Cocoa view OK). **Remaining:** the pedal
+face (the unique centre — currently a placeholder), which will reuse the bypass-footswitch L&F
+and `LEDIndicator` per channel (bound to `bypass_yellow`/`bypass_red`).
+
+Build helpers added: `Standalone` plugin format (run the UI without a DAW) and the `UISnapshot`
+console app (headless editor→PNG; no display needed).
 
 ---
 
