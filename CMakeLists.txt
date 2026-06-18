@@ -10,6 +10,18 @@ add_subdirectory(libs/JUCE)
 add_subdirectory(libs/xsimd)
 add_subdirectory(libs/chowdsp_wdf)
 
+# Treat vendored deps as SYSTEM headers so their (harmless) warnings don't leak into our
+# targets — keeps -Wall -Wextra (and a future -Werror CI gate, per build.md) enforced on our
+# code only. JUCE already marks its own includes system.
+foreach(dep chowdsp_wdf xsimd)
+    if(TARGET ${dep})
+        get_target_property(_inc ${dep} INTERFACE_INCLUDE_DIRECTORIES)
+        if(_inc)
+            set_target_properties(${dep} PROPERTIES INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_inc}")
+        endif()
+    endif()
+endforeach()
+
 juce_add_plugin(Monarch
     COMPANY_NAME "Leigh Pierce"
     BUNDLE_ID "com.leighpierce.monarchoftone"

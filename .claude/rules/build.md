@@ -104,6 +104,10 @@ In DSP code: `#include <xsimd/xsimd.hpp>` BEFORE `#include <chowdsp_wdf/chowdsp_
 - `cmake_minimum_required(VERSION 3.15)`
 - Target macOS 10.13+
 - Enable `-Wall -Wextra`; treat warnings as errors in CI
+- Vendored deps (chowdsp_wdf, xsimd) are marked SYSTEM in CMakeLists.txt
+  (`INTERFACE_SYSTEM_INCLUDE_DIRECTORIES`) so their header warnings (e.g. chowdsp's
+  `-Wshadow-field-in-constructor`) don't leak into our targets or break a `-Werror` CI gate.
+  JUCE already marks its own includes system. Our build is warning-clean.
 
 ## Code Style
 
