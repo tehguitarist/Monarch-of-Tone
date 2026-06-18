@@ -20,6 +20,8 @@ void MonarchAudioProcessor::cacheParamPointers()
              get ("presence_red"), get ("clipping_mode_red"), get ("bypass_red") };
     pInputTrim = get ("input_trim");
     pOutputTrim = get ("output_trim");
+    pOversampleLive = get ("oversampling_realtime");
+    pOversampleRender = get ("oversampling_render");
 }
 
 void MonarchAudioProcessor::pushParams()
@@ -135,15 +137,83 @@ juce::AudioProcessorValueTreeState::ParameterLayout MonarchAudioProcessor::creat
 void MonarchAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     constexpr double bypassRampSeconds = 0.005; // ~5 ms click-free bypass crossfade
+    baseSampleRate = sampleRate;
+    maxBlock = samplesPerBlock;
+
+    const int numCh = (int) strips.size();
+    scratchDry.setSize (numCh, samplesPerBlock);
+    scratchNodeG.setSize (numCh, samplesPerBlock);
+    scratchNodeHC.setSize (numCh, samplesPerBlock);
+
     for (auto& s : strips)
     {
-        s.yellow.prepare (sampleRate, samplesPerBlock);
-        s.red.prepare (sampleRate, samplesPerBlock);
+        s.yellow.prepareLinear (sampleRate);
+        s.red.prepareLinear (sampleRate);
         s.wetYellow.reset (sampleRate, bypassRampSeconds);
         s.wetRed.reset (sampleRate, bypassRampSeconds);
         s.wetYellow.setCurrentAndTargetValue (pYellow.bypass->load() > 0.5f ? 0.0f : 1.0f);
         s.wetRed.setCurrentAndTargetValue (pRed.bypass->load() > 0.5f ? 0.0f : 1.0f);
     }
+
+    // Force a (re)build of the clip-span oversamplers + prepareClip on the first block.
+    activeLog2 = -1;
+    activeNumChannels = 0;
+    updateOversampling (getTotalNumInputChannels());
+}
+
+int MonarchAudioProcessor::currentFactorLog2() const
+{
+    // 0/1/2/3 → 1x/2x/4x/8x. Render path (offline bounce) uses its own choice.
+    const auto* p = isNonRealtime() ? pOversampleRender : pOversampleLive;
+    return juce::jlimit (0, 3, (int) p->load());
+}
+
+void MonarchAudioProcessor::updateOversampling (int numCh)
+{
+    const int wantLog2 = currentFactorLog2();
+    const bool wantRender = isNonRealtime();
+    numCh = juce::jmax (1, numCh);
+
+    if (wantLog2 == activeLog2 && wantRender == activeIsRender && numCh == activeNumChannels)
+        return; // nothing changed — stay on the per-sample hot path
+
+    activeLog2 = wantLog2;
+    activeIsRender = wantRender;
+    activeNumChannels = numCh;
+
+    if (wantLog2 == 0)
+    {
+        osYellow.reset(); // 1x — no oversampler, clip span runs at base rate
+        osRed.reset();
+    }
+    else
+    {
+        // Live: low-latency minimum-phase IIR. Render: max-quality linear-phase FIR.
+        const auto filter = wantRender ? juce::dsp::Oversampling<double>::filterHalfBandFIREquiripple
+                                       : juce::dsp::Oversampling<double>::filterHalfBandPolyphaseIIR;
+        auto make = [&] {
+            auto os = std::make_unique<juce::dsp::Oversampling<double>> (
+                (size_t) numCh, (size_t) wantLog2, filter, /*maxQuality*/ true);
+            os->initProcessing ((size_t) maxBlock);
+            return os;
+        };
+        osYellow = make();
+        osRed = make();
+    }
+
+    // Re-prepare just the clip-span stages at the oversampled rate (base × 2^log2).
+    const double clipRate = baseSampleRate * (double) (1 << wantLog2);
+    for (auto& s : strips)
+    {
+        s.yellow.prepareClip (clipRate);
+        s.red.prepareClip (clipRate);
+    }
+
+    // Report the added latency (two clip-span oversamplers in series; 0 at 1x).
+    double latency = 0.0;
+    if (osYellow != nullptr)
+        latency += osYellow->getLatencyInSamples() + osRed->getLatencyInSamples();
+    setLatencySamples ((int) std::lround (latency));
 }
 
 void MonarchAudioProcessor::releaseResources()
@@ -163,6 +233,91 @@ bool MonarchAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) 
     return mainIn == mainOut;
 }
 
+// Process one pedal channel (Yellow or Red) across the whole buffer: base-rate Stage 1 →
+// oversampled clip span → base-rate Tone/Volume, then a click-free wet/dry bypass crossfade.
+// Operates in place on `buf` (already in circuit volts on entry, still in circuit volts on exit).
+void MonarchAudioProcessor::processPedalChannel (juce::AudioBuffer<float>& buf, int numCh,
+                                                 int numSamples, bool isYellow,
+                                                 juce::dsp::Oversampling<double>* os)
+{
+    auto smoother = [&] (size_t ch) -> juce::SmoothedValue<float>& {
+        return isYellow ? strips[ch].wetYellow : strips[ch].wetRed;
+    };
+    auto chan = [&] (size_t ch) -> monarch::MonarchChannel& {
+        return isYellow ? strips[ch].yellow : strips[ch].red;
+    };
+
+    // Fully bypassed (all channels settled at dry) → skip DSP and the oversampler entirely.
+    bool anyActive = false;
+    for (int ch = 0; ch < numCh; ++ch)
+    {
+        auto& sm = smoother ((size_t) ch);
+        if (sm.isSmoothing() || sm.getTargetValue() > 0.0f)
+            anyActive = true;
+    }
+    if (! anyActive)
+        return;
+
+    // 1. Base-rate front: capture dry + Stage 1 → NodeG.
+    for (int ch = 0; ch < numCh; ++ch)
+    {
+        const float* in = buf.getReadPointer (ch);
+        double* dry = scratchDry.getWritePointer (ch);
+        double* ng = scratchNodeG.getWritePointer (ch);
+        auto& c = chan ((size_t) ch);
+        for (int n = 0; n < numSamples; ++n)
+        {
+            dry[n] = (double) in[n];
+            ng[n] = c.processPre (dry[n]);
+        }
+    }
+
+    // 2. Nonlinear clip span — oversampled (factor > 1) or direct (1x).
+    if (os != nullptr)
+    {
+        juce::dsp::AudioBlock<double> ngBlock (scratchNodeG.getArrayOfWritePointers(),
+                                               (size_t) numCh, (size_t) numSamples);
+        auto up = os->processSamplesUp (ngBlock);
+        const int osN = (int) up.getNumSamples();
+        for (int ch = 0; ch < numCh; ++ch)
+        {
+            auto& c = chan ((size_t) ch);
+            for (int i = 0; i < osN; ++i)
+                up.setSample (ch, i, c.processClip (up.getSample (ch, i)));
+        }
+        juce::dsp::AudioBlock<double> hcBlock (scratchNodeHC.getArrayOfWritePointers(),
+                                               (size_t) numCh, (size_t) numSamples);
+        os->processSamplesDown (hcBlock);
+    }
+    else
+    {
+        for (int ch = 0; ch < numCh; ++ch)
+        {
+            const double* ng = scratchNodeG.getReadPointer (ch);
+            double* hc = scratchNodeHC.getWritePointer (ch);
+            auto& c = chan ((size_t) ch);
+            for (int n = 0; n < numSamples; ++n)
+                hc[n] = c.processClip (ng[n]);
+        }
+    }
+
+    // 3. Base-rate back: Tone → Volume, then wet/dry bypass crossfade → buf.
+    for (int ch = 0; ch < numCh; ++ch)
+    {
+        const double* dry = scratchDry.getReadPointer (ch);
+        const double* hc = scratchNodeHC.getReadPointer (ch);
+        float* out = buf.getWritePointer (ch);
+        auto& c = chan ((size_t) ch);
+        auto& sm = smoother ((size_t) ch);
+        for (int n = 0; n < numSamples; ++n)
+        {
+            const double wet = c.processPost (hc[n]);
+            const double g = (double) sm.getNextValue();
+            out[n] = (float) (dry[n] + g * (wet - dry[n]));
+        }
+    }
+}
+
 void MonarchAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
 {
     juce::ScopedNoDenormals noDenormals;
@@ -170,43 +325,42 @@ void MonarchAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
     const int numSamples = buffer.getNumSamples();
     const int numChannels = juce::jmin (buffer.getNumChannels(), (int) strips.size());
 
-    // Clear any output channels with no matching input.
     for (int ch = getTotalNumInputChannels(); ch < getTotalNumOutputChannels(); ++ch)
         buffer.clear (ch, 0, numSamples);
 
     pushParams();
+    updateOversampling (numChannels); // pick live/render factor; rebuild only on change
 
     const float inGain = juce::Decibels::decibelsToGain (pInputTrim->load()) * circuitVoltsPerFS;
     const float outGain = juce::Decibels::decibelsToGain (pOutputTrim->load()) / circuitVoltsPerFS;
 
+    // Input trim → circuit volts, in place; capture input meter (post-trim).
     for (int ch = 0; ch < numChannels; ++ch)
     {
-        auto& strip = strips[(size_t) ch];
         float* data = buffer.getWritePointer (ch);
-        float inPeak = 0.0f, outPeak = 0.0f;
-
+        float inPeak = 0.0f;
         for (int n = 0; n < numSamples; ++n)
         {
-            // Host float → absolute circuit volts (post input trim).
-            const double dryY = (double) (data[n] * inGain);
-            inPeak = juce::jmax (inPeak, std::abs ((float) dryY));
-
-            // Yellow channel, with click-free bypass crossfade (wet=1 active, 0 = dry pass).
-            const double wetY = strip.yellow.processSample (dryY);
-            const double gY = (double) strip.wetYellow.getNextValue();
-            const double afterY = dryY + gY * (wetY - dryY);
-
-            // Red channel (series after Yellow), same crossfade.
-            const double wetR = strip.red.processSample (afterY);
-            const double gR = (double) strip.wetRed.getNextValue();
-            const double afterR = afterY + gR * (wetR - afterY);
-
-            const float out = (float) afterR * outGain;
-            data[n] = out;
-            outPeak = juce::jmax (outPeak, std::abs (out));
+            data[n] *= inGain;
+            inPeak = juce::jmax (inPeak, std::abs (data[n]));
         }
-
         (ch == 0 ? inputLevelL : inputLevelR).store (inPeak);
+    }
+
+    // Series: Yellow → Red (each with its own clip-span oversampler).
+    processPedalChannel (buffer, numChannels, numSamples, /*isYellow*/ true, osYellow.get());
+    processPedalChannel (buffer, numChannels, numSamples, /*isYellow*/ false, osRed.get());
+
+    // Output trim; capture output meter (post-trim).
+    for (int ch = 0; ch < numChannels; ++ch)
+    {
+        float* data = buffer.getWritePointer (ch);
+        float outPeak = 0.0f;
+        for (int n = 0; n < numSamples; ++n)
+        {
+            data[n] *= outGain;
+            outPeak = juce::jmax (outPeak, std::abs (data[n]));
+        }
         (ch == 0 ? outputLevelL : outputLevelR).store (outPeak);
     }
 }

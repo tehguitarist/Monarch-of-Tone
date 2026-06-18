@@ -54,13 +54,15 @@ clang-format -i src/**/*.{cpp,h}
 
 ## Repository State
 
-> **CURRENT: Step 7/8 — oversampling + UI (DSP chain complete & audible)**
+> **CURRENT: Step 9 — UI (audio engine complete & validated)**
 
-All per-channel DSP stages are implemented and individually validated, integrated into
-`MonarchChannel`, and wired through `processBlock` (APVTS params, ±12 dB input/output trim with
-the 1 V/FS calibration, per-channel bypass crossfade, meters, dual-mono stereo). The AU passes
-`auval` (loads, all 16 params, renders without NaN). **Remaining:** oversampling/ADAA on the clip
-stages (Step 7) and the UI (Step 9).
+The full audio engine is done: all per-channel DSP stages implemented and individually
+validated, integrated into `MonarchChannel`, wired through `processBlock` (APVTS params, ±12 dB
+trim with the 1 V/FS calibration, per-channel bypass crossfade, meters, dual-mono stereo), and
+oversampled (1x/2x/4x/8x, IIR live / FIR render, clip-span only so voicing is OS-independent —
+dsp-validator PASS). The AU passes `auval`. **Remaining:** ADAA (optional refinement on the clip
+stages) and the UI (Step 9). Next up per the user: peripheral UI (trim, OS, resizing) then the
+pedal face.
 
 ---
 
@@ -126,7 +128,14 @@ stages (Step 7) and the UI (Step 9).
      Stage1 → Stage2/SW1 → op-amp rail-sat (±3.3 V) → SW2 → Tone → Volume with clipping-mode
      routing. `tests/FullChain_DualChannel.cpp`: all 4 modes both channels, clipping hierarchy
      Boost>OD>Dist>Both, Boost on rails, Red hotter, Yellow→Red series stable, no NaN.
-7. **Oversampling + ADAA** on both clipping stages — verify aliasing reduction
+7. ✅ **Oversampling** — **DONE & validated (dsp-validator PASS; auval PASS).** Wraps ONLY each
+   channel's nonlinear clip span (`processClip`: Stage2/SW1 + rail-sat + SW2), so the factor
+   changes anti-aliasing only — the linear voicing is OS-independent (linear stages prepared once
+   at base rate, never re-prepared on factor change). 1x/2x/4x/8x via `oversampling_realtime` /
+   `oversampling_render` (isNonRealtime → render); **IIR low-latency live, FIR max-quality
+   render**; 2 oversamplers (Yellow, Red), each multi-channel; bypassed channels skip it; latency
+   reported. Factor/quality rebuild is on the audio thread, gated to only-on-change (rare). ADAA
+   is an optional later refinement.
 8. ✅ **Dual-channel integration** — **DONE (audible; auval PASS).** `processBlock` wires
    APVTS → both channels, ±12 dB input/output trim (1 V/FS calibration, `circuitVoltsPerFS`),
    per-channel ~5 ms bypass crossfade, peak meters, and **dual-mono stereo** (a `ChannelStrip`

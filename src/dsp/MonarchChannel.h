@@ -41,14 +41,28 @@ public:
 
     explicit MonarchChannel (bool hiGain = false) : stage1 (hiGain), hiGainStage1 (hiGain) {}
 
-    void prepare (double sampleRate, int /*samplesPerBlock*/)
+    // The linear stages run at the base rate; the nonlinear clip span (Stage2/SW1 + rail-sat
+    // + SW2) runs at the OVERSAMPLED rate, so the OS factor changes only the anti-aliasing,
+    // never the linear voicing. Prepare the two groups independently; re-prepare just the clip
+    // group when the OS factor changes. For standalone/1x use, baseRate == clipRate.
+    void prepareLinear (double baseRate)
     {
-        stage1.prepare (sampleRate);
-        stage2.prepare (sampleRate);
-        sw1.prepare (sampleRate);
-        sw2.prepare (sampleRate);
-        tone.prepare (sampleRate);
-        volume.prepare (sampleRate);
+        stage1.prepare (baseRate);
+        tone.prepare (baseRate);
+        volume.prepare (baseRate);
+    }
+
+    void prepareClip (double clipRate)
+    {
+        stage2.prepare (clipRate);
+        sw1.prepare (clipRate);
+        sw2.prepare (clipRate);
+    }
+
+    void prepare (double sampleRate, int /*samplesPerBlock*/ = 0)
+    {
+        prepareLinear (sampleRate);
+        prepareClip (sampleRate);
     }
 
     void reset()
@@ -74,16 +88,26 @@ public:
         sw2On = (mode == 2 || mode == 3);
     }
 
-    /** Process one sample (absolute circuit volts in → out). */
-    inline double processSample (double x) noexcept
+    // Base-rate front: input network + Stage 1 → V(NodeG).
+    inline double processPre (double x) noexcept { return stage1.processSample (x); }
+
+    // Oversampled nonlinear span: Stage2 (or SW1 soft clip) → op-amp rail-sat → SW2 (or pass)
+    // → V(node_HC). This is the ONLY part that should run at the oversampled rate.
+    inline double processClip (double nodeG) noexcept
     {
-        const double nodeG = stage1.processSample (x);
         double pin7 = sw1On ? sw1.processSample (nodeG) : stage2.processSample (nodeG);
         pin7 = railSaturate (pin7); // op-amp output ceiling (Boost always; Distortion via linear Stage2)
-        const double nodeHC = sw2On ? sw2.processSample (pin7) : pin7;
-        const double tOut = tone.processSample (nodeHC);
-        return volume.processSample (tOut);
+        return sw2On ? sw2.processSample (pin7) : pin7;
     }
+
+    // Base-rate back: Tone → Volume → output.
+    inline double processPost (double nodeHC) noexcept
+    {
+        return volume.processSample (tone.processSample (nodeHC));
+    }
+
+    /** Full chain at a single rate (standalone / tests / 1x). */
+    inline double processSample (double x) noexcept { return processPost (processClip (processPre (x))); }
 
     bool isHiGain() const { return hiGainStage1; }
 

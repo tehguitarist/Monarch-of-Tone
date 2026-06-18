@@ -1,8 +1,10 @@
 #pragma once
 
 #include <array>
+#include <memory>
 
 #include <juce_audio_processors/juce_audio_processors.h>
+#include <juce_dsp/juce_dsp.h>
 
 #include "dsp/MonarchChannel.h"
 
@@ -74,9 +76,28 @@ private:
     ParamPtrs pYellow, pRed;
     std::atomic<float>* pInputTrim {};
     std::atomic<float>* pOutputTrim {};
+    std::atomic<float>* pOversampleLive {};
+    std::atomic<float>* pOversampleRender {};
+
+    // ---- Oversampling: wraps ONLY each channel's nonlinear clip span (Stage2/SW1 + rail + SW2).
+    // One oversampler per pedal channel (Yellow, Red), each multi-channel (L/R). Factor is chosen
+    // per block from isNonRealtime() (render) vs live; the filter is low-latency IIR for live and
+    // max-quality FIR for render. Rebuilt on the audio thread only when the factor/quality/channel
+    // count changes (rare, user-driven) — one-block gap accepted per architecture.md.
+    std::unique_ptr<juce::dsp::Oversampling<double>> osYellow, osRed;
+    juce::AudioBuffer<double> scratchDry, scratchNodeG, scratchNodeHC;
+    double baseSampleRate { 0.0 };
+    int maxBlock { 0 };
+    int activeLog2 { -1 };          // current OS exponent: 0 = 1x, 1 = 2x, 2 = 4x, 3 = 8x
+    bool activeIsRender { false };
+    int activeNumChannels { 0 };
 
     void cacheParamPointers();
-    void pushParams(); // read APVTS → set per-block knob values on both strips
+    void pushParams();                               // APVTS → per-block knob values on both strips
+    int currentFactorLog2() const;                   // from isNonRealtime() + APVTS
+    void updateOversampling (int numCh);             // rebuild oversamplers + prepareClip on change
+    void processPedalChannel (juce::AudioBuffer<float>& buf, int numCh, int numSamples,
+                              bool isYellow, juce::dsp::Oversampling<double>* os);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MonarchAudioProcessor)
 };

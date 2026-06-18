@@ -182,5 +182,12 @@ WarningsAsErrors: ""
   finite/stable; no NaN. Accepted approximations (quantified negligible): SW-2-OFF drops R12=1k
   (−0.08 dB flat), ideal voltage-out cascade. Remaining for Step 7/8: APVTS-driven processBlock
   wiring (input/output trim calibration, bypass crossfade, meters) + oversampling.
-- Step 8: Oversampling — confirm 4x live / 8x render split; bypassed channel skips oversampler
+- Step 8: Oversampling — ✅ PASS (2026-06-18, dsp-validator + auval). Wraps ONLY the clip span
+  (`MonarchChannel::processClip`); linear stages stay at base rate so the OS factor changes
+  anti-aliasing only, never voicing (verified by construction — `prepareLinear` never re-called
+  on factor change, only `prepareClip` at base×2^log2). 1x/2x/4x/8x via oversampling_realtime/
+  _render (isNonRealtime → render), IIR low-latency live / FIR max-quality render, 2 oversamplers
+  (Yellow/Red, multi-channel), bypassed channels skip it, latency reported. Audio-thread rebuild
+  gated to only-on-change (accepted one-block gap). DSP regression tests still PASS after the
+  pre/clip/post split.
 - Step 9: Full control sweep both channels, no instability, clicks, or NaN
