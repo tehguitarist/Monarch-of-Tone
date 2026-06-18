@@ -95,6 +95,19 @@ target_compile_options(Stage1_HiGain
         -Wall -Wextra
 )
 
+add_executable(ToneStage_FreqResponse tests/ToneStage_FreqResponse.cpp)
+
+target_link_libraries(ToneStage_FreqResponse
+    PRIVATE
+        xsimd::xsimd
+        chowdsp::chowdsp_wdf
+)
+
+target_compile_options(ToneStage_FreqResponse
+    PRIVATE
+        -Wall -Wextra
+)
+
 add_executable(Stage2_Gain tests/Stage2_Gain.cpp)
 
 target_link_libraries(Stage2_Gain

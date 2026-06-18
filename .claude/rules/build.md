@@ -150,7 +150,15 @@ WarningsAsErrors: ""
   symmetric, HARD clamp ±0.55V @ 1V in rising only to 0.66V @ 10V (diode-log; ~1.6 dB out per
   20 dB in). 1S1588 true antiparallel via always-present R12=1k. `tests/SW2HardClip_Sine.cpp`,
   dsp-validator PASS.
-- Step 6: 4 clipping modes per channel (Boost/OD/Dist/Both) — Yellow on its stock Stage 1,
+- Step 6 (Tone stage): ✅ PASS (2026-06-18, dsp-validator). Passive TONE/Presence network
+  (circuit.md §11): TONE 3-terminal pot tap modelled as a 3-port WDF parallel adaptor at the
+  wiper (R_a series from the node_HC source; R_b+C8 to BIAS; R13 to node_T_out), Presence
+  Trim+C9 and the VOL pot body (100k) loading node_T_out. `tests/ToneStage_FreqResponse.cpp`:
+  treble-cut control (TONE↑ brightens, 5 kHz −27.7→−7.6 dB across the sweep), Presence reduces
+  the hi-cut (5 kHz −18.7→−8.7 dB), passband −2.1 dB, no NaN; DC divider matches analytic to
+  0.01 dB. **Contract for VolumePot/Step 7:** node_T_out already carries the VOL-body load — the
+  VolumePot stage models only the wiper audio-taper tap + C11/R14; do NOT re-load node_T_out.
+- Step 6 (per-channel modes): 4 clipping modes per channel (Boost/OD/Dist/Both) — Yellow on its stock Stage 1,
   Red on its fixed Hi-Gain Stage 1. (Hi Gain is no longer a runtime axis, so there is no
   8-combination matrix — 4 modes × 2 fixed-voicing channels.)
   **Boost mode must clip on the op-amp rails (≈±3.3V, soft knee) — not stay infinitely clean.**

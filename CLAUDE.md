@@ -107,9 +107,15 @@ chowdsp_wdf smoke test are both in place and verified.
 5. **4 clipping modes per channel** — Boost/OD/Dist/Both (`clipping_mode_*`). Hi Gain is no
    longer a runtime axis: Yellow is fixed-standard, Red is fixed-Hi-Gain, so the old
    "× Standard/HiGain" 8-mode matrix collapses to 4 modes each (circuit.md Section 18).
-6. **Tone stage** — passive RC; TONE is a 3-terminal pot tap (R-type adaptor at the
-   wiper: R_a toward node_HC, R_b+C8 toward BIAS, R13 toward node_T_out/Presence/VOL) —
-   topology fully resolved, see circuit.md Section 11
+6. ✅ **Tone stage** — **DONE & validated (dsp-validator PASS, Step 6).** Passive RC; TONE is
+   a 3-terminal pot tap modelled as a 3-port WDF **parallel** adaptor at the wiper (no R-type
+   matrix — no op-amp): R_a (series from node_HC source) / R_b+C8 (to BIAS, treble-cut) / R13
+   (to node_T_out). node_T_out loaded by Presence (Trim+C9) and the **VOL pot body (100k)**.
+   Output = V(node_T_out). `tests/ToneStage_FreqResponse.cpp`: treble-cut control (TONE 1→0
+   darkens; 5 kHz −7.6→−27.7 dB), presence lifts hi-cut (5 kHz −18.7→−8.7 dB), passband
+   −2.1 dB, DC divider matches to 0.01 dB. See `src/dsp/ToneStage.h`. **Contract:** VolumePot
+   must NOT re-load node_T_out with the VOL body (already included here) — only the wiper
+   audio-taper tap + C11/R14.
 7. **Oversampling + ADAA** on both clipping stages — verify aliasing reduction
 8. **Dual-channel integration** — Yellow→Red in series, independent bypass; Hi Gain fixed on Red
 9. **UI implementation** — both channel panels (Yellow/Red, no Hi Gain toggle), oversampling controls
