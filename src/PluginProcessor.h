@@ -54,12 +54,14 @@ public:
     std::atomic<float> outputLevelR { 0.0f };
 
 private:
-    // Signal calibration: 0 dBFS ↔ ~3.31 absolute circuit volts. Pinned from a measurement on
-    // the real-pedal (NAM) capture rig — a 0.7 Vpk humbucker transient reads −13.5 dBFS, so
-    // FS = 0.7 / 10^(−13.5/20) ≈ 3.31 V. This puts the diode/rail thresholds (real volts) at the
-    // correct input levels to match the captured King of Tone; verified against the OD/Dist
-    // clipping-onset in analysis/. Input/output trim (±12 dB) trims around it.
-    static constexpr float circuitVoltsPerFS = 3.31f;
+    // Signal calibration: 0 dBFS ↔ ~0.66 absolute circuit volts. Pinned to MATCH the real-pedal
+    // (NAM) captures in analysis/ — the captured King of Tone hits its clean/Boost rail-clip
+    // onset at a −18 dBFS 1 kHz input, i.e. an effective 0.66 V/FS (a 1 V-pk humbucker transient
+    // measures −13.5 dBFS ≈ 3.31 V/FS, but the capture was reamped ~14 dB quieter; we match the
+    // capture per decision 2026-06-20 and may revisit the absolute level once the curves match).
+    // This sets the diode/rail thresholds at the input levels the capture used; verified against
+    // the clean onset + OD/Dist THD. Input/output trim (±12 dB) trims around it.
+    static constexpr float circuitVoltsPerFS = 0.66f;
 
     // One dual-mono pedal per audio channel (index 0 = L, 1 = R). Each strip is the full
     // Yellow → Red series chain; both strips share the same knob settings. Hi Gain is fixed
