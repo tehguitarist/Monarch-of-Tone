@@ -131,33 +131,33 @@ void PedalFace::resized()
 {
     const float W = (float) getWidth(), H = (float) getHeight();
     const float knobD = jmin (W * 0.16f, H * 0.20f);
-    const float presD = knobD * 0.44f; // smaller presence trims
+    const float presD = knobD * 0.264f; // small presence trims (0.6× the previous size)
     const float labH = jmax (10.0f, H * 0.052f);
 
     auto place = [] (Component& c, float cx, float cy, float w, float h) {
         c.setBounds (roundToInt (cx - w * 0.5f), roundToInt (cy - h * 0.5f), roundToInt (w), roundToInt (h));
     };
-    auto placeLabel = [&] (Label& l, float cx, float cyKnob, float knob) {
-        place (l, cx, cyKnob + knob * 0.58f, knob * 1.5f, labH);
+    auto placeLabel = [&] (Label& l, float cx, float cyKnob, float knob, float gap = 0.70f) {
+        place (l, cx, cyKnob + knob * gap, knob * 1.6f, labH);
     };
 
-    // Top row, pushed up: Volume / Drive per channel (volume outer, drive inner).
+    // Top row: Volume / Drive per channel — SAME order on both channels (Volume left, Drive right).
     const float topY = H * 0.155f;
     const float volYx = W * 0.135f, driveYx = W * 0.330f;
-    const float driveRx = W * 0.670f, volRx = W * 0.865f;
+    const float volRx = W * 0.670f, driveRx = W * 0.865f;
     place (volY, volYx, topY, knobD, knobD);
     place (driveY, driveYx, topY, knobD, knobD);
-    place (driveR, driveRx, topY, knobD, knobD);
     place (volR, volRx, topY, knobD, knobD);
+    place (driveR, driveRx, topY, knobD, knobD);
     placeLabel (volYL, volYx, topY, knobD);
     placeLabel (driveYL, driveYx, topY, knobD);
-    placeLabel (driveRL, driveRx, topY, knobD);
     placeLabel (volRL, volRx, topY, knobD);
+    placeLabel (driveRL, driveRx, topY, knobD);
 
-    // Tone knob centred between Volume and Drive (same column-pair), same vertical drop as before.
-    const float toneRowY = H * 0.45f;
+    // Tone knob centred between Volume and Drive, pulled UP closer to that pair.
+    const float toneRowY = H * 0.37f;
     const float toneYx = (volYx + driveYx) * 0.5f;
-    const float toneRx = (driveRx + volRx) * 0.5f;
+    const float toneRx = (volRx + driveRx) * 0.5f;
     place (toneY, toneYx, toneRowY, knobD, knobD);
     place (toneR, toneRx, toneRowY, knobD, knobD);
     placeLabel (toneYL, toneYx, toneRowY, knobD);
@@ -165,30 +165,30 @@ void PedalFace::resized()
 
     // Compass centre.
     const float compD = jmin (W * 0.215f, H * 0.30f);
-    const float compCy = H * 0.40f;
+    const float compCy = H * 0.44f;
     compassArea = Rectangle<float> (W * 0.5f - compD * 0.5f, compCy - compD * 0.5f, compD, compD).toNearestInt();
 
     // Small Presence trims: vertical centre = compass centre, on either side, clear of the graphic.
-    const float presX = W * 0.5f - compD * 0.5f - presD * 0.7f; // just outside the compass
+    const float presX = W * 0.5f - compD * 0.5f - presD * 0.85f; // just outside the compass
     place (presY, presX, compCy, presD, presD);
     place (presR, W - presX, compCy, presD, presD);
-    placeLabel (presYL, presX, compCy, presD);
-    placeLabel (presRL, W - presX, compCy, presD);
+    placeLabel (presYL, presX, compCy, presD, 0.85f);
+    placeLabel (presRL, W - presX, compCy, presD, 0.85f);
 
-    // 3-way clip switches at the left/right edges, below the knobs / above the footswitches.
+    // 3-way clip switches at the left/right edges (raised up).
     const float clipW = W * 0.12f, clipH = H * 0.20f;
-    place (clipY, W * 0.085f, H * 0.59f, clipW, clipH);
-    place (clipR, W * 0.915f, H * 0.59f, clipW, clipH);
+    place (clipY, W * 0.085f, H * 0.55f, clipW, clipH);
+    place (clipR, W * 0.915f, H * 0.55f, clipW, clipH);
 
-    // LEDs, then the (large) logo, then the footswitches.
+    // LEDs, then the (large) logo, then the footswitches — all raised up.
     const float ledBox = jmin (W, H) * 0.055f;
-    place (ledY, W * 0.40f, H * 0.66f, ledBox, ledBox);
-    place (ledR, W * 0.60f, H * 0.66f, ledBox, ledBox);
+    place (ledY, W * 0.40f, H * 0.61f, ledBox, ledBox);
+    place (ledR, W * 0.60f, H * 0.61f, ledBox, ledBox);
 
-    place (logoL, W * 0.5f, H * 0.77f, W * 0.94f, H * 0.16f);
+    place (logoL, W * 0.5f, H * 0.70f, W * 0.94f, H * 0.16f);
 
     const float fsD = jmin (W * 0.12f, H * 0.17f);
-    const float fsY = H * 0.905f;
+    const float fsY = H * 0.83f;
     place (bypassY, W * 0.27f, fsY, fsD, fsD);
     place (bypassR, W * 0.73f, fsY, fsD, fsD);
     place (bypassYL, W * 0.27f, fsY + fsD * 0.60f, fsD * 1.7f, labH);
@@ -198,9 +198,12 @@ void PedalFace::resized()
 void PedalFace::refresh (float sc)
 {
     scale = sc;
-    auto knobLabelFont = papyrus (jmax (8.0f, 11.0f * sc));
-    for (auto* l : { &volYL, &driveYL, &toneYL, &presYL, &volRL, &driveRL, &toneRL, &presRL })
-        l->setFont (knobLabelFont);
+    auto mainLabelFont = papyrus (jmax (12.0f, 16.0f * sc)); // V / D / Tone — larger
+    for (auto* l : { &volYL, &driveYL, &toneYL, &volRL, &driveRL, &toneRL })
+        l->setFont (mainLabelFont);
+    auto presLabelFont = papyrus (jmax (8.0f, 10.0f * sc)); // Pres — small
+    presYL.setFont (presLabelFont);
+    presRL.setFont (presLabelFont);
 
     auto bypassFont = papyrus (jmax (7.0f, 8.0f * sc));
     bypassYL.setFont (bypassFont);

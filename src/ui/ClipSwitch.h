@@ -88,14 +88,23 @@ public:
         }
     }
 
+    // Click to select a position, or drag the thumb between positions.
     void mouseDown (const juce::MouseEvent& e) override
     {
-        const float frac = (float) e.position.y / (float) juce::jmax (1, getHeight());
-        const int idx = juce::jlimit (0, 2, (int) (frac * 3.0f));
-        attachment.setValueAsCompleteGesture ((float) idx);
+        attachment.beginGesture();
+        setFromY (e.position.y);
     }
+    void mouseDrag (const juce::MouseEvent& e) override { setFromY (e.position.y); }
+    void mouseUp (const juce::MouseEvent&) override { attachment.endGesture(); }
 
 private:
+    void setFromY (float y)
+    {
+        const int idx = juce::jlimit (0, 2, (int) (y / (float) juce::jmax (1, getHeight()) * 3.0f));
+        if (idx != index)
+            attachment.setValueAsPartOfGesture ((float) idx);
+    }
+
     juce::ParameterAttachment attachment;
     int index { 1 };
     float labelFontPx { 7.0f };
