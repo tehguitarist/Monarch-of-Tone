@@ -54,11 +54,12 @@ public:
     std::atomic<float> outputLevelR { 0.0f };
 
 private:
-    // Signal calibration: host full-scale (±1.0 float) maps to ±1.0 absolute circuit volt — a
-    // hot-humbucker transient level. Typical recorded guitar then sits at realistic instrument
-    // volts; the diode/rail thresholds (real volts) are hit correctly. Input/output trim (±12 dB)
-    // and the Drive knob position the clipping from there. See dsp.md "Signal Calibration".
-    static constexpr float circuitVoltsPerFS = 1.0f;
+    // Signal calibration: 0 dBFS ↔ ~3.31 absolute circuit volts. Pinned from a measurement on
+    // the real-pedal (NAM) capture rig — a 0.7 Vpk humbucker transient reads −13.5 dBFS, so
+    // FS = 0.7 / 10^(−13.5/20) ≈ 3.31 V. This puts the diode/rail thresholds (real volts) at the
+    // correct input levels to match the captured King of Tone; verified against the OD/Dist
+    // clipping-onset in analysis/. Input/output trim (±12 dB) trims around it.
+    static constexpr float circuitVoltsPerFS = 3.31f;
 
     // One dual-mono pedal per audio channel (index 0 = L, 1 = R). Each strip is the full
     // Yellow → Red series chain; both strips share the same knob settings. Hi Gain is fixed

@@ -10,3 +10,6 @@ tools/R-Solver/
 tools/rsolver-venv/
 tools/__pycache__/
 *.pyc
+
+# Analysis Python venv (numpy/scipy) — do not commit
+analysis/venv/

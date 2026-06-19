@@ -216,3 +216,33 @@ target_link_libraries(UISnapshot
         juce::juce_dsp
         juce::juce_recommended_config_flags
 )
+
+# ---- Offline render tool (runs a WAV through the processor; for real-pedal A/B validation) ----
+juce_add_console_app(PedalRender PRODUCT_NAME "PedalRender")
+
+target_sources(PedalRender
+    PRIVATE
+        tools/PedalRender.cpp
+        src/PluginProcessor.cpp
+        src/PluginEditor.cpp
+        src/ui/MonarchLookAndFeel.cpp
+        src/ui/PedalFace.cpp
+)
+
+target_include_directories(PedalRender PRIVATE src)
+
+target_compile_definitions(PedalRender
+    PRIVATE
+        "JucePlugin_Name=\"Monarch of Tone\""
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0
+)
+
+target_link_libraries(PedalRender
+    PRIVATE
+        xsimd::xsimd
+        chowdsp::chowdsp_wdf
+        juce::juce_audio_utils
+        juce::juce_dsp
+        juce::juce_recommended_config_flags
+)
