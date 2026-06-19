@@ -5,8 +5,8 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include "PluginProcessor.h"
-#include "ui/LEDIndicator.h"
 #include "ui/MonarchLookAndFeel.h"
+#include "ui/PedalFace.h"
 #include "ui/VUMeter.h"
 
 class MonarchAudioProcessorEditor : public juce::AudioProcessorEditor, private juce::Timer
@@ -47,8 +47,9 @@ private:
     juce::TextButton scaleBtn;
     std::unique_ptr<juce::ComboBoxParameterAttachment> osRealtimeAttach, osRenderAttach;
 
-    juce::Rectangle<int> pedalFaceArea; // placeholder this phase; PedalFace component lands next
-    juce::Rectangle<int> osStripArea;   // OS strip background rect (laid out in resized, painted in paint)
+    std::unique_ptr<PedalFace> pedalFace; // the unique purple/gold centre
+    juce::Rectangle<int> pedalFaceArea;
+    juce::Rectangle<int> osStripArea; // OS strip background rect (laid out in resized, painted in paint)
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MonarchAudioProcessorEditor)
 };

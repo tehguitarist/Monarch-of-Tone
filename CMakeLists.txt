@@ -38,6 +38,7 @@ target_sources(Monarch
         src/PluginProcessor.cpp
         src/PluginEditor.cpp
         src/ui/MonarchLookAndFeel.cpp
+        src/ui/PedalFace.cpp
 )
 
 target_include_directories(Monarch
@@ -195,6 +196,7 @@ target_sources(UISnapshot
         src/PluginProcessor.cpp
         src/PluginEditor.cpp
         src/ui/MonarchLookAndFeel.cpp
+        src/ui/PedalFace.cpp
 )
 
 target_include_directories(UISnapshot PRIVATE src)

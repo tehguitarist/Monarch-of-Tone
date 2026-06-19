@@ -49,8 +49,18 @@ public:
                                bool shouldDrawButtonAsHighlighted, bool shouldDrawButtonAsDown) override;
     juce::Font getTextButtonFont (juce::TextButton&, int buttonHeight) override;
 
+    // Pedal-face palette (royal purple body + gold, sampled from pedal_picture.png).
+    static constexpr juce::uint32 cPedalPurple = 0xFF6A0956u;   // body base
+    static constexpr juce::uint32 cPedalPurpleLit = 0xFF8C1A74u; // lighter centre (lighting)
+    static constexpr juce::uint32 cPedalPurpleDark = 0xFF3E0431u; // edge vignette
+    static constexpr juce::uint32 cPedalGold = 0xFFC6A15Bu;     // lettering / compass
+    static constexpr juce::uint32 cPedalGoldBright = 0xFFE2C681u;
+    static constexpr juce::uint32 cKnobBlack = 0xFF161019u;     // knob cap base
+
 private:
     void drawTrimHalo (juce::Graphics&, juce::Rectangle<float> bounds, float sliderPos,
+                       float startAngle, float endAngle);
+    void drawMainKnob (juce::Graphics&, juce::Rectangle<float> bounds, float sliderPos,
                        float startAngle, float endAngle);
     void drawBypassFootswitch (juce::Graphics&, juce::Rectangle<float> bounds, bool isDown);
 

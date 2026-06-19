@@ -18,14 +18,55 @@ void MonarchLookAndFeel::drawRotarySlider (Graphics& g, int x, int y, int width,
                                            float sliderPos, float rotaryStartAngle,
                                            float rotaryEndAngle, Slider& s)
 {
+    const auto bounds = Rectangle<int> (x, y, width, height).toFloat();
     if (s.getComponentID() == "trim")
+        drawTrimHalo (g, bounds, sliderPos, rotaryStartAngle, rotaryEndAngle);
+    else
+        drawMainKnob (g, bounds, sliderPos, rotaryStartAngle, rotaryEndAngle); // black knurled (pedal face)
+}
+
+void MonarchLookAndFeel::drawMainKnob (Graphics& g, Rectangle<float> bounds, float sliderPos,
+                                       float startAngle, float endAngle)
+{
+    const float d = jmin (bounds.getWidth(), bounds.getHeight());
+    const float cx = bounds.getCentreX(), cy = bounds.getCentreY();
+    const float r = d * 0.5f * 0.92f; // knurled black knob (ref: pedal photo)
+    const float toAngle = startAngle + sliderPos * (endAngle - startAngle);
+
+    // Drop shadow.
+    g.setColour (Colours::black.withAlpha (0.45f));
+    g.fillEllipse (cx - r + 1.0f, cy - r + 2.0f, r * 2.0f, r * 2.0f);
+
+    // Knurled rim: short radial ticks just outside the cap, alternating light/dark for grip.
+    const int ticks = 36;
+    for (int i = 0; i < ticks; ++i)
     {
-        drawTrimHalo (g, Rectangle<int> (x, y, width, height).toFloat(), sliderPos, rotaryStartAngle,
-                      rotaryEndAngle);
-        return;
+        const float a = (float) i / (float) ticks * MathConstants<float>::twoPi;
+        const float s0 = std::sin (a), c0 = std::cos (a);
+        g.setColour ((i % 2 == 0) ? Colour (0xFF2A2A30u) : Colour (0xFF050507u));
+        g.drawLine (cx + r * 0.86f * s0, cy - r * 0.86f * c0, cx + r * s0, cy - r * c0,
+                    jmax (1.0f, d * 0.02f));
     }
-    LookAndFeel_V4::drawRotarySlider (g, x, y, width, height, sliderPos, rotaryStartAngle,
-                                      rotaryEndAngle, s);
+
+    // Cap body — black radial gradient, lit upper-left.
+    ColourGradient body (Colour (0xFF3C3C42u), cx - r * 0.4f, cy - r * 0.5f,
+                         Colour (0xFF09090Bu), cx + r * 0.45f, cy + r * 0.6f, true);
+    body.addColour (0.6, Colour (cKnobBlack));
+    g.setGradientFill (body);
+    g.fillEllipse (cx - r * 0.86f, cy - r * 0.86f, r * 1.72f, r * 1.72f);
+
+    // Rim ring + a soft top sheen.
+    g.setColour (Colours::black);
+    g.drawEllipse (cx - r * 0.86f, cy - r * 0.86f, r * 1.72f, r * 1.72f, jmax (1.0f, d * 0.015f));
+    g.setColour (Colours::white.withAlpha (0.10f));
+    g.drawEllipse (cx - r * 0.7f, cy - r * 0.78f, r * 1.4f, r * 1.0f, jmax (1.0f, d * 0.01f));
+
+    // White indicator line.
+    const float sinA = std::sin (toAngle), cosA = std::cos (toAngle);
+    const Point<float> p1 (cx + 0.12f * r * sinA, cy - 0.12f * r * cosA);
+    const Point<float> p2 (cx + 0.80f * r * sinA, cy - 0.80f * r * cosA);
+    g.setColour (Colour (0xFFF2F2F2u));
+    g.drawLine (Line<float> (p1, p2), jmax (1.5f, d * 0.05f));
 }
 
 void MonarchLookAndFeel::drawTrimHalo (Graphics& g, Rectangle<float> bounds, float sliderPos,

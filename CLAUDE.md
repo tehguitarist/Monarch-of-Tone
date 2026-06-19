@@ -54,22 +54,26 @@ clang-format -i src/**/*.{cpp,h}
 
 ## Repository State
 
-> **CURRENT: Step 9 — UI (peripheral elements done; pedal face next)**
+> **CURRENT: Step 9 — UI complete (engine + full UI done & validated)**
 
 The full audio engine is done & validated (all stages, `MonarchChannel`, `processBlock`,
-oversampling — see Step 7/8). **UI peripheral elements are now implemented** (shared-look,
-matching a sibling plugin): `MonarchLookAndFeel` (palette + halo trim knob + OS combo boxes +
-bypass footswitch + scaling button font), `VUMeter`, `LEDIndicator`, the Input/Output side
-panels (trim halo + TRIM label + VU), the oversampling strip (LIVE/RENDER combos bound to the
-existing `oversampling_realtime`/`oversampling_render` params + UI-size scale button), and a
-resizable/aspect-locked window with per-session (APVTS `uiScale`) + cross-session
-(`ApplicationProperties` `defaultScale`) persistence. Verified by headless render
-(`UISnapshot` tool → /tmp/monarch_ui.png) and `auval` (Cocoa view OK). **Remaining:** the pedal
-face (the unique centre — currently a placeholder), which will reuse the bypass-footswitch L&F
-and `LEDIndicator` per channel (bound to `bypass_yellow`/`bypass_red`).
+oversampling — Step 7/8). **The UI is now complete:**
+- **Peripheral (shared-look):** `MonarchLookAndFeel` (palette + halo trim knob + main knurled
+  knob + OS combo boxes + bypass footswitch + scaling button font), `VUMeter`, `LEDIndicator`,
+  Input/Output side panels (trim halo + TRIM + VU), the oversampling strip (LIVE/RENDER combos
+  bound to `oversampling_realtime`/`oversampling_render` + UI-size scale button), and a
+  resizable/aspect-locked window (base 694×354, 0.5–2.5×) with per-session (APVTS `uiScale`) +
+  cross-session (`ApplicationProperties` `defaultScale`) persistence.
+- **Pedal face (`PedalFace`):** royal-purple body (`#6A0956`, lit gradient) with gold (`#C6A15B`)
+  Papyrus lettering + gold compass rose (ref `pedal_picture.png`). Per channel: Volume/Drive/Tone
+  black knurled knobs, a small Presence trim flanking the compass, a 3-way `ClipSwitch`
+  (Boost/OD/Dist) at the edge (Red mirrored), an LED, and a bypass footswitch. "MONARCH OF TONE"
+  logo (no ANALOG.MAN). Verified by headless render (`UISnapshot` → /tmp/monarch_ui.png) + auval.
 
-Build helpers added: `Standalone` plugin format (run the UI without a DAW) and the `UISnapshot`
-console app (headless editor→PNG; no display needed).
+**Remaining:** Step 10 final sweep (all controls full-range, no clicks/NaN); ADAA optional.
+
+Build helpers: `Standalone` plugin format (run the UI without a DAW) and the `UISnapshot` console
+app (headless editor→PNG; no display needed — `./build/.../UISnapshot [scale]`).
 
 ---
 
@@ -150,7 +154,9 @@ console app (headless editor→PNG; no display needed).
    per-channel ~5 ms bypass crossfade, peak meters, and **dual-mono stereo** (a `ChannelStrip`
    {Yellow,Red} per audio channel). Params read once per block via cached APVTS atomic pointers;
    Yellow→Red in series. Oversampling not yet wrapped (Step 7).
-9. **UI implementation** — both channel panels (Yellow/Red, no Hi Gain toggle), oversampling controls
+9. ✅ **UI implementation** — **DONE.** Shared-look peripheral shell (side panels + OS strip +
+   resizable window) and the unique purple/gold `PedalFace` (knobs, 3-way clip switches, presence
+   trims, LEDs, footswitches, compass rose, logo). Yellow/Red, no Hi Gain toggle. auval PASS.
 10. **Final sweep** — all controls full range, no instability, clicks, or NaN output
 
 ---

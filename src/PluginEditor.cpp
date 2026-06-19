@@ -98,6 +98,9 @@ MonarchAudioProcessorEditor::MonarchAudioProcessorEditor (MonarchAudioProcessor&
     scaleBtn.onClick = [this] { showScaleMenu(); };
     addAndMakeVisible (scaleBtn);
 
+    pedalFace = std::make_unique<PedalFace> (audioProcessor.apvts);
+    addAndMakeVisible (*pedalFace);
+
     setResizable (true, true);
     if (auto* c = getConstrainer())
     {
@@ -119,14 +122,7 @@ void MonarchAudioProcessorEditor::paint (Graphics& g)
 {
     g.fillAll (Colour (MonarchLookAndFeel::cBackground));
 
-    // Pedal-face placeholder (the real face lands next phase).
-    g.setColour (Colour (0xFF0C1424u));
-    g.fillRoundedRectangle (pedalFaceArea.toFloat(), 8.0f);
-    g.setColour (Colour (0xFF1A2A40u));
-    g.drawRoundedRectangle (pedalFaceArea.toFloat().reduced (0.5f), 8.0f, 1.0f);
-    g.setColour (Colour (MonarchLookAndFeel::cOSLabel));
-    g.setFont (Font (FontOptions (12.0f * currentScale, Font::bold)));
-    g.drawText ("PEDAL FACE", pedalFaceArea, Justification::centred);
+    // (The pedal face paints itself — `pedalFace` covers pedalFaceArea.)
 
     // Oversampling strip background.
     g.setColour (Colour (MonarchLookAndFeel::cOSBackground));
@@ -171,6 +167,11 @@ void MonarchAudioProcessorEditor::resized()
     const Rectangle<int> outPanel (W - margin - panelW, topY, panelW, topH);
     pedalFaceArea = Rectangle<int> (margin + panelW + colGap, topY,
                                     W - 2 * (margin + panelW + colGap), topH);
+    if (pedalFace != nullptr)
+    {
+        pedalFace->setBounds (pedalFaceArea);
+        pedalFace->refresh (sc);
+    }
 
     auto layoutPanel = [&] (Rectangle<int> panel, Label& sec, Slider& knob, Label& sub, VUMeter& vu) {
         auto r = panel;
@@ -225,6 +226,9 @@ void MonarchAudioProcessorEditor::timerCallback()
         out = 0.0f;
     vuOutDecay = out;
     outputVU.setLevel (out);
+
+    if (pedalFace != nullptr)
+        pedalFace->updateLEDs();
 }
 
 void MonarchAudioProcessorEditor::showScaleMenu()
