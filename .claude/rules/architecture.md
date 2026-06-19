@@ -56,13 +56,13 @@ below the table.
 | `tone_yellow` | Tone Yellow | 0.0–1.0 | 0.5 | Linear taper (B-pot) applied in DSP |
 | `volume_yellow` | Volume Yellow | 0.0–1.0 | 0.5 | Audio taper (A-pot) applied in DSP |
 | `presence_yellow` | Presence Yellow | 0.0–1.0 | 0.0 | Linear taper; default fully CCW (no boost) |
-| `clipping_mode_yellow` | Clipping Yellow | 0/1/2/3 | 1 | `AudioParameterChoice`: "Boost"/"Overdrive"/"Distortion"/"Both" |
+| `clipping_mode_yellow` | Clipping Yellow | 0/1/2 | 1 | `AudioParameterChoice`: "Boost"/"Overdrive"/"Distortion" (3-way) |
 | `bypass_yellow` | Bypass Yellow | true/false | false | `AudioParameterBool` |
 | `drive_red` | Drive Red | 0.0–1.0 | 0.5 | As above |
 | `tone_red` | Tone Red | 0.0–1.0 | 0.5 | As above |
 | `volume_red` | Volume Red | 0.0–1.0 | 0.5 | As above |
 | `presence_red` | Presence Red | 0.0–1.0 | 0.0 | As above |
-| `clipping_mode_red` | Clipping Red | 0/1/2/3 | 1 | As above |
+| `clipping_mode_red` | Clipping Red | 0/1/2 | 1 | As above |
 | `bypass_red` | Bypass Red | true/false | false | `AudioParameterBool` |
 | `input_trim` | Input Trim | -12.0 to +12.0 dB | 0.0 | Plugin-only; `AudioParameterFloat` |
 | `output_trim` | Output Trim | -12.0 to +12.0 dB | 0.0 | Plugin-only; `AudioParameterFloat` |
@@ -82,12 +82,15 @@ circuit.md Section 6 — but it no longer affects the parameter/threading model 
 
 ## Clipping Mode Mapping
 
+3-way per channel (decision 2026-06-19 — the "Both" stacked mode was dropped to suit the
+3-position hardware toggle; `MonarchChannel::processClip` still handles any SW-1/SW-2 combo, so
+re-adding it is a 1-line change).
+
 | Value | Label | SW-1 | SW-2 |
 |-------|-------|------|------|
 | 0 | "Boost" | OFF | OFF |
 | 1 | "Overdrive" | ON | OFF |
 | 2 | "Distortion" | OFF | ON |
-| 3 | "Both" | ON | ON |
 
 ## Channel Routing
 

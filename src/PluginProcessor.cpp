@@ -54,7 +54,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout MonarchAudioProcessor::creat
 {
     std::vector<std::unique_ptr<juce::RangedAudioParameter>> params;
 
-    const juce::StringArray clippingModeChoices { "Boost", "Overdrive", "Distortion", "Both" };
+    const juce::StringArray clippingModeChoices { "Boost", "Overdrive", "Distortion" };
     const juce::StringArray oversamplingChoices { "1x", "2x", "4x", "8x" };
 
     // The two series channels are identified externally by their LED colour: the first

@@ -165,9 +165,9 @@ WarningsAsErrors: ""
   the hi-cut (5 kHz −18.7→−8.7 dB), passband −2.1 dB, no NaN; DC divider matches analytic to
   0.01 dB. **Contract for VolumePot/Step 7:** node_T_out already carries the VOL-body load — the
   VolumePot stage models only the wiper audio-taper tap + C11/R14; do NOT re-load node_T_out.
-- Step 6 (per-channel modes): 4 clipping modes per channel (Boost/OD/Dist/Both) — Yellow on its stock Stage 1,
-  Red on its fixed Hi-Gain Stage 1. (Hi Gain is no longer a runtime axis, so there is no
-  8-combination matrix — 4 modes × 2 fixed-voicing channels.)
+- Step 6 (per-channel modes): 3 clipping modes per channel (Boost/OD/Dist; "Both" dropped
+  2026-06-19 for the 3-way toggle) — Yellow on its stock Stage 1, Red on its fixed Hi-Gain
+  Stage 1. (Hi Gain is not a runtime axis — 3 modes × 2 fixed-voicing channels.)
   **Boost mode must clip on the op-amp rails (≈±3.3V, soft knee) — not stay infinitely clean.**
   Diode modes must clip at the diode thresholds (≈±1.64V / ≈±0.584V), proving the rail
   saturation never engages there (tone-safe). See dsp.md "Op-amp Rail Saturation".

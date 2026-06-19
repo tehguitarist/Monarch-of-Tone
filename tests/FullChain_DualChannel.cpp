@@ -53,7 +53,7 @@ int main()
     yellow.prepare (fs, 512);
     red.prepare (fs, 512);
 
-    const char* modeName[] = { "Boost", "Overdrive", "Distortion", "Both" };
+    const char* modeName[] = { "Boost", "Overdrive", "Distortion" };
     const double vpk = 0.3;   // hot-ish guitar level (≈ −12 dBu is 0.275 Vpk)
     const double freq = 220.0;
     const double drive = 0.7;
@@ -61,9 +61,10 @@ int main()
     std::printf ("Full-chain peak output (vin=%.2f Vpk @ %.0f Hz, drive=%.2f, vol=max)\n", vpk, freq, drive);
     std::printf ("  %-11s  %10s  %10s\n", "mode", "Yellow", "Red(HiGain)");
 
+    constexpr int kModes = 3; // Boost / Overdrive / Distortion (3-way, no "Both")
     bool nanSeen = false, redHotter = true;
-    std::vector<double> yPeak (4, 0.0);
-    for (int m = 0; m < 4; ++m)
+    std::vector<double> yPeak ((size_t) kModes, 0.0);
+    for (int m = 0; m < kModes; ++m)
     {
         const double y = peakOut (yellow, m, freq, vpk, drive);
         const double r = peakOut (red, m, freq, vpk, drive);
@@ -77,9 +78,9 @@ int main()
         std::printf ("  %-11s  %10.4f  %10.4f\n", modeName[m], y, r);
     }
 
-    // Clipping ordering (Yellow): Boost (rails) highest; Distortion/Both clamp lowest.
-    const bool boostHighest = yPeak[0] >= yPeak[1] && yPeak[0] >= yPeak[2] && yPeak[0] >= yPeak[3];
-    const bool nonSilent = yPeak[0] > 1e-3 && yPeak[1] > 1e-3 && yPeak[2] > 1e-3 && yPeak[3] > 1e-3;
+    // Clipping ordering (Yellow): Boost (rails) highest; Distortion clamps lowest.
+    const bool boostHighest = yPeak[0] >= yPeak[1] && yPeak[0] >= yPeak[2];
+    const bool nonSilent = yPeak[0] > 1e-3 && yPeak[1] > 1e-3 && yPeak[2] > 1e-3;
     // Boost must clip on the rails, not run away: pre-volume peak bounded near ±3.3 V.
     const bool boostRails = yPeak[0] > 1.0 && yPeak[0] < 4.0;
 

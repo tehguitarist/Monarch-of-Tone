@@ -31,7 +31,11 @@
 
 ## Layout — Two-Channel Pedal Face
 
-Reference: `king_of_tone_pedal_picture.jpg` — white enclosure, gold compass rose, black knobs.
+Reference: `pedal_picture.png` (project root) — **royal purple** enclosure (`#6A0956`), **gold**
+lettering in **Papyrus** font (`#C6A15B`), gold compass rose centre, black knurled knobs
+(`#161019`) with white indicators, chrome footswitches with off-white rings (`#DBDCD5`). The
+"ANALOG.MAN" wording is omitted. (Supersedes the earlier white-enclosure reference.)
+**Clipping switches (3-way): toward the left & right edges, below the knobs, above the footswitches.**
 The King of Tone has two identical channels side by side. We name them by their LED colour:
 the first channel is **Yellow**, the second is **Red**. Signal runs Yellow → Red in series.
 Layout mirrors the hardware directly. Note there is **no Hi Gain control** — the Hi-Gain mod
@@ -78,10 +82,11 @@ stock. At most, the Red panel shows a cosmetic, non-interactive "Hi Gain" badge.
 `AudioParameterBool`, no automation, no LED toggle.
 
 ### Clipping Mode Selector (×2, one per channel)
-- 4-position selector per channel: **Boost / Overdrive / Distortion / Both**
-- Segmented button or small ComboBox — clearly legible
+- **3-way switch** per channel: **Boost / Overdrive / Distortion** (the "Both" stacked mode was
+  dropped 2026-06-19 to suit a 3-position hardware-style toggle; param `clipping_mode_*` = 0/1/2)
+- Styled as a 3-position toggle (hardware aesthetic), not a ComboBox
 - Default: "Overdrive" (matches hardware factory default: SW-1 ON, SW-2 OFF)
-- Placed above or below the channel LEDs
+- **Placement: toward the left & right edges, below the knobs and above the footswitches**
 
 ### Bypass (×2 footswitches)
 - Large footswitch-style toggle button per channel, at bottom of each channel column

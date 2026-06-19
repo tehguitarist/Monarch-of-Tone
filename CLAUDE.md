@@ -118,9 +118,9 @@ console app (headless editor→PNG; no display needed).
      no — series-R + shunt-diode-root. `tests/SW2HardClip_Sine.cpp`: gain ≈+1, symmetric, HARD
      clamp ±0.55V (rises only to 0.66V @ 10× drive = diode log). See `src/dsp/SW2HardClip.h`.
    - **Run `dsp-validator` after each stage. Do not proceed on FAIL.**
-5. **4 clipping modes per channel** — Boost/OD/Dist/Both (`clipping_mode_*`). Hi Gain is no
-   longer a runtime axis: Yellow is fixed-standard, Red is fixed-Hi-Gain, so the old
-   "× Standard/HiGain" 8-mode matrix collapses to 4 modes each (circuit.md Section 18).
+5. **3 clipping modes per channel** — Boost/OD/Dist (`clipping_mode_*`; "Both" dropped 2026-06-19
+   for the 3-way hardware toggle). Hi Gain is not a runtime axis (Yellow fixed-standard, Red
+   fixed-Hi-Gain), so each channel exposes just its 3 clipping modes (circuit.md Section 18).
 6. ✅ **Tone stage** — **DONE & validated (dsp-validator PASS, Step 6).** Passive RC; TONE is
    a 3-terminal pot tap modelled as a 3-port WDF **parallel** adaptor at the wiper (no R-type
    matrix — no op-amp): R_a (series from node_HC source) / R_b+C8 (to BIAS, treble-cut) / R13

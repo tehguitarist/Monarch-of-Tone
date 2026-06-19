@@ -29,8 +29,8 @@ namespace monarch
  *                                 SW-2 ON: SW2HardClip (R12 + 1S1588 shunt, hard clip)
  *      → ToneStage (passive TONE/Presence) → VolumePot (audio taper + C11/R14) → out
  *
- * Clipping mode (architecture.md): 0 Boost(—/—), 1 Overdrive(SW1/—), 2 Distortion(—/SW2),
- * 3 Both(SW1/SW2). Hi Gain is fixed per channel (ctor flag → Stage1), not a runtime mode.
+ * Clipping mode (architecture.md): 0 Boost(—/—), 1 Overdrive(SW1/—), 2 Distortion(—/SW2)
+ * — 3-way per channel. Hi Gain is fixed per channel (ctor flag → Stage1), not a runtime mode.
  */
 class MonarchChannel
 {
@@ -81,11 +81,13 @@ public:
     void setPresence (double p) { tone.setPresence (p); }
     void setVolume (double v) { volume.setVolume (v); }
 
-    /** Clipping mode 0..3 (Boost/Overdrive/Distortion/Both → SW-1/SW-2 on/off). */
+    /** Clipping mode 0..2 (Boost/Overdrive/Distortion → SW-1/SW-2 on/off). 3-way per channel
+        (no "Both" — dropped 2026-06-19 for the 3-position hardware toggle). processClip still
+        handles any SW-1/SW-2 combination, so re-adding a stacked mode later is a 1-line change. */
     void setClippingMode (int mode)
     {
-        sw1On = (mode == 1 || mode == 3);
-        sw2On = (mode == 2 || mode == 3);
+        sw1On = (mode == 1);
+        sw2On = (mode == 2);
     }
 
     // Base-rate front: input network + Stage 1 → V(NodeG).

@@ -873,10 +873,10 @@ One `DiodePairT` instance.
 
 > **Hi Gain is now a FIXED per-channel build option, not a runtime mode (decision 2026-06-17).**
 > The **Yellow** channel is always standard (Hi Gain OFF); the **Red** channel is always
-> Hi Gain ON. So each channel exposes only its 4 clipping modes (Boost/OD/Dist/Both) via the
-> `clipping_mode_*` parameter — there is no Hi-Gain toggle. The full 8-row table below is
-> retained only as the per-channel reference: read the **OFF** rows for Yellow and the
-> **ON** rows for Red.
+> Hi Gain ON. Each channel exposes its **3 clipping modes (Boost/OD/Dist)** via the
+> `clipping_mode_*` parameter — the **"Both" stacked mode was dropped 2026-06-19** for the
+> 3-position hardware toggle (so ignore the "Both" rows below). There is no Hi-Gain toggle:
+> read the **OFF** rows for Yellow and the **ON** rows for Red.
 
 | Mode | SW-1 | SW-2 | Hi Gain (fixed) | Clamp | Character | Channel |
 |------|------|------|-------------|-------|-----------|---------|
