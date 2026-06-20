@@ -201,11 +201,24 @@ the captures — `PedalRender in.wav out.wav drive tone vol pres clip`).
       ~0.1 dB of analytic. Clean-EQ vs captures: G4 ≈ 0.4 dB RMS, G2/G6 within ~1.5 dB (now drive-
       dependent, as the real pedal). **Tilt shelf RETIRED** (`TiltShelf::kEnabled=false`).
       circuitVoltsPerFS re-cal 0.66 → 0.87. All DSP tests + auval PASS.
-    - ⏳ **Driven-path re-validation (NEXT)** — the Stage-1 rebuild changed drive levels into the
-      clip span, so: (a) compression depth (real still compresses ~3 dB harder at hot levels —
-      pre-existing, partly improved by the re-cal); (b) the even-harmonic shaper coeffs
-      (MonarchChannel `asym*`) were tuned to the OLD Stage 1 and need re-tuning vs the captures;
-      (c) the low-note (<440 Hz) THD/H2 — confirm whether the higher drive now reaches it.
+    - ✅ **Even-harmonic shaper re-tune** (commit f5878f0) — DONE. Re-tuned `asym*` to the rebuilt
+      Stage 1 (asymThresh 0.45→0.37, asymDriveScale 1.20→1.70). H2 vs captures within ~1 dB at
+      G6/G10, ~2–4 dB at G2 (low drive). Clean stays symmetric; FullChain PASS.
+    - ☑️ **DECISION 2026-06-21 — accept the device-physics residuals.** With Stage 1 now circuit-
+      accurate, the remaining driven mismatches are NOT topology errors but un-modeled second-order
+      DEVICE physics (the same class as the even harmonics): (a) OD compresses ~3–4 dB lighter than
+      the real at hot input (soft-clip/charge-storage fidelity; Distortion compression is good,
+      Δ~2 dB); (b) low notes (<440 Hz) under-distort (real distorts 82 Hz MORE than 1 kHz — the
+      signature of COUPLING-CAP CHARGE STORAGE / "blocking distortion" at the C5 159 Hz rolloff,
+      absent in our ideal-cap WDF); (c) 5 kHz HF distortion is lighter. These aren't on any
+      schematic; we accept them rather than add more artificial layers (user pref: circuit-accurate).
+    - ⏳ **THD-by-frequency-band validation (NEXT)** — sweep THD across the spectrum (not just spot
+      tones) and verify both the THD AMOUNT and the HARMONIC TYPE/LOCATION (which harmonics, where)
+      match the captures band-by-band — confirm the spectral distribution of distortion is right,
+      not just the level at 1 kHz.
+    - ⏳ **Volume-knob validation (NEXT)** — verify the VOL control (100kA audio taper, VolumePot +
+      ToneStage VOL-body load) tracks the captures correctly across its range (level + any taper/
+      loading interaction). Captures were at fixed volume, so may need a dedicated check.
 
 ---
 
