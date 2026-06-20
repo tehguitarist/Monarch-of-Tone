@@ -77,24 +77,26 @@ int main()
         std::printf ("  %6.2f   %10.2f  %10.2f  %8.2f\n", d, gs, gh, gh - gs);
     }
 
-    // "9 o'clock acts like noon": Red at ~9:00 should land near Yellow at ~noon.
-    hiGain.setDrive (drive_9oclock);
-    const double redAt9 = measureGainDB (hiGain, probeFreq, amp);
+    // Hi-Gain provides a SUBSTANTIAL boost. The real Theseus floors are Yellow = R2∥R3 ≈ 990 Ω
+    // and Red = R2 = 100k (a ~100× floor switch), so Red is much hotter than Yellow. (The earlier
+    // "9 o'clock acts like noon" heuristic was tuned to the superseded artificial 39k floor; the
+    // real 100k floor is hotter than that marketing phrase implies, and we have no Red captures —
+    // so verify only that Hi-Gain is a real, monotonic boost, not a specific clock alignment.)
+    hiGain.setDrive (drive_noon);
+    const double redAtNoon = measureGainDB (hiGain, probeFreq, amp);
     stock.setDrive (drive_noon);
     const double yellowAtNoon = measureGainDB (stock, probeFreq, amp);
-    const double clockErr = redAt9 - yellowAtNoon;
+    const double boost = redAtNoon - yellowAtNoon;
 
-    std::printf ("\n  \"9 o'clock acts like noon\":\n");
-    std::printf ("    Red  @ 9:00 (drive=%.2f): %6.2f dB\n", drive_9oclock, redAt9);
-    std::printf ("    Yellow @ noon (drive=%.2f): %6.2f dB\n", drive_noon, yellowAtNoon);
-    std::printf ("    alignment error: %+.2f dB (target ~0)\n", clockErr);
+    std::printf ("\n  Hi-Gain boost (both @ noon): Red %.2f dB − Yellow %.2f dB = %+.2f dB\n",
+                 redAtNoon, yellowAtNoon, boost);
 
-    const bool clockOk = std::abs (clockErr) < 2.0; // within ~2 dB of the noon reference
-    const bool pass = hotterEverywhere && hiGainMonotonic && clockOk && ! nanSeen;
+    const bool boostOk = boost > 3.0; // a meaningful Hi-Gain lift (real floors give ~6 dB)
+    const bool pass = hotterEverywhere && hiGainMonotonic && boostOk && ! nanSeen;
 
-    std::printf ("\n  hiGain hotter everywhere: %s | hiGain DRIVE↑gain↑: %s | 9≈noon (<2dB): %s | no NaN: %s\n",
+    std::printf ("\n  hiGain hotter everywhere: %s | hiGain DRIVE↑gain↑: %s | substantial boost: %s | no NaN: %s\n",
                  hotterEverywhere ? "ok" : "FAIL", hiGainMonotonic ? "ok" : "FAIL",
-                 clockOk ? "ok" : "FAIL", nanSeen ? "FAIL" : "ok");
+                 boostOk ? "ok" : "FAIL", nanSeen ? "FAIL" : "ok");
     std::printf ("%s\n", pass ? "PASS" : "FAIL");
     return pass ? 0 : 1;
 }

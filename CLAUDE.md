@@ -181,8 +181,9 @@ the captures — `PedalRender in.wav out.wav drive tone vol pres clip`).
     - ✅ **Capture-match tilt shelf + Yellow floor → 10k** (commit 684ec5b) — a fixed first-order
       high-shelf (−2.6 dB LF / +1.4 dB HF, pivot 1.4 kHz, unity at 1 kHz) correcting a gain-
       INVARIANT ~1 kHz-pivot EQ tilt; `TiltShelf` in PluginProcessor.h, gated out on full bypass.
-      **ARTIFICIAL — LIKELY RETIRED by the Step-11 Stage-1 fix** (it was compensating for the wrong
-      Stage-1 voicing). `TiltShelf::kEnabled=false` A/Bs the pure model.
+      **ARTIFICIAL — NOW RETIRED** (`TiltShelf::kEnabled=false`) by the Stage-1 Z_lower fix below,
+      which reproduces the tilt circuit-accurately. (Also the Yellow floor 10k → real ~990 Ω.)
+      Code kept; flip kEnabled to A/B.
     - ✅ **Even-harmonic asymmetry** (commit ffa5c64, `MonarchChannel::injectEvenHarmonic`) — the
       KOT clips symmetrically by design (→ no even harmonics), and the topology STRUCTURALLY
       rejects the circuit-accurate bias-shift (the feedback soft-clip and hard shunt resist an
@@ -193,13 +194,18 @@ the captures — `PedalRender in.wav out.wav drive tone vol pres clip`).
       Matches OD/Dist H2 within ~3–4 dB across drive (G2/G6/G10) and level, 440 Hz–5 kHz. **Known
       gaps:** Boost's true (falling) trend is settled for moderate constant warmth; **<440 Hz H2
       is under-injected because the model under-drives low notes** (the Stage-1 deficit below).
-    - ⏳ **Stage-1 Z_lower topology fix (NEXT — circuit-accurate)** — the Theseus schematic +
-      parts list (`analysis/`) show our Stage-1 Z_lower is the WRONG topology and the DRIVE floors
-      are wrong (see circuit.md §6, 2026-06-20). Plan: rebuild Z_lower, re-derive the R-type
-      scattering matrix, set the real floors (Yellow ≈ R2∥R3 ≈ 1k, Red = R2 = 100k), re-validate
-      vs captures, and **likely retire the tilt shelf**. Expected to fix the residual EQ curve AND
-      the low-note drive/THD/H2 deficit together. De-risk by simulating the corrected full chain
-      vs the captured EQ BEFORE touching the WDF matrix.
+    - ✅ **Stage-1 Z_lower topology fix (circuit-accurate)** — DONE. Rebuilt `Stage1.h` to the real
+      Theseus Z_lower (`C4 series [R4 ∥ (R5+C3)]`) + real floors (Yellow R2∥R3 ≈ 990 Ω, Red R2 =
+      100k) + C1 = 22n. NO R-type matrix — an ideal op-amp decouples Z_lower/Z_upper, so it solves
+      two WDF one-ports (V-source → Z_lower → current → I-source → Z_upper → voltage), validated to
+      ~0.1 dB of analytic. Clean-EQ vs captures: G4 ≈ 0.4 dB RMS, G2/G6 within ~1.5 dB (now drive-
+      dependent, as the real pedal). **Tilt shelf RETIRED** (`TiltShelf::kEnabled=false`).
+      circuitVoltsPerFS re-cal 0.66 → 0.87. All DSP tests + auval PASS.
+    - ⏳ **Driven-path re-validation (NEXT)** — the Stage-1 rebuild changed drive levels into the
+      clip span, so: (a) compression depth (real still compresses ~3 dB harder at hot levels —
+      pre-existing, partly improved by the re-cal); (b) the even-harmonic shaper coeffs
+      (MonarchChannel `asym*`) were tuned to the OLD Stage 1 and need re-tuning vs the captures;
+      (c) the low-note (<440 Hz) THD/H2 — confirm whether the higher drive now reaches it.
 
 ---
 

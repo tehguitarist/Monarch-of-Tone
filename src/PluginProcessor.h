@@ -56,14 +56,13 @@ public:
     std::atomic<float> outputLevelR { 0.0f };
 
 private:
-    // Signal calibration: 0 dBFS ↔ ~0.66 absolute circuit volts. Pinned to MATCH the real-pedal
-    // (NAM) captures in analysis/ — the captured King of Tone hits its clean/Boost rail-clip
-    // onset at a −18 dBFS 1 kHz input, i.e. an effective 0.66 V/FS (a 1 V-pk humbucker transient
-    // measures −13.5 dBFS ≈ 3.31 V/FS, but the capture was reamped ~14 dB quieter; we match the
-    // capture per decision 2026-06-20 and may revisit the absolute level once the curves match).
-    // This sets the diode/rail thresholds at the input levels the capture used; verified against
-    // the clean onset + OD/Dist THD. Input/output trim (±12 dB) trims around it.
-    static constexpr float circuitVoltsPerFS = 0.66f;
+    // Signal calibration: 0 dBFS ↔ absolute circuit volts. Pinned to MATCH the real-pedal (NAM)
+    // captures in analysis/ — the captured KOT hits its clean/Boost rail-clip onset at a −18 dBFS
+    // 1 kHz input. Re-calibrated 0.66 → 0.87 (+2.4 dB) after the Stage-1 Z_lower/floor rebuild
+    // (2026-06-20), which dropped Stage-1 gain by ~2.4 dB, to restore the same clipping drive.
+    // PROVISIONAL — the driven path (compression depth, even-harmonic shaper) still needs a full
+    // re-validation against the captures after this rebuild; expect this value to be refined.
+    static constexpr float circuitVoltsPerFS = 0.87f;
 
     // ---- Capture-match calibration (first-order high-shelf / "tilt") ----------------------
     // A/B vs the NAM captures of the real King of Tone showed a clean, GAIN-INVARIANT tilt
@@ -80,7 +79,7 @@ private:
     // Set kEnabled=false to A/B the pure-circuit model. (decision 2026-06-20)
     struct TiltShelf
     {
-        static constexpr bool kEnabled = true;
+        static constexpr bool kEnabled = false;
         static constexpr double kGloDb = -2.6;    // LF asymptote (dB)
         static constexpr double kGhiDb = 1.4;     // HF asymptote (dB)
         static constexpr double kPivotHz = 1400.0; // geometric centre of the zero/pole

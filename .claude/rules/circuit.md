@@ -313,8 +313,8 @@ op-amp model).
 
 ## 6. Stage 1 — IC_A (Non-Inverting Amplifier)
 
-> **⚠️ MAJOR CORRECTION 2026-06-20 — Z_lower topology + DRIVE floors were WRONG (model fix
-> PENDING).** Re-traced from the **Theseus schematic** (`analysis/theseus schematic.png`) and
+> **⚠️ MAJOR CORRECTION 2026-06-20 — Z_lower topology + DRIVE floors were WRONG → ✅ NOW FIXED &
+> IMPLEMENTED.** Re-traced from the **Theseus schematic** (`analysis/theseus schematic.png`) and
 > confirmed against the **Theseus kit parts list** (`analysis/theseus_kit_documentation.pdf`
 > p29). Found while A/B-ing the model against NAM captures of a real KOT: our implemented Stage-1
 > matches the matsumin trace below, but the matsumin trace's **Z_lower is a different topology
@@ -341,11 +341,18 @@ op-amp model).
 > linear, TONE 25kB linear, VOL 100kA audio (so the EQ residual is NOT a taper issue). IC voltages
 > (p30): V+ 9.15 V, V− 0, bias ~4.5 V → confirms ±3.3 V rail.
 >
-> **MODEL FIX PENDING (Step 11):** rebuild Stage-1's Z_lower to the topology above, re-derive the
-> R-type scattering matrix (`tools/r_solver_sympy.py`, new netlist), set the real floors, then
-> re-validate vs the captures and **likely retire the artificial capture-match tilt shelf**
-> (PluginProcessor.h `TiltShelf`, commit 684ec5b) since it was compensating for this. Everything
-> from here to the end of §7 describes the SUPERSEDED matsumin two-branch model still in the code.
+> **✅ IMPLEMENTED 2026-06-20 (Stage1.h rewritten).** Z_lower is now the topology above; floors are
+> `R6_floor = R2∥R3 ≈ 990 Ω` (Yellow) / `HiGain_floor = R2 = 100k` (Red); input cap C1 = 22n. The
+> R-type scattering matrix was **eliminated** — for an ideal op-amp the two impedances decouple, so
+> Stage 1 now solves two simple WDF one-ports: drive Z_lower with an ideal VOLTAGE source = V(pin3+)
+> → read current i; drive Z_upper with an ideal CURRENT source = i → read voltage; V(NodeG) =
+> V(pin3+) + i·Z_upper. Validated to within ~0.1 dB of the analytic transfer function. The
+> **artificial capture-match tilt shelf is RETIRED** (PluginProcessor.h `TiltShelf::kEnabled=false`)
+> — the corrected Stage-1 voicing reproduces the EQ tilt the shelf was faking (clean-EQ vs captures:
+> G4 ≈ 0.4 dB RMS; G2/G6 within ~1.5 dB, now drive-dependent as the real pedal is). circuitVoltsPerFS
+> re-calibrated 0.66 → 0.87. **Still TODO:** driven-path re-validation (compression depth; the even-
+> harmonic shaper coeffs were tuned to the old Stage 1 and need re-tuning). Everything from here to
+> the end of §7 below describes the SUPERSEDED matsumin two-branch model (kept for history only).
 
 > **CORRECTED 2026-06-15** — re-traced directly from `king_of_tone_schematic.png`. The
 > previous version of this section misidentified R7/R8/C4 placement and the role of the
