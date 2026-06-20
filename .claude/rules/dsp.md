@@ -238,7 +238,9 @@ topology update.
 
 - **DRIVE (100kB):** Linear. `R = R_max * x`
 - **TONE (25kB):** Linear. `R = R_max * x`
-- **VOL (100kA):** Audio. `R = R_max * pow(10.0, 2.0 * x - 2.0)` or equivalent
+- **VOL (100kA):** Audio. Wiper fraction `pow(10.0, 1.8 * (x - 1.0))` — noon = −18 dB. (Exponent
+  fitted to the real-pedal captures, 2026-06-21; the textbook "ideal log" 2.0/−20 dB was ~2 dB too
+  quiet at noon vs the captures. See `src/dsp/VolumePot.h`.)
 - **PRESENCE (50kB):** Linear. `R = R_max * x`
 
 Never apply audio taper to DRIVE, TONE, or PRESENCE. Never apply linear taper to VOL.

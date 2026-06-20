@@ -37,11 +37,18 @@ public:
 
     void reset() { c11.reset(); }
 
-    /** VOL in [0,1], AUDIO taper. Wiper fraction = pow(10, 2x−2): x=1→1.0, x=0.5→0.1, x=0→0.01. */
+    // Audio-taper steepness. The textbook "ideal log" pot is 2.0 (noon = −20 dB), but A/B vs the
+    // real-pedal captures (all at noon volume) showed the plugin ~2 dB quiet at noon — the real
+    // 100kA pot is a touch less steep. Fitted to the captures: 1.8 → noon = −18.0 dB (matched to
+    // ~0.1 dB). decision 2026-06-21. (A full taper validation would need a volume-sweep capture,
+    // which isn't available; this is fit to the single noon point + the "less steep" hypothesis.)
+    static constexpr double taperExp = 1.8;
+
+    /** VOL in [0,1], AUDIO taper. Wiper fraction = pow(10, taperExp·(x−1)): x=1→1.0, x=0.5→−18 dB. */
     void setVolume (double vol01)
     {
         const auto x = std::min (1.0, std::max (0.0, vol01));
-        volGain = std::pow (10.0, 2.0 * x - 2.0);
+        volGain = std::pow (10.0, taperExp * (x - 1.0));
     }
 
     /** x = V(node_T_out); returns the stage output (post audio-taper tap + C11/R14 DC block). */

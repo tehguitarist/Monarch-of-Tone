@@ -1,7 +1,8 @@
 // Volume pot audio taper — validation gate (Step 6/back-end).
 //
-// Verifies the VOL audio (A) taper wiper fraction pow(10, 2x−2): full ≈ 0 dB, mid ≈ −20 dB,
-// min ≈ −40 dB; passband flat (C11/R14 HPF corner 0.16 Hz is transparent in-band); no NaN.
+// Verifies the VOL audio (A) taper wiper fraction pow(10, 1.8·(x−1)): full ≈ 0 dB, noon ≈ −18 dB,
+// min ≈ −36 dB; passband flat (C11/R14 HPF corner 0.16 Hz is transparent in-band); no NaN.
+// (Exponent 1.8 fitted to the real-pedal captures — see VolumePot.h; ideal-log would be 2.0/−20 dB.)
 
 #include "../src/dsp/VolumePot.h"
 
@@ -40,7 +41,7 @@ int main()
     struct
     {
         double v, expectDB;
-    } pts[] = { { 1.0, 0.0 }, { 0.75, -10.0 }, { 0.5, -20.0 }, { 0.25, -30.0 }, { 0.0, -40.0 } };
+    } pts[] = { { 1.0, 0.0 }, { 0.75, -9.0 }, { 0.5, -18.0 }, { 0.25, -27.0 }, { 0.0, -36.0 } };
 
     bool taperOk = true, nanSeen = false;
     for (auto& p : pts)

@@ -741,8 +741,9 @@ VOL pot (100kA audio taper) attenuates the tone stage output. C11 (1µF) blocks 
 Output HPF: f_c = 1/(2π × R14 × C11) ≈ 0.16 Hz — DC blocking only.
 
 **WDF model:** Parallel divider for VOL (top=node_T_out, bottom=BIAS, wiper output);
-series C11; shunt R14. All linear. Audio taper: `R_lower = 100k × pow(10, 2×x - 2)`
-where x ∈ [0,1].
+series C11; shunt R14. All linear. Audio taper wiper fraction = `pow(10, 1.8·(x − 1))`
+(noon = −18 dB), x ∈ [0,1] — exponent **fitted to the captures 2026-06-21** (the textbook
+ideal-log 2.0/−20 dB was ~2 dB too quiet at noon; the real 100kA pot is less steep).
 
 ---
 
@@ -905,7 +906,7 @@ One `DiodePairT` instance.
 |---------|------|-------------|
 | DRIVE | 100kB linear | `R = 100k × x` |
 | TONE | 25kB linear | `R = 25k × x` |
-| VOL | 100kA audio | `R = 100k × pow(10, 2×x - 2)` |
+| VOL | 100kA audio | wiper `pow(10, 1.8·(x − 1))`, noon = −18 dB (exponent fitted to captures 2026-06-21; ideal-log 2.0 was ~2 dB quiet) |
 | Trim (Presence) | 50kB linear | `R = 50k × x` |
 
 ---

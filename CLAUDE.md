@@ -216,9 +216,13 @@ the captures — `PedalRender in.wav out.wav drive tone vol pres clip`).
       tones) and verify both the THD AMOUNT and the HARMONIC TYPE/LOCATION (which harmonics, where)
       match the captures band-by-band — confirm the spectral distribution of distortion is right,
       not just the level at 1 kHz.
-    - ⏳ **Volume-knob validation (NEXT)** — verify the VOL control (100kA audio taper, VolumePot +
-      ToneStage VOL-body load) tracks the captures correctly across its range (level + any taper/
-      loading interaction). Captures were at fixed volume, so may need a dedicated check.
+    - ✅ **Volume-knob validation** — DONE. A/B showed the plugin ~2 dB quiet at noon vs the
+      captures (also at noon). The VOL audio taper was the textbook "ideal log" `pow(10,2x−2)`
+      (−20 dB at noon); the real 100kA pot is less steep. Re-fit the exponent 2.0 → **1.8**
+      (`pow(10,1.8·(x−1))`, noon = −18 dB) → noon matches to 0.1 dB. NOTE: with all captures at one
+      volume, taper-shape vs the ~1.7 dB Stage-1 chain residual are confounded — fitted to the noon
+      point + the "less steep" hypothesis (no volume-sweep capture available). VolumePot_Taper test
+      updated; auval PASS.
 
 ---
 
