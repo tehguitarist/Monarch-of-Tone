@@ -14,8 +14,15 @@
 - R-type adaptors required for feedback topologies — derive scattering matrix from nodal equations
 - **Never reconstruct the WDF tree at runtime for switch changes** — precomputed scattering matrices, switch via `setSMatrixData()`
 - VREF (VB) treated as signal ground throughout — model bipolar
-- Stage 1 (IC_A, non-inverting): linear WDF tree, no Newton-Raphson
+- Stage 1 (IC_A, non-inverting): linear WDF tree, no Newton-Raphson. **NB (2026-06-20 rebuild):
+  Stage 1 NO LONGER uses an R-type scattering matrix** — for an ideal op-amp Z_lower/Z_upper
+  decouple, so it solves two one-ports (V-source→Z_lower→current i; I-source→Z_upper→voltage;
+  V(NodeG)=V(pin3+)+i·Z_upper). Real Theseus topology + floors. See circuit.md §6 / Stage1.h.
 - Stage 2 (IC_B, inverting): linear WDF tree for op-amp, R-type adaptor at feedback node
+- Even-harmonic asymmetry (`MonarchChannel::injectEvenHarmonic`): the KOT clips symmetrically, so
+  the model's even harmonics are injected EMPIRICALLY at the clip output (the topology rejects the
+  circuit-accurate route — see circuit.md / CLAUDE.md Step 11). nodeG source for mid/high + a
+  low-pass-of-x source for the low band; gated so clean stays symmetric. Not a circuit element.
 - Nonlinear stages (SW-1 soft-clip, SW-2 hard-clip): Newton-Raphson via chowdsp_wdf nonlinear solver
 
 ### prepareToPlay Requirements
