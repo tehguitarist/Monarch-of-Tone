@@ -231,6 +231,23 @@ the captures — `PedalRender in.wav out.wav drive tone vol pres clip`).
       volume, taper-shape vs the ~1.7 dB Stage-1 chain residual are confounded — fitted to the noon
       point + the "less steep" hypothesis (no volume-sweep capture available). VolumePot_Taper test
       updated; auval PASS.
+    - ☑️ **Per-mode output level — captures are NORMALIZED (2026-06-21).** A/B at fixed (noon) volume:
+      the captures put Boost/OD/Dist at the SAME level (±0.3 dB), which is physically impossible at
+      fixed volume (the diodes clamp lower: Boost rails ±3.3 V → OD ±1.64 V → Dist ±0.58 V). So the
+      captures were level-normalized per mode. The plugin's Boost > OD (−5.8 dB) > Dist (−12 dB) is
+      PHYSICALLY CORRECT (matches the diode-clamp ratios) — not a volume loss. (Can't verify the real
+      inter-mode drop from normalized captures.) Practical: A/B and null tests must re-gain PER MODE.
+    - ⏳ **Null-test validation (NEXT)** — systematic plugin-vs-capture nulling across the full
+      capture set (all gains × Boost/OD/Dist, plus the new TONE-interaction captures at gain 6 for
+      all clipping). Preliminary G6 T5 (sub-sample time-aligned + per-mode level-matched): clean/Boost
+      nulls **−34/−35 dB in the mids** (300 Hz–2 kHz), −20 dB low, −8 dB >6 kHz; driven sweep nulls
+      −13 to −19 dB overall (OD best −18.8, Dist −13.8), deepest in the low-mids, shallow >6 kHz —
+      the expected NAM pattern (more null low-mids, less 2–6 kHz, none >6 kHz). So the plugin DOES
+      sound/react like the real thing to within NAM fidelity; nothing fundamentally off. TODO: run
+      the full sweep, and use the tone-interaction captures to validate the Tone control under drive.
+      KEY: null depth needs sub-sample alignment + per-mode re-gain (captures normalized) — a plain
+      subtract won't cancel. Harness: **`analysis/null_test.py`** (fractional-delay + LS-gain + per-band)
+      — `null_test.py CAPTURE.wav PLUGIN.wav [t0 t1]`, render the plugin via `PedalRender` first.
 
 ---
 
