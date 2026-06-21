@@ -54,10 +54,12 @@ clang-format -i src/**/*.{cpp,h}
 
 ## Repository State
 
-> **CURRENT: Step 11 — Real-pedal (NAM capture) A/B calibration in progress.** Engine + UI are
-> complete & validated; we are now matching the model to NAM captures of a real King of Tone
-> (single Yellow/stock channel) in `analysis/`. A schematic re-check (2026-06-20) found a
-> **fundamental Stage-1 Z_lower topology error** — see circuit.md §6 and Step 11 below.
+> **CURRENT: Step 11 — Real-pedal (NAM capture) A/B calibration COMPLETE (2026-06-21).** Engine + UI
+> are complete & validated; the model is matched to NAM captures of a real King of Tone (single
+> Yellow/stock channel) in `analysis/`. The Stage-1 Z_lower topology error found in the 2026-06-20
+> schematic re-check is fixed (circuit.md §6); the full 25-capture null sweep confirms NAM-fidelity
+> matching (−8.5 to −18.8 dB, tone-under-drive validated) — see Step 11 below. Remaining residuals
+> are accepted device-physics / capture limits. All on `main`.
 
 The full audio engine is done & validated (all stages, `MonarchChannel`, `processBlock`,
 oversampling — Step 7/8). **The UI is now complete:**
@@ -237,17 +239,27 @@ the captures — `PedalRender in.wav out.wav drive tone vol pres clip`).
       captures were level-normalized per mode. The plugin's Boost > OD (−5.8 dB) > Dist (−12 dB) is
       PHYSICALLY CORRECT (matches the diode-clamp ratios) — not a volume loss. (Can't verify the real
       inter-mode drop from normalized captures.) Practical: A/B and null tests must re-gain PER MODE.
-    - ⏳ **Null-test validation (NEXT)** — systematic plugin-vs-capture nulling across the full
-      capture set (all gains × Boost/OD/Dist, plus the new TONE-interaction captures at gain 6 for
-      all clipping). Preliminary G6 T5 (sub-sample time-aligned + per-mode level-matched): clean/Boost
-      nulls **−34/−35 dB in the mids** (300 Hz–2 kHz), −20 dB low, −8 dB >6 kHz; driven sweep nulls
-      −13 to −19 dB overall (OD best −18.8, Dist −13.8), deepest in the low-mids, shallow >6 kHz —
-      the expected NAM pattern (more null low-mids, less 2–6 kHz, none >6 kHz). So the plugin DOES
-      sound/react like the real thing to within NAM fidelity; nothing fundamentally off. TODO: run
-      the full sweep, and use the tone-interaction captures to validate the Tone control under drive.
-      KEY: null depth needs sub-sample alignment + per-mode re-gain (captures normalized) — a plain
-      subtract won't cancel. Harness: **`analysis/null_test.py`** (fractional-delay + LS-gain + per-band)
-      — `null_test.py CAPTURE.wav PLUGIN.wav [t0 t1]`, render the plugin via `PedalRender` first.
+    - ✅ **Null-test validation — DONE (full 25-capture sweep, 2026-06-21).** Plugin rendered at each
+      capture's exact settings (`tools/PedalRender`) and nulled on the driven sweep (13.5–19.5 s) with
+      sub-sample alignment + per-mode LS-gain (`analysis/null_test.py`; orchestrator was a throwaway
+      `/tmp/sweep.py`). **Overall null −8.5 to −18.8 dB across the whole set** — the expected NAM-fidelity
+      pattern: deepest in the low-mids (often −15 to −22 dB), shallower 2–6 kHz, ~0 above 6 kHz. **So the
+      plugin genuinely sounds/reacts like the real pedal; nothing fundamentally off.** (Earlier "no
+      nulling" was the missing sub-sample align + per-mode re-gain — captures are normalized, a plain
+      subtract can't cancel.) Findings:
+        - **Tone control under drive VALIDATED** — null depth is flat across T2→T5→T8 in every mode
+          (Boost ≈ −14.7, OD ≈ −18.7, Dist ≈ −14.0); the tone stage tracks the real pedal, no drift.
+        - **OD is the best-matched mode** (avg ≈ −16, up to −18.8); mid gain (G4–G6) is the sweet spot.
+        - **LS-gain column reconfirms per-mode normalization**: Boost ≈ 0 dB, OD +4…+9, Dist +11…+17 —
+          the more the diodes clamp, the more the capture was normalized up (physically-correct hierarchy).
+        - **Weak spots (both accepted device-physics / capture limits, NOT topology errors):** max drive
+          G10 nulls shallowest (−8.5…−9.8) in ALL modes → the capture's own max-gain aliasing/noise; and
+          high-gain Boost (G8 −11.4) lags its diode siblings (G8 OD −17.7) → the op-amp rail-sat knee.
+          **The rail-sat knee was swept (railV 3.3↔3.6, knee 3.0↔3.18): softening helps G8/G10 ~0.7 dB but
+          costs G6 ~0.9 dB (a wash, just trades drive settings); harder is identical. Left at the circuit-
+          motivated ±3.3 V / knee 3.0 — the residual is not improvable here without a net loss.**
+      Harness kept: **`analysis/null_test.py`** (fractional-delay + LS-gain + per-band) —
+      `null_test.py CAPTURE.wav PLUGIN.wav [t0 t1]`, render the plugin via `PedalRender` first.
 
 ---
 
