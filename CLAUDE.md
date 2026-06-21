@@ -204,18 +204,26 @@ the captures — `PedalRender in.wav out.wav drive tone vol pres clip`).
     - ✅ **Even-harmonic shaper re-tune** (commit f5878f0) — DONE. Re-tuned `asym*` to the rebuilt
       Stage 1 (asymThresh 0.45→0.37, asymDriveScale 1.20→1.70). H2 vs captures within ~1 dB at
       G6/G10, ~2–4 dB at G2 (low drive). Clean stays symmetric; FullChain PASS.
-    - ☑️ **DECISION 2026-06-21 — accept the device-physics residuals.** With Stage 1 now circuit-
-      accurate, the remaining driven mismatches are NOT topology errors but un-modeled second-order
-      DEVICE physics (the same class as the even harmonics): (a) OD compresses ~3–4 dB lighter than
-      the real at hot input (soft-clip/charge-storage fidelity; Distortion compression is good,
-      Δ~2 dB); (b) low notes (<440 Hz) under-distort (real distorts 82 Hz MORE than 1 kHz — the
-      signature of COUPLING-CAP CHARGE STORAGE / "blocking distortion" at the C5 159 Hz rolloff,
-      absent in our ideal-cap WDF); (c) 5 kHz HF distortion is lighter. These aren't on any
-      schematic; we accept them rather than add more artificial layers (user pref: circuit-accurate).
-    - ⏳ **THD-by-frequency-band validation (NEXT)** — sweep THD across the spectrum (not just spot
-      tones) and verify both the THD AMOUNT and the HARMONIC TYPE/LOCATION (which harmonics, where)
-      match the captures band-by-band — confirm the spectral distribution of distortion is right,
-      not just the level at 1 kHz.
+    - ✅ **THD-by-frequency-band validation** (commit pending) — DONE via spot tones AND the driven
+      sweep (20 Hz–20 kHz). Harmonic TYPE/LOCATION are correct: both real and plugin are odd-dominant
+      (symmetric clipping), and the odd harmonics + THD match well **82 Hz–3 kHz** (e.g. 1 kHz H3
+      −21/−21). Two findings: (1) **4–6 kHz the real reads hotter — confirmed CAPTURE ALIASING**
+      (the 48 kHz NAM folds HF harmonics down: real has −26 dB alias energy at 23 kHz; the plugin's
+      8× clip is anti-aliased = the MORE correct version). (2) **low-freq even harmonics were missing
+      — now fixed** (below).
+    - ✅ **Low-frequency even-harmonic fix** (commit pending) — DONE. The nodeG-sourced even-harmonic
+      shaper missed low notes (Stage-1's high-shelf makes nodeG tiny <440 Hz, so the gate never fired
+      though the note clips — its odd harmonics were already correct). Added a second injection path
+      sourced from a low-pass (corner 150 Hz) of the clip OUTPUT x (node_HC) — x is large only when
+      clipping, so it self-gates (clean stays clean) and carries the clamped low note. Per-mode coeff
+      (`asymLowOD/Dist`). Result: low-note H2 now matches the captures (OD 82/110/220/440 Hz =
+      −44/−45/−49/−59 vs real −43/−45/−51/−59; Dist 82 Hz −42/−42). Mid/high unchanged; clean H2
+      = −159 dB; all tests + auval PASS. (Empirical model of the C5 blocking-distortion device physics.)
+    - ☑️ **ACCEPTED device-physics residuals (2026-06-21).** Remaining driven mismatches are NOT
+      topology errors but un-modeled second-order device physics: OD compresses ~3–4 dB lighter than
+      the real at hot input (Distortion compression is good, Δ~2 dB); and a small genuine HF-harmonic
+      difference >8 kHz (tone-stage rolloff). Accepted per user pref (circuit-accuracy over more
+      artificial layers); the low-freq even harmonics that WERE in this bucket are now fixed (above).
     - ✅ **Volume-knob validation** — DONE. A/B showed the plugin ~2 dB quiet at noon vs the
       captures (also at noon). The VOL audio taper was the textbook "ideal log" `pow(10,2x−2)`
       (−20 dB at noon); the real 100kA pot is less steep. Re-fit the exponent 2.0 → **1.8**

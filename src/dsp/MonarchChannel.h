@@ -68,6 +68,21 @@ public:
                                                         // it tracks only DC and preserves low-frequency
                                                         // even harmonics (a fast mean cancels them)
 
+    // ---- Low-frequency even-harmonic path ----------------------------------------------------
+    // The nodeG-sourced injection above misses LOW notes: Stage 1's high-shelf makes nodeG tiny at
+    // low frequencies, so the gate never fires there even though the note clips (its odd harmonics
+    // are correct). The captures show real low-note H2 (~−43 dB at 82 Hz). Fix: a second injection
+    // sourced from a LOW-PASS of the clip OUTPUT x (node_HC) — x is large only when clipping (so it
+    // self-gates → clean notes stay clean) and at low frequencies carries the clamped low note that
+    // nodeG lacks. Its square's 2f component is the low-band H2. Empirically models the coupling-cap
+    // "blocking distortion" the schematic can't (decision 2026-06-21).
+    // Per-mode low-band coeff (the clip output x has a different amplitude per mode — OD ~1.6 V,
+    // Dist ~0.58 V — so the same coeff gives different H2). Tuned to the captures' low-note H2.
+    static constexpr double asymLowOD = -0.015;   // OD low-band H2 coeff
+    static constexpr double asymLowDist = -0.042; // Distortion low-band H2 coeff
+    static constexpr double asymLowBoost = 0.0;   // Boost low-band (none — boost low notes ~clean)
+    static constexpr double asymLowFc = 150.0;    // low-band low-pass corner (Hz) — taper to ~440 Hz
+
     explicit MonarchChannel (bool hiGain = false) : stage1 (hiGain), hiGainStage1 (hiGain) {}
 
     // The linear stages run at the base rate; the nonlinear clip span (Stage2/SW1 + rail-sat
@@ -88,8 +103,11 @@ public:
         sw2.prepare (clipRate);
         asymCoeff = std::exp (-1.0 / (asymTauSeconds * clipRate));      // fast: clip-depth gate
         meanCoeff = std::exp (-1.0 / (asymMeanTauSeconds * clipRate));  // slow: DC removal only
+        lpLowCoeff = std::exp (-2.0 * M_PI * asymLowFc / clipRate);     // low-band low-pass corner
         clipEnv = 0.0;
         meanSq = 0.0;
+        xLp = 0.0;
+        meanLow = 0.0;
     }
 
     void prepare (double sampleRate, int /*samplesPerBlock*/ = 0)
@@ -181,7 +199,16 @@ private:
         const double k = (sw1On ? asymOD : (sw2On ? asymDist : asymBoost)) * gate;
 
         meanSq = meanCoeff * meanSq + (1.0 - meanCoeff) * soft * soft;
-        return x + k * (soft * soft - meanSq); // +k·(even part) — DC-free 2f injection
+        double out = x + k * (soft * soft - meanSq); // mid/high band — DC-free 2f injection
+
+        // Low-frequency band: source the H2 from a low-pass of the clip output x (clamped only when
+        // clipping → self-gating, clean stays clean). Catches low notes that clip but whose nodeG is
+        // shelved down. At mid/high, xLp → small (x is above the corner) → no double injection.
+        xLp = lpLowCoeff * xLp + (1.0 - lpLowCoeff) * x;
+        meanLow = meanCoeff * meanLow + (1.0 - meanCoeff) * xLp * xLp;
+        const double kLow = sw1On ? asymLowOD : (sw2On ? asymLowDist : asymLowBoost);
+        out += kLow * (xLp * xLp - meanLow);
+        return out;
     }
 
     Stage1 stage1;     // includes the fixed Hi-Gain selection for Red
@@ -199,6 +226,9 @@ private:
     double meanSq { 0.0 };    // slow ⟨soft²⟩ (removes only DC from the H2 injection)
     double asymCoeff { 0.0 }; // fast envelope smoothing (clip-depth gate)
     double meanCoeff { 0.0 }; // slow envelope smoothing (DC removal)
+    double xLp { 0.0 };       // low-passed clip output (low-band H2 source)
+    double meanLow { 0.0 };   // slow ⟨xLp²⟩ (DC removal for the low band)
+    double lpLowCoeff { 0.0 };// low-band low-pass coeff (set in prepareClip)
 };
 
 } // namespace monarch
