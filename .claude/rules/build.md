@@ -194,3 +194,9 @@ WarningsAsErrors: ""
   gated to only-on-change (accepted one-block gap). DSP regression tests still PASS after the
   pre/clip/post split.
 - Step 9: Full control sweep both channels, no instability, clicks, or NaN
+- Step 10: Final full-range control sweep — ✅ PASS (2026-06-22). `tools/ControlSweep` (build target
+  `ControlSweep`) drives the full stereo processor through every control's full range × all 9 clip
+  combos, 4 OS factors (static + live change), bypass crossfades, instant knob jumps, and the 8x
+  render path: 0 non-finite, bounded (worst |out| 13.3), no steady-state instability; auval PASS.
+  Fixed the one zipper found (instantaneous VOLUME automation step) by smoothing VOLUME + input/
+  output TRIM (~5 ms); DRIVE/TONE/PRESENCE left unsmoothed (WDF elements, continuous turns clean).

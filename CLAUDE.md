@@ -75,7 +75,7 @@ oversampling — Step 7/8). **The UI is now complete:**
   (Boost/OD/Dist) at the edge (Red mirrored), an LED, and a bypass footswitch. "MONARCH OF TONE"
   logo (no ANALOG.MAN). Verified by headless render (`UISnapshot` → /tmp/monarch_ui.png) + auval.
 
-**Remaining:** Step 10 final sweep (all controls full-range, no clicks/NaN); ADAA optional.
+**Remaining:** ADAA optional. (Step 10 final sweep ✅ — see below.)
 **Step 11 (CURRENT): real-pedal A/B calibration** — see the Build Sequence Step 11 below.
 
 Build helpers: `Standalone` plugin format (run the UI without a DAW), the `UISnapshot` console
@@ -174,7 +174,16 @@ the captures — `PedalRender in.wav out.wav drive tone vol pres clip`).
 9. ✅ **UI implementation** — **DONE.** Shared-look peripheral shell (side panels + OS strip +
    resizable window) and the unique purple/gold `PedalFace` (knobs, 3-way clip switches, presence
    trims, LEDs, footswitches, compass rose, logo). Yellow/Red, no Hi Gain toggle. auval PASS.
-10. **Final sweep** — all controls full range, no instability, clicks, or NaN output
+10. ✅ **Final sweep** — DONE (2026-06-22). `tools/ControlSweep` drives the full stereo processor
+    through every control's full range × all 9 clip-mode combos, all 4 OS factors (static + live
+    change), bypass crossfades, instantaneous knob jumps, and the render path (8x FIR). Result:
+    **0 non-finite samples, bounded (worst |out| 13.3 ≪ 100), no steady-state instability**; auval
+    PASS. Found one zipper — an instantaneous VOLUME automation step (knob turns were already
+    click-free) — and fixed it: **VOLUME + input/output TRIM now smoothed (~5 ms ramp)**, the pure
+    level multipliers (tone-neutral, no WDF state). VolumePot.h one-pole on the wiper gain;
+    `inTrimGain`/`outTrimGain` `SmoothedValue` in PluginProcessor. Volume-jump step 11.0 → 1.8.
+    DRIVE/TONE/PRESENCE left unsmoothed by choice (WDF elements; continuous turns are click-free —
+    presence's 4.7 step only shows on a hard automation step). All DSP tests + taper test still PASS.
 11. **Real-pedal (NAM capture) A/B calibration** ← CURRENT — match the model to NAM captures of a
     real KOT (single Yellow/stock channel) via `tools/PedalRender` + `analysis/analyze.py`:
     - ✅ **Signal calibration** `circuitVoltsPerFS = 0.66` (commit ba86c69) — the clean/Boost

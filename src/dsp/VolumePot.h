@@ -32,10 +32,19 @@ public:
     void prepare (double sampleRate)
     {
         c11.prepare (sampleRate);
+        // ~5 ms one-pole ramp on the wiper gain so DAW automation steps on VOLUME don't zipper
+        // (manual knob turns are already gradual). Tone-neutral: VOL is a post-circuit level tap,
+        // not part of any WDF state. Steady-state gain (and the taper) is unchanged. 2026-06-22.
+        constexpr double tauSeconds = 0.005;
+        smoothCoeff = 1.0 - std::exp (-1.0 / (tauSeconds * sampleRate));
         reset();
     }
 
-    void reset() { c11.reset(); }
+    void reset()
+    {
+        c11.reset();
+        volGain = volGainTarget; // snap on (re)prepare — no startup ramp from a stale value
+    }
 
     // Audio-taper steepness. The textbook "ideal log" pot is 2.0 (noon = −20 dB), but A/B vs the
     // real-pedal captures (all at noon volume) showed the plugin ~2 dB quiet at noon — the real
@@ -48,12 +57,13 @@ public:
     void setVolume (double vol01)
     {
         const auto x = std::min (1.0, std::max (0.0, vol01));
-        volGain = std::pow (10.0, taperExp * (x - 1.0));
+        volGainTarget = std::pow (10.0, taperExp * (x - 1.0)); // smoothed toward in processSample
     }
 
     /** x = V(node_T_out); returns the stage output (post audio-taper tap + C11/R14 DC block). */
     inline double processSample (double x) noexcept
     {
+        volGain += smoothCoeff * (volGainTarget - volGain); // de-zipper VOLUME automation steps
         const double vWiper = x * volGain; // audio-taper wiper tap (feeds high-Z output → no loading)
         source.setVoltage (vWiper);
         source.incident (seriesC11.reflected());
@@ -64,6 +74,8 @@ public:
 
 private:
     double volGain { 0.1 };
+    double volGainTarget { 0.1 };
+    double smoothCoeff { 1.0 }; // set in prepare(); 1.0 = no smoothing until prepared
 
     // C11/R14 output high-pass: Vwiper → C11 → out, R14 (out → GND). Read across R14.
     wdft::ResistorT<double> r14 { R14 };

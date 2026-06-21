@@ -128,6 +128,11 @@ private:
     TiltShelf tilt;
     juce::SmoothedValue<float> shelfMix; // 1 = shelf engaged, 0 = true-bypass (dry, no shelf)
 
+    // Input/output trim gains, smoothed (~5 ms) so DAW automation steps don't zipper. These are
+    // pure pre/post level multipliers (no circuit state), so smoothing is tone-neutral. The factor
+    // includes the circuitVoltsPerFS calibration (in: ×cal, out: ÷cal). 2026-06-22.
+    juce::SmoothedValue<float> inTrimGain, outTrimGain;
+
     // One dual-mono pedal per audio channel (index 0 = L, 1 = R). Each strip is the full
     // Yellow → Red series chain; both strips share the same knob settings. Hi Gain is fixed
     // per channel via the MonarchChannel ctor flag (Yellow stock, Red Hi-Gain).

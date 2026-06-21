@@ -159,6 +159,12 @@ void MonarchAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBloc
     shelfMix.reset (sampleRate, bypassRampSeconds);
     shelfMix.setCurrentAndTargetValue (1.0f);
 
+    constexpr double trimRampSeconds = 0.005; // de-zipper input/output trim automation steps
+    inTrimGain.reset (sampleRate, trimRampSeconds);
+    outTrimGain.reset (sampleRate, trimRampSeconds);
+    inTrimGain.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (pInputTrim->load()) * circuitVoltsPerFS);
+    outTrimGain.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (pOutputTrim->load()) / circuitVoltsPerFS);
+
     // Force a (re)build of the clip-span oversamplers + prepareClip on the first block.
     activeLog2 = -1;
     activeNumChannels = 0;
@@ -335,20 +341,25 @@ void MonarchAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
     pushParams();
     updateOversampling (numChannels); // pick live/render factor; rebuild only on change
 
-    const float inGain = juce::Decibels::decibelsToGain (pInputTrim->load()) * circuitVoltsPerFS;
-    const float outGain = juce::Decibels::decibelsToGain (pOutputTrim->load()) / circuitVoltsPerFS;
+    inTrimGain.setTargetValue (juce::Decibels::decibelsToGain (pInputTrim->load()) * circuitVoltsPerFS);
+    outTrimGain.setTargetValue (juce::Decibels::decibelsToGain (pOutputTrim->load()) / circuitVoltsPerFS);
 
-    // Input trim → circuit volts, in place; capture input meter (post-trim).
-    for (int ch = 0; ch < numChannels; ++ch)
+    // Input trim → circuit volts, in place; capture input meter (post-trim). Ramp the gain per
+    // sample (shared across channels so L/R track) so trim automation steps don't zipper.
     {
-        float* data = buffer.getWritePointer (ch);
-        float inPeak = 0.0f;
+        std::array<float, 2> inPeak { 0.0f, 0.0f };
         for (int n = 0; n < numSamples; ++n)
         {
-            data[n] *= inGain;
-            inPeak = juce::jmax (inPeak, std::abs (data[n]));
+            const float g = inTrimGain.getNextValue();
+            for (int ch = 0; ch < numChannels; ++ch)
+            {
+                float* data = buffer.getWritePointer (ch);
+                data[n] *= g;
+                inPeak[(size_t) ch] = juce::jmax (inPeak[(size_t) ch], std::abs (data[n]));
+            }
         }
-        (ch == 0 ? inputLevelL : inputLevelR).store (inPeak);
+        inputLevelL.store (inPeak[0]);
+        if (numChannels > 1) inputLevelR.store (inPeak[1]);
     }
 
     // Series: Yellow → Red (each with its own clip-span oversampler).
@@ -385,17 +396,21 @@ void MonarchAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
         }
     }
 
-    // Output trim; capture output meter (post-trim).
-    for (int ch = 0; ch < numChannels; ++ch)
+    // Output trim; capture output meter (post-trim). Ramp per sample (shared L/R) to de-zipper.
     {
-        float* data = buffer.getWritePointer (ch);
-        float outPeak = 0.0f;
+        std::array<float, 2> outPeak { 0.0f, 0.0f };
         for (int n = 0; n < numSamples; ++n)
         {
-            data[n] *= outGain;
-            outPeak = juce::jmax (outPeak, std::abs (data[n]));
+            const float g = outTrimGain.getNextValue();
+            for (int ch = 0; ch < numChannels; ++ch)
+            {
+                float* data = buffer.getWritePointer (ch);
+                data[n] *= g;
+                outPeak[(size_t) ch] = juce::jmax (outPeak[(size_t) ch], std::abs (data[n]));
+            }
         }
-        (ch == 0 ? outputLevelL : outputLevelR).store (outPeak);
+        outputLevelL.store (outPeak[0]);
+        if (numChannels > 1) outputLevelR.store (outPeak[1]);
     }
 }
 

@@ -246,3 +246,33 @@ target_link_libraries(PedalRender
         juce::juce_dsp
         juce::juce_recommended_config_flags
 )
+
+# ---- Step 10 control-sweep / stability gate (full processor, all controls full-range) ----
+juce_add_console_app(ControlSweep PRODUCT_NAME "ControlSweep")
+
+target_sources(ControlSweep
+    PRIVATE
+        tools/ControlSweep.cpp
+        src/PluginProcessor.cpp
+        src/PluginEditor.cpp
+        src/ui/MonarchLookAndFeel.cpp
+        src/ui/PedalFace.cpp
+)
+
+target_include_directories(ControlSweep PRIVATE src)
+
+target_compile_definitions(ControlSweep
+    PRIVATE
+        "JucePlugin_Name=\"Monarch of Tone\""
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0
+)
+
+target_link_libraries(ControlSweep
+    PRIVATE
+        xsimd::xsimd
+        chowdsp::chowdsp_wdf
+        juce::juce_audio_utils
+        juce::juce_dsp
+        juce::juce_recommended_config_flags
+)

@@ -247,7 +247,9 @@ topology update.
 - **TONE (25kB):** Linear. `R = R_max * x`
 - **VOL (100kA):** Audio. Wiper fraction `pow(10.0, 1.8 * (x - 1.0))` — noon = −18 dB. (Exponent
   fitted to the real-pedal captures, 2026-06-21; the textbook "ideal log" 2.0/−20 dB was ~2 dB too
-  quiet at noon vs the captures. See `src/dsp/VolumePot.h`.)
+  quiet at noon vs the captures. See `src/dsp/VolumePot.h`.) The wiper gain is **smoothed (~5 ms
+  one-pole)** so VOLUME automation steps don't zipper (Step 10, 2026-06-22) — steady-state taper
+  unchanged; input/output trim are likewise smoothed in PluginProcessor. DRIVE/TONE/PRESENCE unsmoothed.
 - **PRESENCE (50kB):** Linear. `R = R_max * x`
 
 Never apply audio taper to DRIVE, TONE, or PRESENCE. Never apply linear taper to VOL.

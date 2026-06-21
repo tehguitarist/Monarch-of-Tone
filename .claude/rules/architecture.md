@@ -136,6 +136,12 @@ All of the following in `prepareToPlay(sampleRate, samplesPerBlock)`:
 >   (array of 2), so L/R have independent WDF state but share knob settings.
 > - **Calibration:** host float ×`circuitVoltsPerFS` (1 V/FS) → absolute circuit volts; input/
 >   output trim in dB around that. Meters are peak, post-trim.
+> - **Param smoothing (Step 10, 2026-06-22):** VOLUME and input/output TRIM are smoothed (~5 ms) so
+>   DAW automation steps don't zipper — the pure level multipliers, tone-neutral (no WDF state). VOL
+>   via a one-pole on the wiper gain in `VolumePot`; trims via `inTrimGain`/`outTrimGain`
+>   `SmoothedValue` ramped per sample. DRIVE/TONE/PRESENCE are NOT smoothed (WDF circuit elements;
+>   continuous knob turns are already click-free). So "smoothed parameter values" above is realized
+>   for the level controls only, by design.
 > - **Bypass:** click-free ~5 ms crossfade per channel (`juce::SmoothedValue` wet 1→0). Current
 >   build crossfades wet/dry every sample (always processes); the "skip DSP when bypassed" CPU
 >   optimisation lands with oversampling (Step 7/8), where it matters.
