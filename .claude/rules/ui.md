@@ -75,6 +75,10 @@ communicate that it is the higher-gain voice — purely cosmetic, not a control.
 - JUCE `Slider` (rotary) + custom LookAndFeel paint
 - Presence knobs: smaller, same style, labelled "Presence Yellow" / "Presence Red"
 - Default Presence = fully CCW (matches hardware default = no treble boost)
+- All 8 knobs show a small popup tooltip with the current 0.0–1.0 value (2 decimal places) while
+  being dragged (`Slider::setPopupDisplayEnabled`); `textFromValueFunction` is overridden after
+  the `SliderParameterAttachment` is built, since the attachment's default formatting falls back
+  to 7 decimals (these params have no `NormalisableRange` interval). See `PedalFace::setupKnob`.
 
 ### Hi Gain — no control
 There is **no Hi Gain toggle**. The Theseus Hi-Gain mod is a fixed part of the Red channel's
@@ -120,6 +124,9 @@ stock. At most, the Red panel shows a cosmetic, non-interactive "Hi Gain" badge.
 - Visually distinct from the main knobs (different size, placement, colour tint)
 - Range: -12 to +12 dB
 - Placed at the top of the plugin window, outside the pedal face area
+- Each has a fixed, always-visible dB readout label below the existing "TRIM" sub-label
+  (`inputTrimValue`/`outputTrimValue` in `PluginEditor`), updated via `Slider::onValueChange` —
+  not a hover/drag tooltip, since trims (unlike the main knobs) lack a textbox of their own
 
 ### Oversampling Controls
 - Two controls, clearly grouped and labelled:

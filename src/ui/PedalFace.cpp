@@ -26,8 +26,12 @@ PedalFace::PedalFace (AudioProcessorValueTreeState& apvts)
         s.setSliderStyle (Slider::RotaryHorizontalVerticalDrag);
         s.setRotaryParameters (kPi * 1.25f, kPi * 2.75f, true);
         s.setTextBoxStyle (Slider::NoTextBox, false, 0, 0);
+        s.setPopupDisplayEnabled (true, false, this); // small value tooltip (0.0-1.0) while dragging
         addAndMakeVisible (s);
         sliderAttachments.push_back (std::make_unique<SliderParameterAttachment> (*state.getParameter (paramId), s));
+        // The attachment's default text formatting falls back to 7 decimal places (no
+        // NormalisableRange interval on these params) — override to 2 for the tooltip.
+        s.textFromValueFunction = [] (double v) { return String (v, 2); };
         lab.setText (text, dontSendNotification);
         lab.setJustificationType (Justification::centred);
         lab.setColour (Label::textColourId, Colour (MonarchLookAndFeel::cPedalGold));

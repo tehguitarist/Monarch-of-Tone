@@ -81,6 +81,13 @@ the real "18 V mod" → more headroom in Boost, OD/Dist ~unchanged; 9 V = the va
 (2) **Rail-saturation ADAA** — first-order antiderivative antialiasing on the op-amp rail-sat (the
 memoryless knee); diode-stage ADAA deferred (WDF roots, no chowdsp ADAA support — research-grade).
 Both validated (auval, FullChain, ControlSweep). See dsp.md "ADAA" / "Supply Voltage".
+(3) **Minor UI polish** — the 8 main knobs (Volume/Drive/Tone/Presence × Yellow/Red) show a small
+popup tooltip with the 0–1 value (2 decimal places) while dragging (`Slider::setPopupDisplayEnabled`,
+`textFromValueFunction` overridden in `PedalFace::setupKnob` — the attachment's default formatting
+falls back to 7 decimals since these params have no `NormalisableRange` interval). Input/Output
+Trim each gained a fixed, always-visible dB readout label (`inputTrimValue`/`outputTrimValue` in
+`PluginEditor`, below the existing "TRIM" sub-label). Knob defaults (Volume/Drive/Tone = noon,
+Presence = minimum, bypass = on/active) were checked and already matched — no DSP/param change.
 **Step 11 (CURRENT): real-pedal A/B calibration** — see the Build Sequence Step 11 below.
 
 Build helpers: `Standalone` plugin format (run the UI without a DAW), the `UISnapshot` console

@@ -48,6 +48,14 @@ MonarchAudioProcessorEditor::MonarchAudioProcessorEditor (MonarchAudioProcessor&
     setupTrimSub (inputTrimSub);
     setupTrimSub (outputTrimSub);
 
+    auto setupTrimValue = [this] (Label& l) {
+        l.setJustificationType (Justification::centred);
+        l.setColour (Label::textColourId, Colour (MonarchLookAndFeel::cTrimLabel));
+        addAndMakeVisible (l);
+    };
+    setupTrimValue (inputTrimValue);
+    setupTrimValue (outputTrimValue);
+
     const float pi = MathConstants<float>::pi;
     auto setupTrim = [this, pi] (Slider& s) {
         s.setComponentID ("trim");
@@ -63,6 +71,12 @@ MonarchAudioProcessorEditor::MonarchAudioProcessorEditor (MonarchAudioProcessor&
         *audioProcessor.apvts.getParameter ("input_trim"), inputTrim);
     outputTrimAttach = std::make_unique<SliderParameterAttachment> (
         *audioProcessor.apvts.getParameter ("output_trim"), outputTrim);
+
+    auto formatTrim = [] (double dB) { return String (dB, 1) + " dB"; };
+    inputTrimValue.setText (formatTrim (inputTrim.getValue()), dontSendNotification);
+    outputTrimValue.setText (formatTrim (outputTrim.getValue()), dontSendNotification);
+    inputTrim.onValueChange = [this, formatTrim] { inputTrimValue.setText (formatTrim (inputTrim.getValue()), dontSendNotification); };
+    outputTrim.onValueChange = [this, formatTrim] { outputTrimValue.setText (formatTrim (outputTrim.getValue()), dontSendNotification); };
 
     addAndMakeVisible (inputVU);
     addAndMakeVisible (outputVU);
@@ -138,6 +152,8 @@ void MonarchAudioProcessorEditor::refreshFonts (float sc)
     outputSectionLabel.setFont (bold (8.0f * sc).withExtraKerningFactor (0.20f));
     inputTrimSub.setFont (bold (7.5f * sc).withExtraKerningFactor (0.15f));
     outputTrimSub.setFont (bold (7.5f * sc).withExtraKerningFactor (0.15f));
+    inputTrimValue.setFont (bold (8.5f * sc));
+    outputTrimValue.setFont (bold (8.5f * sc));
     osLabel.setFont (bold (8.0f * sc));
     osLiveLabel.setFont (bold (7.0f * sc).withExtraKerningFactor (0.10f));
     osRenderLabel.setFont (bold (7.0f * sc).withExtraKerningFactor (0.10f));
@@ -173,7 +189,7 @@ void MonarchAudioProcessorEditor::resized()
         pedalFace->refresh (sc);
     }
 
-    auto layoutPanel = [&] (Rectangle<int> panel, Label& sec, Slider& knob, Label& sub, VUMeter& vu) {
+    auto layoutPanel = [&] (Rectangle<int> panel, Label& sec, Slider& knob, Label& sub, Label& val, VUMeter& vu) {
         auto r = panel;
         sec.setBounds (r.removeFromTop (i (14)));
         r.removeFromTop (i (2));
@@ -181,12 +197,13 @@ void MonarchAudioProcessorEditor::resized()
         auto knobRow = r.removeFromTop (knobD);
         knob.setBounds (knobRow.withSizeKeepingCentre (knobD, knobD));
         sub.setBounds (r.removeFromTop (i (12)));
-        r.removeFromTop (i (4));
+        val.setBounds (r.removeFromTop (i (12)));
+        r.removeFromTop (i (2));
         const int vuW = jmin (i (34), r.getWidth());
         vu.setBounds (r.withSizeKeepingCentre (vuW, r.getHeight()));
     };
-    layoutPanel (inPanel, inputSectionLabel, inputTrim, inputTrimSub, inputVU);
-    layoutPanel (outPanel, outputSectionLabel, outputTrim, outputTrimSub, outputVU);
+    layoutPanel (inPanel, inputSectionLabel, inputTrim, inputTrimSub, inputTrimValue, inputVU);
+    layoutPanel (outPanel, outputSectionLabel, outputTrim, outputTrimSub, outputTrimValue, outputVU);
 
     // ---- Oversampling strip content (inset from the bg) ----
     auto os = osStripArea.reduced (i (6), 0);

@@ -40,6 +40,7 @@ private:
     juce::Label inputSectionLabel, outputSectionLabel;
     juce::Slider inputTrim, outputTrim;
     juce::Label inputTrimSub, outputTrimSub;
+    juce::Label inputTrimValue, outputTrimValue; // fixed (always-visible) dB readout, -12.0 to +12.0
     VUMeter inputVU, outputVU;
     std::unique_ptr<juce::SliderParameterAttachment> inputTrimAttach, outputTrimAttach;
     float vuInDecay { 0.0f }, vuOutDecay { 0.0f };
