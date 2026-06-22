@@ -75,7 +75,12 @@ oversampling — Step 7/8). **The UI is now complete:**
   (Boost/OD/Dist) at the edge (Red mirrored), an LED, and a bypass footswitch. "MONARCH OF TONE"
   logo (no ANALOG.MAN). Verified by headless render (`UISnapshot` → /tmp/monarch_ui.png) + auval.
 
-**Remaining:** ADAA optional. (Step 10 final sweep ✅ — see below.)
+**Post-Step-11 additions (2026-06-23):** (1) **Supply-voltage mod** (9/12/18 V) — `supply_voltage`
+param + top-centre `VoltageSelector` UI; scales the op-amp rail ceiling only (diode thresholds fixed),
+the real "18 V mod" → more headroom in Boost, OD/Dist ~unchanged; 9 V = the validated ±3.3 V baseline.
+(2) **Rail-saturation ADAA** — first-order antiderivative antialiasing on the op-amp rail-sat (the
+memoryless knee); diode-stage ADAA deferred (WDF roots, no chowdsp ADAA support — research-grade).
+Both validated (auval, FullChain, ControlSweep). See dsp.md "ADAA" / "Supply Voltage".
 **Step 11 (CURRENT): real-pedal A/B calibration** — see the Build Sequence Step 11 below.
 
 Build helpers: `Standalone` plugin format (run the UI without a DAW), the `UISnapshot` console

@@ -36,8 +36,9 @@ class MonarchChannel
 {
 public:
     // ±3.3 V op-amp output ceiling around BIAS (JRC4580 on a 9 V rail) — circuit.md §4, dsp.md.
-    static constexpr double railV = 3.3;
-    static constexpr double railKnee = 3.0; // linear below the knee → diode modes untouched
+    // This is the 9 V baseline; setSupplyVoltage() scales it for the 12 V / 18 V mod (below).
+    static constexpr double railV9V = 3.3;
+    static constexpr double railKneeMargin = 0.3; // knee sits this far below the ceiling
 
     // ---- Even-harmonic match (capture A/B, 2026-06-20) -------------------------------------
     // The KOT clips symmetrically BY DESIGN, so the ideal WDF model makes only odd harmonics.
@@ -108,6 +109,8 @@ public:
         meanSq = 0.0;
         xLp = 0.0;
         meanLow = 0.0;
+        railXprev = 0.0; // F(0)=0 for any rails
+        railFprev = 0.0;
     }
 
     void prepare (double sampleRate, int /*samplesPerBlock*/ = 0)
@@ -124,6 +127,8 @@ public:
         sw2.reset();
         tone.reset();
         volume.reset();
+        railXprev = 0.0;
+        railFprev = 0.0;
     }
 
     // ---- Parameter setters (call per block; tapers applied inside each stage) ----
@@ -131,6 +136,20 @@ public:
     void setTone (double t) { tone.setTone (t); }
     void setPresence (double p) { tone.setPresence (p); }
     void setVolume (double v) { volume.setVolume (v); }
+
+    /** Supply-voltage mod (9/12/18 V). Simulates running the pedal on a higher supply: the
+        op-amp rails move out to ±(Vsupply/2 − margin), so each +1 V of supply adds +0.5 V of
+        usable swing around BIAS. Only the op-amp ceiling changes — the diode clip thresholds
+        (±1.64 V soft / ±0.584 V hard) are set by junction physics and DO NOT move. So a higher
+        supply gives more clean headroom (most audible in Boost, and a touch in Distortion's
+        rail-clamped path) while OD/Dist diode voicing is essentially unchanged — exactly the
+        real-world "18 V mod" behaviour. 9 V maps to the validated ±3.3 V baseline exactly. */
+    void setSupplyVoltage (double vSupply) noexcept
+    {
+        railV = railV9V + (vSupply - 9.0) * 0.5; // +0.5 V swing per +1 V supply (rail moves ΔV/2)
+        railKnee = railV - railKneeMargin;
+        railFprev = railAntideriv (railXprev); // keep the ADAA antiderivative consistent with new rails
+    }
 
     /** Clipping mode 0..2 (Boost/Overdrive/Distortion → SW-1/SW-2 on/off). 3-way per channel
         (no "Both" — dropped 2026-06-19 for the 3-position hardware toggle). processClip still
@@ -149,7 +168,7 @@ public:
     inline double processClip (double nodeG) noexcept
     {
         double pin7 = sw1On ? sw1.processSample (nodeG) : stage2.processSample (nodeG);
-        pin7 = railSaturate (pin7); // op-amp output ceiling (Boost always; Distortion via linear Stage2)
+        pin7 = railSaturateADAA (pin7); // op-amp output ceiling, antialiased (Boost always; Dist via Stage2)
         const double hc = sw2On ? sw2.processSample (pin7) : pin7;
         return injectEvenHarmonic (hc, nodeG);
     }
@@ -170,7 +189,7 @@ private:
     // Below the knee the signal passes UNCHANGED, so it never colours the feedback soft-clip's
     // sub-3 V output at normal drive. It clamps only swings the real op-amp would also clamp:
     // Boost (no diodes) and Distortion's linear-Stage2 ×−22 path always, OD/Both at extreme drive.
-    static inline double railSaturate (double v) noexcept
+    inline double railSaturate (double v) const noexcept
     {
         const double a = std::abs (v);
         if (a <= railKnee)
@@ -178,6 +197,45 @@ private:
         const double over = (a - railKnee) / (railV - railKnee);
         const double clamped = railKnee + (railV - railKnee) * std::tanh (over);
         return std::copysign (clamped, v);
+    }
+
+    // Numerically-stable log(cosh(z)) for the rail-sat antiderivative (avoids cosh overflow).
+    static inline double logCosh (double z) noexcept
+    {
+        const double az = std::abs (z);
+        return az + std::log1p (std::exp (-2.0 * az)) - 0.6931471805599453; // − ln 2
+    }
+
+    // Antiderivative F of railSaturate (F' = railSaturate, F(0)=0). railSaturate is odd, so F is
+    // even → F(v) = F(|v|). Below the knee f(v)=v → F=v²/2; above, f(v)=knee + w·tanh(u/w) with
+    // u=|v|−knee, w=railV−knee → F = knee²/2 + knee·u + w²·logCosh(u/w). Used for first-order ADAA.
+    inline double railAntideriv (double v) const noexcept
+    {
+        const double a = std::abs (v);
+        if (a <= railKnee)
+            return 0.5 * a * a;
+        const double w = railV - railKnee;
+        const double u = a - railKnee;
+        return 0.5 * railKnee * railKnee + railKnee * u + w * w * logCosh (u / w);
+    }
+
+    // First-order antiderivative antialiasing of the rail saturation (DAFx-2020). Replaces the
+    // pointwise f(x) with the averaged (F(x)−F(x₋₁))/(x−x₋₁), which suppresses the aliasing the
+    // hard-ish knee would otherwise fold back — most audible in Boost (the rails are the ONLY
+    // nonlinearity there). Falls back to the midpoint value when x≈x₋₁ (ill-conditioned divide).
+    // This is in ADDITION to oversampling: the clip span (incl. this) already runs oversampled.
+    inline double railSaturateADAA (double x) noexcept
+    {
+        const double Fx = railAntideriv (x);
+        const double dx = x - railXprev;
+        double y;
+        if (std::abs (dx) < 1.0e-6)
+            y = railSaturate (0.5 * (x + railXprev));
+        else
+            y = (Fx - railFprev) / dx;
+        railXprev = x;
+        railFprev = Fx;
+        return y;
     }
 
     // Even-harmonic injection at the clip output (see the asym* constants). `x` = clip output
@@ -221,6 +279,11 @@ private:
     bool sw1On { true };  // default Overdrive (SW-1 ON, SW-2 OFF)
     bool sw2On { false };
     bool hiGainStage1 { false };
+
+    double railV { railV9V };                       // op-amp ceiling (V); 9 V default = ±3.3 V
+    double railKnee { railV9V - railKneeMargin };   // soft-knee onset (V); set by setSupplyVoltage
+    double railXprev { 0.0 };                       // ADAA state: previous rail-sat input
+    double railFprev { 0.0 };                       // ADAA state: F(railXprev) (F(0)=0)
 
     double clipEnv { 0.0 };   // clipping-depth envelope (gates the even-harmonic coeff)
     double meanSq { 0.0 };    // slow ⟨soft²⟩ (removes only DC from the H2 injection)

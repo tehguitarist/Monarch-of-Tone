@@ -19,7 +19,8 @@ Font papyrus (float px, bool bold = false)
 PedalFace::PedalFace (AudioProcessorValueTreeState& apvts)
     : state (apvts),
       clipY (*apvts.getParameter ("clipping_mode_yellow")),
-      clipR (*apvts.getParameter ("clipping_mode_red"))
+      clipR (*apvts.getParameter ("clipping_mode_red")),
+      voltage (*apvts.getParameter ("supply_voltage"))
 {
     auto setupKnob = [this] (Slider& s, Label& lab, const String& text, const char* paramId) {
         s.setSliderStyle (Slider::RotaryHorizontalVerticalDrag);
@@ -70,6 +71,8 @@ PedalFace::PedalFace (AudioProcessorValueTreeState& apvts)
     logoL.setJustificationType (Justification::centred);
     logoL.setColour (Label::textColourId, Colour (MonarchLookAndFeel::cPedalGoldBright).withAlpha (0.8f));
     addAndMakeVisible (logoL);
+
+    addAndMakeVisible (voltage);
 
     updateLEDs();
 }
@@ -247,6 +250,10 @@ void PedalFace::resized()
     const float logoCy = bandTop + (fsTopEdge - bandTop) * 0.5f + (fsTopEdge - bandTop) * 0.08f;
     const float logoH = jmin (H * 0.12f, (fsTopEdge - bandTop) * 0.85f);
     place (logoL, cx0, logoCy, W * 0.94f, logoH);
+
+    // Supply-voltage selector "(+) 9V (-)" — top centre, in the empty band above the top knob row.
+    // Box 30% larger than the original (the tight-grouped text centres within it).
+    place (voltage, cx0, H * 0.065f, W * 0.34f * 1.3f, jmax (12.0f, H * 0.07f) * 1.3f);
 }
 
 void PedalFace::refresh (float sc)
@@ -267,6 +274,7 @@ void PedalFace::refresh (float sc)
 
     clipY.setLabelScale (sc);
     clipR.setLabelScale (sc);
+    voltage.setFontScale (sc);
 }
 
 void PedalFace::updateLEDs()

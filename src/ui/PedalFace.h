@@ -8,6 +8,7 @@
 #include "ClipSwitch.h"
 #include "LEDIndicator.h"
 #include "MonarchLookAndFeel.h"
+#include "VoltageSelector.h"
 
 /**
  * The unique pedal face — royal-purple body with gold Papyrus lettering and a gold compass rose
@@ -42,6 +43,7 @@ private:
     juce::TextButton bypassY, bypassR;
     juce::Label bypassYL, bypassRL;
     juce::Label logoL;
+    VoltageSelector voltage; // supply-voltage sim "(+) 9V (-)" at the top centre
 
     std::vector<std::unique_ptr<juce::SliderParameterAttachment>> sliderAttachments;
     std::unique_ptr<juce::ButtonParameterAttachment> bypassYA, bypassRA;

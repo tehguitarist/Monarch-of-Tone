@@ -178,11 +178,35 @@ Each channel has independent APVTS parameters (e.g., `drive_yellow`, `drive_red`
 - **Bypassed channels skip the oversampler entirely** — no upsample/downsample, raw pass-through. Do not run the oversampler on a bypassed channel even if the factor is >1x. This halves the cost when only one channel is in use.
 - 4x + first-order ADAA is sufficient for inaudible aliasing on this circuit (gentle feedback clipping, not hard rail clipping). 8x render provides additional headroom for the final bounce with no CPU penalty in a non-realtime context.
 
-## ADAA
+## ADAA — ✅ rail-saturation only (2026-06-23); diode-stage ADAA deferred
 
-- Apply to both soft-clip and hard-clip diode stages
-- ADAA in addition to oversampling, not instead
+- **IMPLEMENTED on the op-amp rail saturation** (`MonarchChannel::railSaturateADAA`): first-order
+  antiderivative antialiasing of the memoryless tanh-knee, in ADDITION to oversampling. Replaces the
+  pointwise `f(x)` with `(F(x)−F(x₋₁))/(x−x₋₁)` (midpoint fallback when `x≈x₋₁`), F = the analytic
+  antiderivative of the knee (`v²/2` below the knee; `knee²/2 + knee·u + w²·logCosh(u/w)` above,
+  `w=railV−knee`). Most audible in **Boost** (the rails are the only nonlinearity there). State
+  (`railXprev`/`railFprev`) resets in `prepareClip`/`reset`; `setSupplyVoltage` recomputes `railFprev`
+  so the antiderivative stays consistent when the rails move (see Supply Voltage below).
+- **Soft-/hard-clip diode stages: NOT ADAA'd (deferred, decision 2026-06-23).** Those stages are WDF
+  nonlinear *roots* (`DiodePairT` solved via Wright-Omega), NOT memoryless `y=f(x)` maps, and
+  `chowdsp_wdf` has no ADAA support — true ADAA there is the from-scratch DAFx-2020 WDF-root method
+  (large, research-grade, uncertain gain over the existing 8× FIR oversampling). Left to oversampling,
+  which the notes below already deem sufficient. Revisit only if diode-stage aliasing proves audible.
 - Reference: DAFx2020 "Antiderivative antialiasing in nonlinear wave digital filters"
+
+## Supply Voltage (9 / 12 / 18 V mod) — ✅ IMPLEMENTED 2026-06-23
+
+- `supply_voltage` `AudioParameterChoice` {"9V","12V","18V"}, default 9 V. Simulates running the
+  pedal on a higher supply. `MonarchChannel::setSupplyVoltage(vSupply)` moves the op-amp rail ceiling
+  to `railV = 3.3 + (vSupply−9)·0.5` (each +1 V supply lifts each rail by ½ V → +½ V usable swing),
+  knee = `railV − 0.3`. 9 V maps to the validated ±3.3 V baseline EXACTLY (no change to the existing
+  calibration / null-test at 9 V).
+- **Only the op-amp ceiling scales** — the diode clip thresholds (±1.64 V soft / ±0.584 V hard) are set
+  by junction physics and DO NOT move. So higher supply = more clean headroom (most audible in Boost,
+  a touch in Distortion's rail-clamped path); OD/Dist diode voicing is essentially unchanged. This is
+  the real-world "18 V mod" behaviour. Applied per block in `pushParams` (both channels, both strips).
+- UI: `VoltageSelector` ("(+) 9V (-)") at the pedal-face top centre — (+) steps up, (-) steps down,
+  arrow bright only when a step that direction exists (9 V → only (+), 18 V → only (-)).
 
 ## Hi Gain Mod — ✅ IMPLEMENTED, FIXED on the Red channel (no runtime switch)
 

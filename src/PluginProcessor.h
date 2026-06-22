@@ -153,6 +153,7 @@ private:
     ParamPtrs pYellow, pRed;
     std::atomic<float>* pInputTrim {};
     std::atomic<float>* pOutputTrim {};
+    std::atomic<float>* pSupplyVoltage {};
     std::atomic<float>* pOversampleLive {};
     std::atomic<float>* pOversampleRender {};
 

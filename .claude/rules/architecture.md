@@ -66,6 +66,7 @@ below the table.
 | `bypass_red` | Bypass Red | true/false | false | `AudioParameterBool` |
 | `input_trim` | Input Trim | -12.0 to +12.0 dB | 0.0 | Plugin-only; `AudioParameterFloat` |
 | `output_trim` | Output Trim | -12.0 to +12.0 dB | 0.0 | Plugin-only; `AudioParameterFloat` |
+| `supply_voltage` | Supply Voltage | 0/1/2 | 0 (9V) | `AudioParameterChoice`: "9V"/"12V"/"18V" — voltage mod (scales op-amp rails only; diode thresholds fixed). UI: `VoltageSelector` "(+) 9V (-)" at the pedal-face top centre. See dsp.md "Supply Voltage". |
 | `oversampling_realtime` | Oversampling (Live) | 0/1/2/3 | 2 (4x) | `AudioParameterChoice`: "1x"/"2x"/"4x"/"8x" — active during live playback |
 | `oversampling_render` | Oversampling (Render) | 0/1/2/3 | 3 (8x) | `AudioParameterChoice`: "1x"/"2x"/"4x"/"8x" — active when `isNonRealtime()` |
 

@@ -20,6 +20,7 @@ void MonarchAudioProcessor::cacheParamPointers()
              get ("presence_red"), get ("clipping_mode_red"), get ("bypass_red") };
     pInputTrim = get ("input_trim");
     pOutputTrim = get ("output_trim");
+    pSupplyVoltage = get ("supply_voltage");
     pOversampleLive = get ("oversampling_realtime");
     pOversampleRender = get ("oversampling_render");
 }
@@ -29,6 +30,11 @@ void MonarchAudioProcessor::pushParams()
     // Read APVTS (atomic) once per block and set the WDF knob values on both stereo strips.
     // Block-rate updates: each setter recomputes its stage's impedance, so this stays off the
     // per-sample path. Both strips (L/R) share the same knob settings (dual-mono pedal).
+    // Supply voltage (choice 0/1/2 → 9/12/18 V) — shared by both channels and strips.
+    static constexpr double kSupplyVolts[] = { 9.0, 12.0, 18.0 };
+    const int vIdx = juce::jlimit (0, 2, (int) pSupplyVoltage->load());
+    const double supplyV = kSupplyVolts[vIdx];
+
     for (auto& s : strips)
     {
         s.yellow.setDrive (pYellow.drive->load());
@@ -36,12 +42,14 @@ void MonarchAudioProcessor::pushParams()
         s.yellow.setVolume (pYellow.volume->load());
         s.yellow.setPresence (pYellow.presence->load());
         s.yellow.setClippingMode ((int) pYellow.clip->load());
+        s.yellow.setSupplyVoltage (supplyV);
 
         s.red.setDrive (pRed.drive->load());
         s.red.setTone (pRed.tone->load());
         s.red.setVolume (pRed.volume->load());
         s.red.setPresence (pRed.presence->load());
         s.red.setClippingMode ((int) pRed.clip->load());
+        s.red.setSupplyVoltage (supplyV);
 
         s.wetYellow.setTargetValue (pYellow.bypass->load() > 0.5f ? 0.0f : 1.0f);
         s.wetRed.setTargetValue (pRed.bypass->load() > 0.5f ? 0.0f : 1.0f);
@@ -56,6 +64,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout MonarchAudioProcessor::creat
 
     const juce::StringArray clippingModeChoices { "Boost", "Overdrive", "Distortion" };
     const juce::StringArray oversamplingChoices { "1x", "2x", "4x", "8x" };
+    const juce::StringArray supplyVoltageChoices { "9V", "12V", "18V" };
 
     // The two series channels are identified externally by their LED colour: the first
     // channel is "Yellow", the second is "Red". The Theseus Hi-Gain mod is a FIXED part of
@@ -118,6 +127,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout MonarchAudioProcessor::creat
         "Output Trim",
         juce::NormalisableRange<float> (-12.0f, 12.0f),
         0.0f));
+
+    // Supply-voltage mod (9/12/18 V) — simulates running the pedal at a higher supply (more
+    // op-amp headroom). Applied in the DSP via MonarchChannel::setSupplyVoltage. Default 9 V.
+    params.push_back (std::make_unique<juce::AudioParameterChoice> (
+        juce::ParameterID { "supply_voltage", 1 },
+        "Supply Voltage",
+        supplyVoltageChoices,
+        0));
 
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         juce::ParameterID { "oversampling_realtime", 1 },

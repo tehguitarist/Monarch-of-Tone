@@ -45,6 +45,7 @@ is a fixed part of the Red channel only and is not user-switchable (see architec
 ┌──────────────────────────────────────────────────────────┐
 │  [INPUT TRIM]                             [OUTPUT TRIM]  │  ← plugin-only, visually distinct
 ├──────────────────────────────────────────────────────────┤
+│                      (+) 9V (-)                          │  ← supply-voltage mod, pedal-face top centre
 │           YELLOW CHANNEL          RED CHANNEL            │
 │  [VOL Y]  [DRIVE Y]  [TONE Y]   [VOL R] [DRIVE R] [TONE R] │  ← main knobs
 │                                                          │
@@ -80,6 +81,21 @@ There is **no Hi Gain toggle**. The Theseus Hi-Gain mod is a fixed part of the R
 Stage 1 (baked in at construction, see architecture.md) and the Yellow channel is always
 stock. At most, the Red panel shows a cosmetic, non-interactive "Hi Gain" badge. No
 `AudioParameterBool`, no automation, no LED toggle.
+
+### Supply Voltage Selector (×1, top centre)
+- `VoltageSelector` (`src/ui/VoltageSelector.h`) — a small "(+) 9V (-)" label/control bound to
+  `supply_voltage` (0/1/2 → 9V/12V/18V), simulating the real "run it hotter" supply-voltage mod
+  (more op-amp headroom, diode thresholds unchanged — see dsp.md "Supply Voltage").
+- Layout: `(+)`, the voltage value, and `(-)` are packed as a single tight, horizontally-centred
+  group (arrows hug the label) via `computeLayout()` — not spread across thirds of the bounding box.
+- Each arrow is **bright** when a step in that direction exists and **dim** when it doesn't: at 9V
+  only `(+)` is bright, at 18V only `(-)`, at 12V both.
+- Click `(+)`/`(-)` to step the voltage up/down one notch; `juce::ParameterAttachment` drives the
+  APVTS param (`setValueAsCompleteGesture`).
+- Gold Papyrus lettering (`MonarchLookAndFeel::cPedalGold` / `cPedalGoldBright`), matching the
+  pedal-face aesthetic. Placed in the empty band above the top knob row, centred between the two
+  channels. `setFontScale(sc)` rescales with the UI-size control (base 14.3px, i.e. 30% larger than
+  the original 11px draft size).
 
 ### Clipping Mode Selector (×2, one per channel)
 - **3-way switch** per channel: **Boost / Overdrive / Distortion** (the "Both" stacked mode was
