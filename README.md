@@ -1,6 +1,6 @@
 # Monarch of Tone
 
-A circuit-accurate, dual-channel overdrive plugin (AU/Standalone, JUCE 8) modelled directly
+A circuit-accurate, dual-channel overdrive plugin (AU/VST3, JUCE 8) modelled directly
 from the schematic of a boutique two-in-one Bluesbreaker-derived pedal — the kind of
 "holy grail" overdrive that's notoriously hard to get hold of and even harder to clone by ear.
 Monarch of Tone isn't a vibe-matched approximation: every gain stage, filter pole, and diode
