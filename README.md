@@ -7,7 +7,7 @@ Monarch of Tone isn't a vibe-matched approximation: every gain stage, filter pol
 pair is solved as a Wave Digital Filter from real component values, then calibrated against
 NAM captures of a real unit until the plugin's output nulls against the hardware's.
 
-<img src="image.png" width="900" />
+![image](image.png)
 
 ## What it is
 
