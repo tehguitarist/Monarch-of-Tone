@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, windows-latest, ubuntu-22.04]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev libjack-jack2-dev \
+            libx11-dev libxcomposite-dev libxcursor-dev libxext-dev \
+            libxinerama-dev libxrandr-dev libxrender-dev \
+            libwebkit2gtk-4.1-dev libglu1-mesa-dev mesa-common-dev \
+            libcurl4-openssl-dev
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build plugin (macOS: AU + VST3)
+        if: runner.os == 'macOS'
+        run: cmake --build build --config Release --target Monarch_AU --target Monarch_VST3 --parallel
+
+      - name: Build plugin (VST3)
+        if: runner.os != 'macOS'
+        run: cmake --build build --config Release --target Monarch_VST3 --parallel
+
+      - name: Build DSP validation tests
+        run: |
+          cmake --build build --config Release --parallel --target \
+            SmokeTest_RC Stage1_FreqResponse Stage1_HiGain Stage2_Gain \
+            SW1SoftClip_Sine SW2HardClip_Sine ToneStage_FreqResponse \
+            VolumePot_Taper FullChain_DualChannel
+
+      - name: Run DSP validation tests (bash)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -e
+          for t in SmokeTest_RC Stage1_FreqResponse Stage1_HiGain Stage2_Gain \
+                   SW1SoftClip_Sine SW2HardClip_Sine ToneStage_FreqResponse \
+                   VolumePot_Taper FullChain_DualChannel; do
+            bin="build/${t}_artefacts/Release/${t}"
+            if [ ! -x "$bin" ]; then bin="build/${t}"; fi
+            echo "::group::${t}"
+            "$bin"
+            echo "::endgroup::"
+          done
+
+      - name: Run DSP validation tests (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $tests = "SmokeTest_RC","Stage1_FreqResponse","Stage1_HiGain","Stage2_Gain",
+                   "SW1SoftClip_Sine","SW2HardClip_Sine","ToneStage_FreqResponse",
+                   "VolumePot_Taper","FullChain_DualChannel"
+          foreach ($t in $tests) {
+            $bin = Get-ChildItem -Path build -Recurse -Filter "$t.exe" | Select-Object -First 1
+            if (-not $bin) { throw "Could not find built binary for $t" }
+            Write-Host "::group::$t"
+            & $bin.FullName
+            if ($LASTEXITCODE -ne 0) { throw "$t failed with exit code $LASTEXITCODE" }
+            Write-Host "::endgroup::"
+          }

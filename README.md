@@ -61,8 +61,8 @@ aliasing/noise floor at extreme drive, not in the model. See `analysis/` for the
 
 ## Building
 
-**Requirements:** CMake 3.15+, a C++17 compiler, macOS 10.13+ (AU/Standalone only at present —
-see Known Limitations).
+**Requirements:** CMake 3.15+, a C++17 compiler. AU + VST3 + Standalone on macOS 10.13+; VST3 +
+Standalone on Windows and Linux (see Known Limitations).
 
 ```bash
 git clone <this-repo>
@@ -77,7 +77,8 @@ git submodule add https://github.com/xtensor-stack/xsimd libs/xsimd
 
 # Configure and build
 cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --target Monarch_AU       # Audio Unit
+cmake --build build --target Monarch_AU       # Audio Unit (macOS only)
+cmake --build build --target Monarch_VST3     # VST3 (macOS/Windows/Linux)
 cmake --build build --target Monarch_Standalone
 ```
 
@@ -116,9 +117,34 @@ analysis/     Real-pedal NAM captures, the test signal used to drive them, and t
 CLAUDE.md     Project memory: build sequence, decisions, and the full validation log
 ```
 
+## Releasing
+
+Two GitHub Actions workflows live in `.github/workflows/`:
+
+- **`ci.yml`** — on every push to `main` and every PR, builds the plugin (AU+VST3 on macOS,
+  VST3 on Windows/Linux) and runs every DSP validation test in `tests/` on all three platforms.
+- **`release.yml`** — on pushing a tag like `v0.7.0` (or manual dispatch), builds release
+  binaries on macOS/Windows/Linux and publishes a GitHub Release with one zip per platform:
+  `Monarch-of-Tone-<version>-macOS.zip` (AU + VST3), `-Windows.zip` (VST3), `-Linux.zip` (VST3).
+  The version number is read from `CMakeLists.txt`, not the tag, so they can't drift apart.
+
+**macOS code signing/notarization** runs automatically once these repo secrets are set
+(Settings → Secrets and variables → Actions); until then the macOS zip ships **unsigned** and
+the workflow logs a warning instead of failing:
+
+| Secret | What it is |
+|--------|-----------|
+| `APPLE_CERT_P12_BASE64` | `base64 -i DeveloperIDApplication.p12` of your exported Developer ID Application cert |
+| `APPLE_CERT_PASSWORD` | Password the `.p12` was exported with |
+| `APPLE_SIGNING_IDENTITY` | e.g. `Developer ID Application: Leigh Pierce (TEAMID)` |
+| `APPLE_TEAM_ID` | Your 10-character Apple Developer Team ID |
+| `APPLE_ID` | Apple ID email used for notarization |
+| `APPLE_APP_SPECIFIC_PASSWORD` | An [app-specific password](https://support.apple.com/en-us/102654) for that Apple ID (not your main password) |
+
 ## Known limitations
 
-- **AU and Standalone only** — no VST3 target is wired up yet.
+- **AU is macOS-only** (an Apple plugin format) — Windows and Linux builds ship VST3 +
+  Standalone. macOS ships AU + VST3 + Standalone.
 - Diode-stage ADAA (as opposed to the rail-saturation ADAA already implemented) is deferred:
   the clipping stages are solved as WDF nonlinear *roots*, not memoryless waveshapers, and
   `chowdsp_wdf` doesn't have ADAA support for that case. 8x oversampling on render is judged
@@ -126,6 +152,20 @@ CLAUDE.md     Project memory: build sequence, decisions, and the full validation
 - A few device-physics-level residuals versus the real pedal (very-high-drive compression
   depth, some high-frequency content above the captures' own alias floor) are accepted as
   capture/device limits rather than model errors — see `CLAUDE.md` Step 11 for specifics.
+
+## Roadmap
+
+- **0.7 (current)** — VST3 wired up cross-platform (macOS/Windows/Linux), CI build+test on
+  every push, and a tagged-release pipeline producing a signed/notarized macOS zip plus
+  Windows and Linux VST3 zips.
+- **0.8 (TODO)** — A full reference-validation pass against real-pedal captures: frequency
+  response analysis, comprehensive THD analysis broken out per frequency block from 40 Hz
+  through 16 kHz, and null tests pushed as far as they'll go, with the achieved null depth
+  reported here. Also: finish Apple signing/notarization if not already turned on by then.
+- **0.9 (TODO)** — Factory presets.
+- **1.0 (TODO)** — Simple installers per platform, if JUCE/platform tooling supports it
+  cleanly (e.g. `pkgbuild`/`productbuild` on macOS, Inno Setup or WiX on Windows, an AppImage
+  or `.deb` on Linux) — otherwise the per-platform zips remain the distribution method.
 
 ## Thanks
 

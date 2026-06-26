@@ -60,6 +60,14 @@ clang-format -i src/**/*.{cpp,h}
 > schematic re-check is fixed (circuit.md §6); the full 25-capture null sweep confirms NAM-fidelity
 > matching (−8.5 to −18.8 dB, tone-under-drive validated) — see Step 11 below. Remaining residuals
 > are accepted device-physics / capture limits. All on `main`.
+>
+> **Release engineering (2026-06-27, v0.7.0):** CI/CD added (`.github/workflows/ci.yml`,
+> `release.yml`) and VST3 wired up cross-platform (macOS/Windows/Linux; AU stays macOS-only, an
+> Apple format constraint) — see build.md/architecture.md `FORMATS` notes and README's new
+> Releasing section for the tagged-release pipeline and required Apple signing secrets. This is
+> release engineering, not a DSP/circuit step, so it isn't numbered into the Build Sequence
+> below. Forward TODOs for 0.8 (full reference-validation suite + finishing Apple signing), 0.9
+> (presets), and 1.0 (installers) are tracked in README's Roadmap section, not here.
 
 The full audio engine is done & validated (all stages, `MonarchChannel`, `processBlock`,
 oversampling — Step 7/8). **The UI is now complete:**

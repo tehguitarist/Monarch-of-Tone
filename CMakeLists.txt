@@ -1,10 +1,18 @@
 cmake_minimum_required(VERSION 3.15)
 
-project(MonarchOfTone VERSION 0.1.1)
+project(MonarchOfTone VERSION 0.7.0)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_OSX_DEPLOYMENT_TARGET "10.13" CACHE STRING "Minimum macOS deployment target")
+
+# -Wall -Wextra on GCC/Clang; MSVC doesn't understand those flags (it would just warn D9002
+# and ignore them), so give it the equivalent /W4 instead — same warning level on every CI OS.
+if(MSVC)
+    set(MONARCH_WARNING_FLAGS /W4)
+else()
+    set(MONARCH_WARNING_FLAGS -Wall -Wextra)
+endif()
 
 add_subdirectory(libs/JUCE)
 add_subdirectory(libs/xsimd)
@@ -38,13 +46,20 @@ juce_add_binary_data(MonarchAssets
         assets/ui/mot_texture.jpg
 )
 
+# AU is an Apple-only format; VST3 ships on every platform.
+if(APPLE)
+    set(MONARCH_FORMATS AU VST3 Standalone)
+else()
+    set(MONARCH_FORMATS VST3 Standalone)
+endif()
+
 juce_add_plugin(Monarch
     COMPANY_NAME "Leigh Pierce"
     BUNDLE_ID "com.leighpierce.monarchoftone"
     PLUGIN_MANUFACTURER_CODE LeP1
     PLUGIN_CODE Mon1
     VERSION ${PROJECT_VERSION}
-    FORMATS AU Standalone
+    FORMATS ${MONARCH_FORMATS}
     PRODUCT_NAME "Monarch of Tone"
     COPY_PLUGIN_AFTER_BUILD TRUE
 )
@@ -71,7 +86,7 @@ target_compile_definitions(Monarch
 
 target_compile_options(Monarch
     PRIVATE
-        -Wall -Wextra
+        ${MONARCH_WARNING_FLAGS}
 )
 
 target_link_libraries(Monarch
@@ -97,7 +112,7 @@ target_link_libraries(SmokeTest_RC
 
 target_compile_options(SmokeTest_RC
     PRIVATE
-        -Wall -Wextra
+        ${MONARCH_WARNING_FLAGS}
 )
 
 add_executable(Stage1_FreqResponse tests/Stage1_FreqResponse.cpp)
@@ -110,7 +125,7 @@ target_link_libraries(Stage1_FreqResponse
 
 target_compile_options(Stage1_FreqResponse
     PRIVATE
-        -Wall -Wextra
+        ${MONARCH_WARNING_FLAGS}
 )
 
 add_executable(Stage1_HiGain tests/Stage1_HiGain.cpp)
@@ -123,7 +138,7 @@ target_link_libraries(Stage1_HiGain
 
 target_compile_options(Stage1_HiGain
     PRIVATE
-        -Wall -Wextra
+        ${MONARCH_WARNING_FLAGS}
 )
 
 add_executable(VolumePot_Taper tests/VolumePot_Taper.cpp)
@@ -136,7 +151,7 @@ target_link_libraries(VolumePot_Taper
 
 target_compile_options(VolumePot_Taper
     PRIVATE
-        -Wall -Wextra
+        ${MONARCH_WARNING_FLAGS}
 )
 
 add_executable(FullChain_DualChannel tests/FullChain_DualChannel.cpp)
@@ -149,7 +164,7 @@ target_link_libraries(FullChain_DualChannel
 
 target_compile_options(FullChain_DualChannel
     PRIVATE
-        -Wall -Wextra
+        ${MONARCH_WARNING_FLAGS}
 )
 
 add_executable(ToneStage_FreqResponse tests/ToneStage_FreqResponse.cpp)
@@ -162,7 +177,7 @@ target_link_libraries(ToneStage_FreqResponse
 
 target_compile_options(ToneStage_FreqResponse
     PRIVATE
-        -Wall -Wextra
+        ${MONARCH_WARNING_FLAGS}
 )
 
 add_executable(Stage2_Gain tests/Stage2_Gain.cpp)
@@ -175,7 +190,7 @@ target_link_libraries(Stage2_Gain
 
 target_compile_options(Stage2_Gain
     PRIVATE
-        -Wall -Wextra
+        ${MONARCH_WARNING_FLAGS}
 )
 
 add_executable(SW1SoftClip_Sine tests/SW1SoftClip_Sine.cpp)
@@ -188,7 +203,7 @@ target_link_libraries(SW1SoftClip_Sine
 
 target_compile_options(SW1SoftClip_Sine
     PRIVATE
-        -Wall -Wextra
+        ${MONARCH_WARNING_FLAGS}
 )
 
 add_executable(SW2HardClip_Sine tests/SW2HardClip_Sine.cpp)
@@ -201,7 +216,7 @@ target_link_libraries(SW2HardClip_Sine
 
 target_compile_options(SW2HardClip_Sine
     PRIVATE
-        -Wall -Wextra
+        ${MONARCH_WARNING_FLAGS}
 )
 
 # ---- Headless UI snapshot tool (renders the editor to /tmp/monarch_ui.png; no display needed) ----
