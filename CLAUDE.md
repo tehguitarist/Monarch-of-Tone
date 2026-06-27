@@ -102,6 +102,16 @@ clang-format -i src/**/*.{cpp,h}
 > normalized per mode (the plugin's Clean>OD>Dist hierarchy is physically correct). **NOTE:** the 44
 > captures (`analysis/pedal_export2/`, 842 MB) are NOT committed (repo-bloat); the old `Pedal_export`
 > (stale, v1 signal) was deleted locally. `KoT_schematic_{Theseus.png,matsumin}` re-added to `analysis/`.
+>
+> **Rail-knee sharpness experiment — TRIED & REJECTED (2026-06-27).** Hypothesis: a sharper op-amp
+> rail-sat knee (smaller `railKneeMargin`) would make the mids compress more abruptly and bloom the
+> bass to match the real pedal at high drive. Tested via a temporary `MONARCH_KNEE` env override
+> (margin 0.3→0.15→0.05). **Negligible effect: max 0.007 sample diff (Boost drive 1.0), 0.0 dB on
+> every null/bass metric across G5/G10 × Boost/OD/Dist.** Reason: once a swing is over the ±3.3 V
+> rail it's clamped to ~3.3 V regardless of knee shape; the knee only alters the narrow 3.0–3.3 V
+> transition. So knee sharpness is NOT a lever for the bass bloom — that needs more *gain into the
+> rails* at high drive, which can't be added circuit-accurately (Stage-1 values are schematic-verified).
+> The env hook was reverted; the bloom stays an accepted device-physics/capture limit. Don't re-try this.
 
 The full audio engine is done & validated (all stages, `MonarchChannel`, `processBlock`,
 oversampling — Step 7/8). **The UI is now complete:**
