@@ -152,7 +152,7 @@ the workflow logs a warning instead of failing:
 |--------|-----------|
 | `APPLE_CERT_P12_BASE64` | `base64 -i DeveloperIDApplication.p12` of your exported Developer ID Application cert |
 | `APPLE_CERT_PASSWORD` | Password the `.p12` was exported with |
-| `APPLE_SIGNING_IDENTITY` | e.g. `Developer ID Application: Leigh Pierce (TEAMID)` |
+| `APPLE_SIGNING_IDENTITY` | e.g. `Developer ID Application: NAME (TEAMID)` |
 | `APPLE_TEAM_ID` | Your 10-character Apple Developer Team ID |
 | `APPLE_ID` | Apple ID email used for notarization |
 | `APPLE_APP_SPECIFIC_PASSWORD` | An [app-specific password](https://support.apple.com/en-us/102654) for that Apple ID (not your main password) |
@@ -216,4 +216,4 @@ chowdsp_wdf and xsimd are compatible and included under their own license terms 
 
 ## Author
 
-Leigh Pierce
+
