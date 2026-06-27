@@ -25,6 +25,7 @@ jobs:
     runs-on: macos-14
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
+      HAS_APPLE_SIGNING: ${{ secrets.APPLE_CERT_P12_BASE64 != '' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -44,61 +45,61 @@ jobs:
           echo "au=$au" >> "$GITHUB_OUTPUT"
           echo "vst3=$vst3" >> "$GITHUB_OUTPUT"
 
-      # ---- Apple code signing + notarization — DISABLED until Apple secrets are added. ----
-      # Uncomment this whole block (and the HAS_APPLE_SIGNING env var above, restored as:
-      #   HAS_APPLE_SIGNING: ${{ secrets.APPLE_CERT_P12_BASE64 != '' }}
-      # ) once the 6 secrets in README's "Releasing" section are set. Left here complete and
-      # ready rather than deleted, so turning signing on is an uncomment, not a rewrite.
-      #
-      # - name: Import Developer ID certificate
-      #   if: ${{ env.HAS_APPLE_SIGNING == 'true' }}
-      #   env:
-      #     APPLE_CERT_P12_BASE64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
-      #     APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
-      #   run: |
-      #     KEYCHAIN_PATH="$RUNNER_TEMP/signing.keychain-db"
-      #     KEYCHAIN_PASS=$(uuidgen)
-      #     echo "$APPLE_CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
-      #
-      #     security create-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
-      #     security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-      #     security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
-      #     security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN_PATH" -P "$APPLE_CERT_PASSWORD" \
-      #       -T /usr/bin/codesign -T /usr/bin/security
-      #     security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
-      #     security list-keychain -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | sed 's/"//g')
-      #     rm -f "$RUNNER_TEMP/cert.p12"
-      #
-      # - name: Codesign AU + VST3
-      #   if: ${{ env.HAS_APPLE_SIGNING == 'true' }}
-      #   env:
-      #     APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-      #   run: |
-      #     for bundle in "${{ steps.artifacts.outputs.au }}" "${{ steps.artifacts.outputs.vst3 }}"; do
-      #       codesign --force --deep --options runtime --timestamp \
-      #         --sign "$APPLE_SIGNING_IDENTITY" "$bundle"
-      #       codesign --verify --deep --strict "$bundle"
-      #     done
-      #
-      # - name: Notarize and staple
-      #   if: ${{ env.HAS_APPLE_SIGNING == 'true' }}
-      #   env:
-      #     APPLE_ID: ${{ secrets.APPLE_ID }}
-      #     APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      #     APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-      #   run: |
-      #     ditto -c -k --keepParent "${{ steps.artifacts.outputs.au }}" "$RUNNER_TEMP/au-notarize.zip"
-      #     ditto -c -k --keepParent "${{ steps.artifacts.outputs.vst3 }}" "$RUNNER_TEMP/vst3-notarize.zip"
-      #
-      #     xcrun notarytool submit "$RUNNER_TEMP/au-notarize.zip" \
-      #       --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD" --wait
-      #     xcrun notarytool submit "$RUNNER_TEMP/vst3-notarize.zip" \
-      #       --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD" --wait
-      #
-      #     xcrun stapler staple "${{ steps.artifacts.outputs.au }}"
-      #     xcrun stapler staple "${{ steps.artifacts.outputs.vst3 }}"
+      # ---- Apple code signing + notarization — enabled once the 6 secrets below are set. ----
+      - name: Import Developer ID certificate
+        if: ${{ env.HAS_APPLE_SIGNING == 'true' }}
+        env:
+          APPLE_CERT_P12_BASE64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
+          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASS=$(uuidgen)
+          echo "$APPLE_CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+
+          security create-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN_PATH" -P "$APPLE_CERT_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | sed 's/"//g')
+          rm -f "$RUNNER_TEMP/cert.p12"
+
+      - name: Codesign AU + VST3
+        if: ${{ env.HAS_APPLE_SIGNING == 'true' }}
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          for bundle in "${{ steps.artifacts.outputs.au }}" "${{ steps.artifacts.outputs.vst3 }}"; do
+            codesign --force --deep --options runtime --timestamp \
+              --sign "$APPLE_SIGNING_IDENTITY" "$bundle"
+            codesign --verify --deep --strict "$bundle"
+          done
+
+      - name: Notarize and staple
+        if: ${{ env.HAS_APPLE_SIGNING == 'true' }}
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          ditto -c -k --keepParent "${{ steps.artifacts.outputs.au }}" "$RUNNER_TEMP/au-notarize.zip"
+          ditto -c -k --keepParent "${{ steps.artifacts.outputs.vst3 }}" "$RUNNER_TEMP/vst3-notarize.zip"
+
+          xcrun notarytool submit "$RUNNER_TEMP/au-notarize.zip" \
+            --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD" --wait
+          xcrun notarytool submit "$RUNNER_TEMP/vst3-notarize.zip" \
+            --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD" --wait
+
+          xcrun stapler staple "${{ steps.artifacts.outputs.au }}"
+          xcrun stapler staple "${{ steps.artifacts.outputs.vst3 }}"
+
+      - name: Note signed build
+        if: ${{ env.HAS_APPLE_SIGNING == 'true' }}
+        run: echo "macOS build is signed and notarized (Developer ID + notarytool)."
 
       - name: Note unsigned build
+        if: ${{ env.HAS_APPLE_SIGNING != 'true' }}
         run: echo "::warning::macOS signing is disabled (Apple secrets not yet added) — shipping an UNSIGNED macOS build. See README 'Releasing' for the secrets needed to sign/notarize."
 
       - name: Package zip
