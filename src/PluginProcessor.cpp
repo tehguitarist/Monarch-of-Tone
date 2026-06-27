@@ -66,9 +66,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout MonarchAudioProcessor::creat
     const juce::StringArray oversamplingChoices { "1x", "2x", "4x", "8x" };
     const juce::StringArray supplyVoltageChoices { "9V", "12V", "18V" };
 
-    // The two series channels are identified externally by their LED colour: the first
-    // channel is "Yellow", the second is "Red". The Theseus Hi-Gain mod is a FIXED part of
-    // the Red channel's Stage 1 (not a runtime parameter) — see circuit.md Section 6.
+    // The two series channels are identified externally by their LED colour, "Yellow" and
+    // "Red" (parameter IDs below keep this order for backward compatibility with saved state).
+    // In the real pedal's actual signal flow, Red is FIRST and Yellow is SECOND — see
+    // processPedalChannel's call order in processBlock(). Red is also externally labelled "A"
+    // and Yellow "B" (LED badges in the UI). The Theseus Hi-Gain mod is a FIXED part of the
+    // Red channel's Stage 1 (not a runtime parameter) — see circuit.md Section 6.
     struct ChannelSpec
     {
         const char* id;
@@ -379,9 +382,10 @@ void MonarchAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
         if (numChannels > 1) inputLevelR.store (inPeak[1]);
     }
 
-    // Series: Yellow → Red (each with its own clip-span oversampler).
-    processPedalChannel (buffer, numChannels, numSamples, /*isYellow*/ true, osYellow.get());
+    // Series: Red → Yellow (matches the real pedal's signal flow — Red, the fixed Hi-Gain
+    // channel, is first in the chain; Yellow is second), each with its own clip-span oversampler.
     processPedalChannel (buffer, numChannels, numSamples, /*isYellow*/ false, osRed.get());
+    processPedalChannel (buffer, numChannels, numSamples, /*isYellow*/ true, osYellow.get());
 
     // Capture-match calibration shelf (see PluginProcessor.h::TiltShelf). Applied once, post-
     // pedal, in circuit volts. Crossfaded out when BOTH channels are fully bypassed so true

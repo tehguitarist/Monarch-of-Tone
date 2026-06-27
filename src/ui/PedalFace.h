@@ -14,7 +14,9 @@
  * The unique pedal face — royal-purple body with gold Papyrus lettering and a gold compass rose
  * (ref: pedal_picture.png). Hosts per channel: Volume / Drive / Tone knobs (black knurled), a
  * small Presence trim flanking the compass, a 3-way clip switch at the edge, an LED, and a
- * bypass footswitch. Yellow (left) → Red (right). Takes the APVTS for parameter binding.
+ * bypass footswitch. Yellow (left) and Red (right) are unchanged in physical position, but
+ * signal flow is Red → Yellow (Red is first in the real pedal's chain) — labelled A (Red) and
+ * B (Yellow) on the outside of each LED. Takes the APVTS for parameter binding.
  */
 class PedalFace : public juce::Component
 {
@@ -40,6 +42,7 @@ private:
 
     ClipSwitch clipY, clipR;
     LEDIndicator ledY, ledR;
+    juce::Label ledBadgeY, ledBadgeR; // "B" / "A" outside the LEDs — Red is A (first in signal), Yellow is B (second)
     juce::TextButton bypassY, bypassR;
     juce::Label bypassYL, bypassRL;
     juce::Label logoL;

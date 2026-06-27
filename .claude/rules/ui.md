@@ -37,9 +37,12 @@ lettering in **Papyrus** font (`#C6A15B`), gold compass rose centre, black knobs
 "ANALOG.MAN" wording is omitted. (Supersedes the earlier white-enclosure reference.)
 **Clipping switches (3-way): toward the left & right edges, below the knobs, above the footswitches.**
 The King of Tone has two identical channels side by side. We name them by their LED colour:
-the first channel is **Yellow**, the second is **Red**. Signal runs Yellow → Red in series.
-Layout mirrors the hardware directly. Note there is **no Hi Gain control** — the Hi-Gain mod
-is a fixed part of the Red channel only and is not user-switchable (see architecture.md).
+**Yellow** (left) and **Red** (right) — physical position is unchanged from the hardware.
+**Signal flow is Red → Yellow in series** (corrected 2026-06-28: the real pedal's Hi-Gain
+channel, Red, is first; Yellow is second) — externally labelled with small "A"/"B" badges on
+the outside of each LED: **A = Red**, **B = Yellow**. Layout otherwise mirrors the hardware
+directly. Note there is **no Hi Gain control** — the Hi-Gain mod is a fixed part of the Red
+channel only and is not user-switchable (see architecture.md).
 
 ```
 ┌──────────────────────────────────────────────────────────┐
@@ -49,7 +52,7 @@ is a fixed part of the Red channel only and is not user-switchable (see architec
 │           YELLOW CHANNEL          RED CHANNEL            │
 │  [VOL Y]  [DRIVE Y]  [TONE Y]   [VOL R] [DRIVE R] [TONE R] │  ← main knobs
 │                                                          │
-│  [CLIP Y]      [●LED Y(yellow)] [●LED R(red)]    [CLIP R] │  ← mode selectors + LEDs
+│  [CLIP Y]    B[●LED Y(yellow)] [●LED R(red)]A    [CLIP R] │  ← mode selectors + LEDs (A=Red, B=Yellow)
 │  Boost/OD/Dist/Both                      Boost/OD/Dist/Both     │
 │                                                          │
 │  [PRESENCE Y]  ◆ MONARCH OF TONE ◆  [PRESENCE R]       │  ← internal trim knobs + logo
@@ -115,10 +118,16 @@ stock. At most, the Red panel shows a cosmetic, non-interactive "Hi Gain" badge.
 
 ### LEDs (×2)
 - Small circular indicator per channel, between knobs and bypass
-- The channel names come from these LEDs: the first channel's LED is **yellow**
-  (`colourLEDActiveYellow`), the second's is **red** (`colourLEDActiveRed`)
+- The channel names come from these LEDs: the left channel's LED is **yellow**
+  (`colourLEDActiveYellow`), the right's is **red** (`colourLEDActiveRed`)
 - ON = channel active; OFF (dim) = channel bypassed
 - State from `std::atomic<bool> bypassedYellow / bypassedRed`
+- **A/B badges (added 2026-06-28):** a small gold "B"/"A" label sits just outside each LED
+  (away from the centre compass) — **B outside the Yellow LED**, **A outside the Red LED**.
+  These externally identify the real pedal's actual signal order: **Red is first (A), Yellow
+  is second (B)** — the LED colour names and on-screen position (Yellow left, Red right) are
+  unchanged from the hardware; only the A/B badges communicate processing order. Implemented
+  as plain `juce::Label`s in `PedalFace` (`ledBadgeY`/`ledBadgeR`), non-interactive.
 
 ### Input Trim / Output Trim
 - Visually distinct from the main knobs (different size, placement, colour tint)

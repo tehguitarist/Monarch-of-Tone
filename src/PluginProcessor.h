@@ -134,8 +134,9 @@ private:
     juce::SmoothedValue<float> inTrimGain, outTrimGain;
 
     // One dual-mono pedal per audio channel (index 0 = L, 1 = R). Each strip is the full
-    // Yellow → Red series chain; both strips share the same knob settings. Hi Gain is fixed
-    // per channel via the MonarchChannel ctor flag (Yellow stock, Red Hi-Gain).
+    // Red → Yellow series chain (the real pedal's signal flow — Red is first); both strips
+    // share the same knob settings. Hi Gain is fixed per channel via the MonarchChannel ctor
+    // flag (Yellow stock, Red Hi-Gain).
     struct ChannelStrip
     {
         monarch::MonarchChannel yellow { false };

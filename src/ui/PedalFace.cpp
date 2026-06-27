@@ -57,6 +57,16 @@ PedalFace::PedalFace (AudioProcessorValueTreeState& apvts)
     addAndMakeVisible (ledY);
     addAndMakeVisible (ledR);
 
+    // A/B badges, outside each LED: Red = A (first in the real pedal's signal flow), Yellow = B.
+    auto setupBadge = [this] (Label& l, const String& text) {
+        l.setText (text, dontSendNotification);
+        l.setJustificationType (Justification::centred);
+        l.setColour (Label::textColourId, Colour (MonarchLookAndFeel::cPedalGold));
+        addAndMakeVisible (l);
+    };
+    setupBadge (ledBadgeY, "B");
+    setupBadge (ledBadgeR, "A");
+
     auto setupBypass = [this] (TextButton& b, Label& lab, const char* paramId,
                                std::unique_ptr<ButtonParameterAttachment>& attach) {
         b.setComponentID ("bypass");
@@ -243,6 +253,13 @@ void PedalFace::resized()
     place (ledY, ledYx, ledCy, ledBox, ledBox);
     place (ledR, ledRx, ledCy, ledBox, ledBox);
 
+    // A/B badges, just outside each LED (away from the centre): Yellow's "B" sits left of its
+    // LED, Red's "A" sits right of its LED.
+    const float badgeD = ledBox * 0.85f;
+    const float badgeGap = ledBox * 0.62f;
+    place (ledBadgeY, ledYx - badgeGap, ledCy, badgeD, badgeD);
+    place (ledBadgeR, ledRx + badgeGap, ledCy, badgeD, badgeD);
+
     // Logo: 90% opacity is set once in the constructor. Band starts below whichever is lower —
     // the LED row or the (now much taller) clip switches' DIST labels — so the enlarged switches
     // never collide with the logo text; the label itself is 10% smaller (font size in refresh()).
@@ -273,6 +290,10 @@ void PedalFace::refresh (float sc)
     auto bypassFont = papyrus (jmax (7.0f, 8.0f * sc));
     bypassYL.setFont (bypassFont);
     bypassRL.setFont (bypassFont);
+
+    auto badgeFont = papyrus (jmax (9.0f, 11.0f * sc), true);
+    ledBadgeY.setFont (badgeFont);
+    ledBadgeR.setFont (badgeFont);
 
     logoL.setFont (papyrus (jmax (27.0f, 49.5f * sc))); // 2.5× larger, then 10% smaller (round 2)
 

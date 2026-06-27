@@ -6,7 +6,11 @@
 - All UI runs on the **message thread**
 - Cross-thread communication: `std::atomic` only — no locks, mutexes, or blocking calls on the audio thread
 - Meter levels: `std::atomic<float>` written by audio thread, read by UI timer
-- The two series channels are named by LED colour: **Yellow** (first) and **Red** (second).
+- The two series channels are named by LED colour: **Yellow** and **Red**. In the real pedal's
+  actual signal flow, **Red is first, Yellow is second** (corrected 2026-06-28 — see CLAUDE.md
+  Repository State); parameter IDs/code member order still list Yellow before Red for backward
+  compatibility, but `processBlock` calls `processPedalChannel` for Red before Yellow. Externally
+  the LED badges read **A (Red)** and **B (Yellow)**.
 - Bypass state per channel: `std::atomic<bool> bypassedYellow`, `std::atomic<bool> bypassedRed`
 - Clipping mode per channel: `std::atomic<int> pendingClippingModeYellow`, `std::atomic<int> pendingClippingModeRed`
 - **Hi Gain is NOT a runtime parameter.** It is a *fixed* Theseus mod baked into the Red
@@ -45,10 +49,12 @@ MonarchAudioProcessor          ← AudioProcessor subclass
 
 ## Parameters (APVTS IDs)
 
-The two channels (**Yellow** = first, **Red** = second) have mirrored parameter sets — with
-one exception: there is **no Hi Gain parameter**. Hi Gain is a fixed mod on the Red channel
-only (baked in at construction), so it is not exposed or automatable. See the Hi Gain note
-below the table.
+The two channels (**Yellow**, **Red**) have mirrored parameter sets — with one exception:
+there is **no Hi Gain parameter**. Hi Gain is a fixed mod on the Red channel only (baked in
+at construction), so it is not exposed or automatable. See the Hi Gain note below the table.
+Parameter IDs below list Yellow before Red for historical/backward-compatibility reasons
+only — they do **not** reflect signal order; see the Threading section above for the actual
+Red-first signal flow.
 
 | ID | Label | Range | Default | Notes |
 |----|-------|-------|---------|-------|
@@ -96,8 +102,10 @@ re-adding it is a 1-line change).
 ## Channel Routing
 
 ```
-guitar input → [input trim] → channelYellow.process() → channelRed.process() → [output trim] → amp output
+guitar input → [input trim] → channelRed.process() → channelYellow.process() → [output trim] → amp output
 ```
+
+Red is first (matches the real pedal's signal flow); Yellow is second.
 
 When a channel is bypassed, its `process()` returns the input unchanged (no DSP). Both bypass states are independent. When both are bypassed the signal passes through both switches dry, matching the hardware's true-bypass behaviour.
 
@@ -149,7 +157,8 @@ All of the following in `prepareToPlay(sampleRate, samplesPerBlock)`:
 > - **Oversampling not yet wrapped** — the chain currently runs at base rate (linear stages are
 >   accurate at base rate; clip-stage anti-aliasing is the Step 7 add).
 
-The original planned structure (target once oversampling + smoothing land):
+The original planned structure (target once oversampling + smoothing land; updated to the
+corrected Red-first signal order, 2026-06-28):
 
 ```
 1. Determine active oversampling factor:
@@ -162,11 +171,11 @@ The original planned structure (target once oversampling + smoothing land):
 5. Update WDF node values in both channels
 6. Apply input trim gain
 7. Update input meter levels (std::atomic write)
-8. Process channelYellow:
-   - If bypassedYellow: copy input → output, skip DSP and oversampler
+8. Process channelRed (first in the real pedal's signal flow):
+   - If bypassedRed: copy input → output, skip DSP and oversampler
    - Else: upsample → WDF chain → downsample
-9. Process channelRed (input = channelYellow output):
-    - If bypassedRed: copy input → output, skip DSP and oversampler
+9. Process channelYellow (input = channelRed output):
+    - If bypassedYellow: copy input → output, skip DSP and oversampler
     - Else: upsample → WDF chain → downsample
 10. Apply output trim gain
 11. Update output meter levels (std::atomic write)

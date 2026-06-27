@@ -6,9 +6,13 @@ built as an AU/VST3 plugin using JUCE 8+ and chowdsp_wdf Wave Digital Filter mod
 
 The King of Tone is a **dual-channel** Bluesbreaker-derived overdrive. Both channels are
 modelled — 1-to-1 digital clone. Channels run in series and are independently bypassable.
-The two channels are named externally by their LED colour: **Yellow** (first) → **Red**
-(second). The Theseus Hi-Gain mod is a **fixed** part of the **Red** channel only (not a
-runtime toggle); Yellow is always stock.
+The two channels are named externally by their LED colour: **Yellow** (left) and **Red**
+(right) — physical/UI position unchanged from the hardware. **Signal flow is Red → Yellow**
+(corrected 2026-06-28: the real pedal processes through Red, the fixed Hi-Gain channel,
+*first*, then Yellow second — the opposite of this project's original left-to-right
+assumption); externally labelled with small **A** (Red) / **B** (Yellow) badges outside each
+LED. The Theseus Hi-Gain mod is a **fixed** part of the **Red** channel only (not a runtime
+toggle); Yellow is always stock.
 
 ---
 
@@ -118,6 +122,22 @@ clang-format -i src/**/*.{cpp,h}
 > the LABELLED settings: **Clean −20.7, OD −18.5, Dist −17.6 dB.** Tuning the heavily-driven segment
 > deeper (~+2 dB on sweep_drv_-12) only trades it against the lighter segments (best-across-segments
 > gets slightly worse), so nominal is the best overall match — the knob calibration is confirmed correct.
+>
+> **MAJOR CORRECTION — signal-flow order was backwards (2026-06-28).** This project had assumed
+> Yellow (left, stock) processes first and feeds into Red (right, fixed Hi-Gain) — left-to-right.
+> The real pedal actually runs the **opposite order: Red is first, Yellow is second** (right to
+> left). Fixed in `PluginProcessor.cpp`'s `processBlock` — the two `processPedalChannel` calls
+> were swapped so Red's clip-span oversampler/WDF chain runs before Yellow's. **No DSP-stage
+> internals changed** — each `MonarchChannel`'s own circuitry (Stage1/Stage2/clip/Tone/Volume) is
+> unaffected; only which channel's output feeds the other's input changed. APVTS parameter IDs
+> (`drive_yellow`, `drive_red`, etc.) and the `ChannelStrip{yellow,red}` member order were left
+> as-is for save-state backward compatibility — they no longer reflect signal order, only naming/
+> UI position (Yellow stays left, Red stays right; see ui.md). Added externally-visible **A**
+> (Red) / **B** (Yellow) badges outside each channel's LED in `PedalFace` so the processing order
+> is legible without opening the hood. Verified via `tests/FullChain_DualChannel` (Red→Yellow
+> series, PASS) and `tools/ControlSweep` (full stability gate, PASS) — no regressions, no NaN/
+> instability from the reorder. `.claude/rules/architecture.md`, `dsp.md`, and `ui.md` updated to
+> match (Channel Routing diagrams, processBlock structure, LED/badge documentation).
 
 The full audio engine is done & validated (all stages, `MonarchChannel`, `processBlock`,
 oversampling — Step 7/8). **The UI is now complete:**
@@ -361,8 +381,8 @@ the captures — `PedalRender in.wav out.wav drive tone vol pres clip`).
 | VOL taper | 100kA **audio** (`pow(10, 2x-2)`) |
 | Presence taper | 50kB **linear**; default fully CCW; 2-terminal rheostat (like DRIVE) from node_T_out |
 | Tone stage | Passive RC only — no diodes; 3-terminal TONE pot tap, not two parallel branches |
-| Channel routing | Yellow → Red in series; independently bypassable |
-| Channel names | Yellow (first, stock) → Red (second, fixed Hi-Gain), after the LED colours |
+| Channel routing | **Red → Yellow in series** (real pedal's actual signal flow, corrected 2026-06-28); independently bypassable |
+| Channel names | Yellow (left, stock) and Red (right, fixed Hi-Gain), after the LED colours; externally badged **A (Red)** / **B (Yellow)** for processing order |
 | Default mode | Overdrive (SW-1 ON, SW-2 OFF) per channel |
 | Gain peak | **+12.85 dB @ 4120 Hz (96k, Yellow drive 0.5, floor 1k)**. Accurate at base rate — linear stages need no oversampling/prewarp (earlier large error was an output-recon bug, fixed; see dsp.md). |
 | DRIVE floor | Yellow **1k** (Theseus stock R2∥R3, nearly-clean min +0.67 dB); Red **39k** (Hi-Gain, min +11 dB). matsumin labels R6=10k — we use 1k for a cautious/transparent Yellow min. |

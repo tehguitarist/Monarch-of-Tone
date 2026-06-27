@@ -7,7 +7,8 @@
 //     (Distortion/Both hardest), at the expected absolute thresholds,
 //   - Boost clips on the op-amp rails (≈±3.3 V) rather than running away,
 //   - Red (Hi-Gain) drives harder than Yellow at the same settings,
-//   - the two channels run in series (Yellow → Red) without instability.
+//   - the two channels run in series (Red → Yellow, the real pedal's signal flow) without
+//     instability.
 
 #include "../src/dsp/MonarchChannel.h"
 
@@ -86,7 +87,8 @@ int main()
 
     std::printf ("\n  Boost peak (Yellow) = %.3f V (expect rail-bounded ~1-4 V)\n", yPeak[0]);
 
-    // Dual-channel series: Yellow → Red, default Overdrive, realistic level. Must stay finite.
+    // Dual-channel series: Red → Yellow (the real pedal's signal flow — Red is first), default
+    // Overdrive, realistic level. Must stay finite.
     yellow.reset();
     red.reset();
     yellow.setClippingMode (1);
@@ -103,13 +105,13 @@ int main()
     for (int n = 0; n < (int) fs; ++n)
     {
         const double x = vpk * std::sin (2.0 * M_PI * freq * (double) n / fs);
-        const double y = red.processSample (yellow.processSample (x));
+        const double y = yellow.processSample (red.processSample (x));
         if (std::isnan (y) || std::isinf (y))
             seriesNan = true;
         if (n > (int) (fs * 0.2))
             seriesPeak = std::max (seriesPeak, std::abs (y));
     }
-    std::printf ("  series Yellow→Red (OD, vol=0.5) peak: %.4f V%s\n",
+    std::printf ("  series Red→Yellow (OD, vol=0.5) peak: %.4f V%s\n",
                  seriesPeak, seriesNan ? "  [NaN!]" : "");
 
     const bool seriesOk = ! seriesNan && seriesPeak > 1e-4 && seriesPeak < 10.0;

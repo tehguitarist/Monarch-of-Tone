@@ -154,13 +154,17 @@ class MonarchChannel {
     juce::dsp::Oversampling<double> oversampler;
 };
 
-MonarchChannel channelYellow { false }; // first channel, stock Stage 1
-MonarchChannel channelRed    { true };  // second channel, fixed Hi-Gain Stage 1
+MonarchChannel channelYellow { false }; // stock Stage 1
+MonarchChannel channelRed    { true };  // fixed Hi-Gain Stage 1
 ```
+
+> **Signal order (corrected 2026-06-28): Red is FIRST, Yellow is SECOND** — matches the real
+> pedal's actual signal flow (Red, the fixed Hi-Gain channel, feeds into Yellow). Variable
+> declaration order above (Yellow before Red) is just member order and is not the signal order.
 
 Channel routing:
 ```
-inputSample → channelYellow.process() → yellow_output → channelRed.process() → output
+inputSample → channelRed.process() → red_output → channelYellow.process() → output
 ```
 
 Each channel has independent APVTS parameters (e.g., `drive_yellow`, `drive_red`,
@@ -391,7 +395,8 @@ explicitly rejected: a fixed prewarp freezes the gain peak in place across the D
 - **Input trim (±12 dB)** absorbs hotter/quieter pickups — mirroring how a player sets guitar
   volume / pedal placement to position the clipping. **Output trim** rematches level after.
   No tone-shaping in the trims; they only set where the (fixed-threshold) nonlinearities sit.
-- Input trim → VU meter → Yellow channel → Red channel → VU meter → Output trim
+- Input trim → VU meter → Red channel → Yellow channel → VU meter → Output trim (Red first,
+  matching the real pedal's signal flow — corrected 2026-06-28)
 
 ## processBlock Structure (per channel)
 
@@ -413,4 +418,4 @@ explicitly rejected: a fixed prewarp freezes the gain peak in place across the D
    c. Downsample clipping stage block
 ```
 
-Global processBlock chains: inputTrim → channelYellow.process() → channelRed.process() → outputTrim
+Global processBlock chains: inputTrim → channelRed.process() → channelYellow.process() → outputTrim

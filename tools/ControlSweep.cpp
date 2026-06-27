@@ -1,6 +1,6 @@
 // Step 10 — final full-range control sweep / stability gate.
 //
-// Drives the FULL stereo MonarchAudioProcessor (both channels active, Yellow -> Red in series)
+// Drives the FULL stereo MonarchAudioProcessor (both channels active, Red -> Yellow in series)
 // through every control across its entire range, every clipping-mode combo, every oversampling
 // factor, live OS changes, bypass crossfades, and instantaneous knob jumps — while a continuous
 // guitar-level signal plays. Asserts the output is always finite and bounded (no NaN/Inf, no
