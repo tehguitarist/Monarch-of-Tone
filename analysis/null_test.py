@@ -18,7 +18,7 @@ Render the PLUGIN at the capture's settings first, e.g.:
 import sys
 import numpy as np
 from scipy.io import wavfile
-from scipy.signal import butter, sosfiltfilt
+from scipy.signal import butter, sosfiltfilt, correlate
 
 FS = 48000
 BANDS = [("100-300Hz", 100, 300), ("300Hz-1k", 300, 1000), ("1-2k", 1000, 2000),
@@ -38,7 +38,10 @@ def best_null(c, p):
     """Align p to c (integer + fractional delay) and least-squares gain; return residual, gain."""
     n = min(len(c), len(p))
     c, p = c[:n].copy(), p[:n].copy()
-    lag = np.argmax(np.abs(np.correlate(c - c.mean(), p - p.mean(), 'full'))) - (n - 1)
+    # FFT-based cross-correlation for the integer lag (O(N log N), not np.correlate's O(N^2) —
+    # matters when nulling long broadband segments across the whole capture set).
+    xc = correlate(c - c.mean(), p - p.mean(), mode='full', method='fft')
+    lag = int(np.argmax(np.abs(xc))) - (n - 1)
     p = np.roll(p, lag)
     P = np.fft.rfft(p)
     f = np.fft.rfftfreq(n)

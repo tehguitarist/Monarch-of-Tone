@@ -68,6 +68,21 @@ clang-format -i src/**/*.{cpp,h}
 > release engineering, not a DSP/circuit step, so it isn't numbered into the Build Sequence
 > below. Forward TODOs for 0.8 (full reference-validation suite + finishing Apple signing), 0.9
 > (presets), and 1.0 (installers) are tracked in README's Roadmap section, not here.
+>
+> **v0.8 reference-validation suite (2026-06-27, in progress):** the `analysis/` harness was
+> rebuilt into a comprehensive suite — a v2 `test_signal_48k.wav` (cal tone, clean + 3-level
+> driven log-sweeps, dense tones through 1–8 kHz, SMPTE/CCIF twin-tone IMD, decaying notes),
+> `analyze.py` rewritten around **Farina-ESS deconvolution** (continuous 20 Hz–20 kHz frequency
+> response + THD-by-band + per-order harmonic profile/odd-even split + IMD + dynamics),
+> `run_validation.py` (renders the plugin at all 25 captures' settings via PedalRender, nulls per
+> band, writes `analysis/VALIDATION_REPORT.md`), and `internal_checks.py` (volume taper/
+> tone-invariance, knob monotonicity, sample-rate consistency, aliasing — for axes with no
+> hardware reference). `null_test.best_null` integer-lag step was switched to FFT cross-correlation
+> (was O(N²); 45 s → 0.15 s per 10 s segment). **The v2 signal REPLACES the old one, so the
+> existing 25 captures are stale until the user re-captures against it** — the report's real
+> null numbers (and the README figures) land after recapture. All internal_checks pass 5/5; the
+> taper is exact to ~1e-6 dB and volume is perfectly tone-neutral. Still Step-11-era engine; this
+> is validation tooling, not a DSP change.
 
 The full audio engine is done & validated (all stages, `MonarchChannel`, `processBlock`,
 oversampling — Step 7/8). **The UI is now complete:**

@@ -108,8 +108,12 @@ src/
 tests/        Per-stage DSP validation programs (see table above)
 tools/        Diagnostic/offline executables (PedalRender, ControlSweep, UISnapshot) plus
               the R-type scattering-matrix solver used to derive Stage 1/2's WDF adaptors
-analysis/     Real-pedal NAM captures, the test signal used to drive them, and the Python
-              null-test/THD harness used to validate the model against hardware
+analysis/     Real-pedal NAM captures, the v2 test signal that drives them, and the Python
+              reference-validation suite: gen_test_signal.py (signal), analyze.py (Farina-ESS
+              frequency response + THD-by-band + harmonics + IMD + dynamics), null_test.py
+              (sub-sample-aligned null depth), run_validation.py (renders the plugin at every
+              capture's settings and emits VALIDATION_REPORT.md), and internal_checks.py
+              (volume/knob/sample-rate/aliasing behaviour for the axes captures don't cover)
 .claude/rules/   Living technical specs — circuit topology (circuit.md), DSP implementation
                  rules (dsp.md), plugin architecture (architecture.md), UI layout (ui.md),
                  and build setup (build.md). These are the project's source of truth for
@@ -158,10 +162,18 @@ the workflow logs a warning instead of failing:
 - **0.7 (current)** — VST3 wired up cross-platform (macOS/Windows/Linux), CI build+test on
   every push, and a tagged-release pipeline producing a signed/notarized macOS zip plus
   Windows and Linux VST3 zips.
-- **0.8 (TODO)** — A full reference-validation pass against real-pedal captures: frequency
-  response analysis, comprehensive THD analysis broken out per frequency block from 40 Hz
-  through 16 kHz, and null tests pushed as far as they'll go, with the achieved null depth
-  reported here. Also: finish Apple signing/notarization if not already turned on by then.
+- **0.8 (in progress)** — A full reference-validation pass against real-pedal captures. The
+  Python suite is built (`analysis/`): a v2 test signal (cal tone, clean + 3-level driven
+  log-sweeps, dense tones through 1–8 kHz, twin-tone IMD, decaying notes), Farina-ESS
+  deconvolution for continuous 20 Hz–20 kHz frequency response and THD-by-band, harmonic
+  profile / odd-even split, IMD, dynamic (touch-sensitivity) response, and a null-depth
+  orchestrator across all captures that writes `analysis/VALIDATION_REPORT.md`. **Pending:** the
+  user re-captures the real pedal with the v2 signal, after which the report's achieved
+  null-depth figures land here. Internal checks (volume taper/tone-invariance, knob
+  monotonicity, sample-rate consistency, aliasing) already pass — note that volume, presence,
+  and the Red channel have **no varied-setting hardware reference** (the captures are all at
+  fixed volume=noon, presence=min, Yellow only), so those are validated for correct behaviour
+  rather than bit-matched to hardware. Also: finish Apple signing/notarization if not already on.
 - **0.9 (TODO)** — Factory presets.
 - **1.0 (TODO)** — Simple installers per platform. JUCE itself only builds the plugin/app
   binaries, not installers — but since the project already builds with CMake, the plan is to
