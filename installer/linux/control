@@ -1,0 +1,9 @@
+Package: monarch-of-tone
+Version: __VERSION__
+Section: sound
+Priority: optional
+Architecture: amd64
+Maintainer: Leigh Pierce <leighpierce@me.com>
+Description: Monarch of Tone overdrive plugin (VST3)
+ Circuit-level emulation of the Analog Man King of Tone dual-channel overdrive
+ pedal, built with JUCE and chowdsp_wdf WDF circuit modelling.

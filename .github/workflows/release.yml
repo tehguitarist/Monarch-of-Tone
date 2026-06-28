@@ -1,9 +1,31 @@
 name: Release
 
+# Manual trigger ONLY — this workflow has no push/schedule trigger, so it never runs unless
+# someone explicitly starts it from the Actions tab ("Run workflow") or `gh workflow run
+# release.yml`. Builds AU+VST3 for macOS (VST3-only for Windows/Linux), zips one archive per
+# platform, and publishes them — plus a per-platform installer — to a GitHub Release tagged
+# from the version in CMakeLists.txt.
+#
+# macOS artifacts are signed with a Developer ID Application certificate and notarized via
+# notarytool once the six secrets below are set (until then they ship unsigned with a warning):
+# APPLE_CERT_P12_BASE64, APPLE_CERT_PASSWORD, APPLE_SIGNING_IDENTITY, APPLE_TEAM_ID, APPLE_ID,
+# APPLE_APP_SPECIFIC_PASSWORD.
+#
+# Each platform also gets a basic installer built from installer/<platform>/ alongside the raw
+# zip: a .pkg on macOS (AU/VST3 choice screen, both selected by default), a .exe on Windows
+# (NSIS, VST3 only), and a .deb on Linux (VST3 only). The macOS .pkg wraps the already-signed-
+# and-notarized AU/VST3 bundles, but the .pkg installer itself is NOT signed (that needs a
+# separate "Developer ID Installer" cert, not provisioned here) — Gatekeeper checks the bundles
+# when a host loads them, not the installer wrapper, so this is fine for distribution, though
+# double-clicking the .pkg directly may show an "unidentified developer" prompt.
+
 on:
-  push:
-    tags: ["v*"]
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      draft:
+        description: "Create as a draft release (review before publishing)"
+        type: boolean
+        default: true
 
 jobs:
   prepare:
@@ -64,6 +86,7 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
           security list-keychain -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | sed 's/"//g')
           rm -f "$RUNNER_TEMP/cert.p12"
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
 
       - name: Codesign AU + VST3
         if: ${{ env.HAS_APPLE_SIGNING == 'true' }}
@@ -105,14 +128,30 @@ jobs:
       - name: Package zip
         run: |
           mkdir -p dist
-          cd build/Monarch_artefacts/Release
-          zip -r "$GITHUB_WORKSPACE/dist/Monarch-of-Tone-${VERSION}-macOS.zip" AU VST3
-          cd "$GITHUB_WORKSPACE"
+          # Stage AU+VST3 into a clean dir first — the Release artefacts dir also contains
+          # libMonarch_SharedCode.a (a static-lib build byproduct, not something end users install).
+          STAGE="$RUNNER_TEMP/Monarch-of-Tone"
+          mkdir -p "$STAGE/AU" "$STAGE/VST3"
+          cp -R "${{ steps.artifacts.outputs.au }}" "$STAGE/AU/"
+          cp -R "${{ steps.artifacts.outputs.vst3 }}" "$STAGE/VST3/"
+          (cd "$RUNNER_TEMP" && zip -r "$GITHUB_WORKSPACE/dist/Monarch-of-Tone-${VERSION}-macOS.zip" "Monarch-of-Tone")
+
+      - name: Build installer
+        run: installer/macos/build_installer.sh "$VERSION" build/Monarch_artefacts/Release dist
+
+      - name: Clean up keychain
+        if: always()
+        run: |
+          if [ -n "${KEYCHAIN_PATH:-}" ]; then
+            security delete-keychain "$KEYCHAIN_PATH" || true
+          fi
 
       - uses: actions/upload-artifact@v7
         with:
-          name: macOS-zip
-          path: dist/*.zip
+          name: macOS
+          path: |
+            dist/*.zip
+            dist/*.pkg
 
   windows:
     name: Windows (VST3)
@@ -138,10 +177,42 @@ jobs:
           Compress-Archive -Path "build/Monarch_artefacts/Release/VST3/*" `
             -DestinationPath "dist/Monarch-of-Tone-$env:VERSION-Windows.zip"
 
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $version = "$env:VERSION"
+
+          $makensis = Get-Command makensis.exe -ErrorAction SilentlyContinue
+          if ($makensis) {
+            $makensisPath = $makensis.Source
+          } else {
+            $candidates = @(
+              "$env:ProgramFiles\NSIS\makensis.exe",
+              "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+            )
+            $makensisPath = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          }
+
+          if (-not $makensisPath) {
+            Write-Host "makensis not found on this runner — installing via Chocolatey"
+            choco install nsis -y --no-progress
+            $makensisPath = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+          }
+
+          Write-Host "Using makensis at $makensisPath"
+          & $makensisPath /DVERSION=$version /DARTEFACTS_DIR="$PWD\build\Monarch_artefacts\Release\VST3" installer\windows\Monarch.nsi
+
+          # NSIS resolves a relative OutFile against the .nsi's own directory, not this process's
+          # CWD — move the built installer into dist/ so the upload-artifact glob finds it.
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Move-Item "installer\windows\Monarch-of-Tone-$version-Windows-Installer.exe" "dist\"
+
       - uses: actions/upload-artifact@v7
         with:
-          name: Windows-zip
-          path: dist/*.zip
+          name: Windows
+          path: |
+            dist/*.zip
+            dist/*.exe
 
   linux:
     name: Linux (VST3)
@@ -177,10 +248,15 @@ jobs:
           zip -r "$GITHUB_WORKSPACE/dist/Monarch-of-Tone-${VERSION}-Linux.zip" VST3
           cd "$GITHUB_WORKSPACE"
 
+      - name: Build installer
+        run: installer/linux/build_deb.sh "$VERSION" build/Monarch_artefacts/Release dist
+
       - uses: actions/upload-artifact@v7
         with:
-          name: Linux-zip
-          path: dist/*.zip
+          name: Linux
+          path: |
+            dist/*.zip
+            dist/*.deb
 
   publish:
     name: Publish GitHub Release
@@ -199,5 +275,10 @@ jobs:
         with:
           tag_name: "v${{ needs.prepare.outputs.version }}"
           name: "Monarch of Tone v${{ needs.prepare.outputs.version }}"
-          files: dist/*.zip
+          draft: ${{ inputs.draft }}
           generate_release_notes: true
+          files: |
+            dist/*.zip
+            dist/*.pkg
+            dist/*.exe
+            dist/*.deb

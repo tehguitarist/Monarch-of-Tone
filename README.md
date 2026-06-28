@@ -133,16 +133,57 @@ analysis/     Real-pedal NAM captures, the v2 test signal that drives them, and 
 CLAUDE.md     Project memory: build sequence, decisions, and the full validation log
 ```
 
+## Installing a release build
+
+Each [Release](https://github.com/tehguitarist/MoT/releases) ships two ways to install per
+platform — a plain zip of the plugin files (for anyone who'd rather drop them in manually) and a
+guided installer. Six files total:
+
+| Platform | Zip (manual) | Installer |
+|---|---|---|
+| macOS | `Monarch-of-Tone-X.Y.Z-macOS.zip` — AU + VST3 | `Monarch-of-Tone-X.Y.Z-macOS-Installer.pkg` — lets you choose AU, VST3, or both (both checked by default) |
+| Windows | `Monarch-of-Tone-X.Y.Z-Windows.zip` — VST3 | `Monarch-of-Tone-X.Y.Z-Windows-Installer.exe` — VST3 only (no AU on Windows) |
+| Linux | `Monarch-of-Tone-X.Y.Z-Linux.zip` — VST3 | `Monarch-of-Tone-X.Y.Z-Linux-Installer.deb` — VST3 only (no AU on Linux) |
+
+All six are built and published automatically by [GitHub Actions](.github/workflows/release.yml),
+but only on a manual trigger — nothing publishes itself on every push.
+
+### Installer (recommended)
+
+- **macOS:** double-click the `.pkg` and follow the prompts. A "Customize" screen lets you pick AU
+  and/or VST3; both are selected by default. Installs to `/Library/Audio/Plug-Ins/Components` and
+  `/Library/Audio/Plug-Ins/VST3` respectively.
+- **Windows:** run the `.exe` and follow the prompts. Installs the VST3 to
+  `%COMMONPROGRAMFILES%\VST3\Monarch of Tone.vst3`. Includes an uninstaller.
+- **Linux:** `sudo dpkg -i Monarch-of-Tone-X.Y.Z-Linux-Installer.deb` installs the VST3 to
+  `/usr/lib/vst3/Monarch of Tone.vst3`.
+
+### Manual (zip)
+
+Unzip and copy the plugin bundle(s) to your system's plugin folder yourself:
+
+- **macOS:** `Monarch of Tone.component` → `~/Library/Audio/Plug-Ins/Components/` (or
+  `/Library/Audio/Plug-Ins/Components/` for all users), `Monarch of Tone.vst3` →
+  `~/Library/Audio/Plug-Ins/VST3/` (or `/Library/Audio/Plug-Ins/VST3/`).
+- **Windows:** `Monarch of Tone.vst3` → `C:\Program Files\Common Files\VST3\`.
+- **Linux:** `Monarch of Tone.vst3` → `~/.vst3/` (or `/usr/lib/vst3/` for all users).
+
+> **macOS signing:** release artifacts are signed with a Developer ID certificate and notarized by
+> Apple — no Gatekeeper warning on first launch for the AU/VST3 bundles themselves. The `.pkg`
+> installer wrapper is not separately signed, so macOS may still show an "unidentified developer"
+> prompt when you double-click the `.pkg` directly (right-click → Open, or allow it once in System
+> Settings → Privacy & Security) — this doesn't affect the plugin bundles it installs.
+
 ## Releasing
 
 Two GitHub Actions workflows live in `.github/workflows/`:
 
 - **`ci.yml`** — on every push to `main` and every PR, builds the plugin (AU+VST3 on macOS,
   VST3 on Windows/Linux) and runs every DSP validation test in `tests/` on all three platforms.
-- **`release.yml`** — on pushing a tag like `v0.7.0` (or manual dispatch), builds release
-  binaries on macOS/Windows/Linux and publishes a GitHub Release with one zip per platform:
-  `Monarch-of-Tone-<version>-macOS.zip` (AU + VST3), `-Windows.zip` (VST3), `-Linux.zip` (VST3).
-  The version number is read from `CMakeLists.txt`, not the tag, so they can't drift apart.
+- **`release.yml`** — manual trigger only (`gh workflow run release.yml` or the Actions tab's
+  "Run workflow", with an optional `draft` input, default true). Builds release binaries and
+  installers on macOS/Windows/Linux and publishes a GitHub Release with the six files listed
+  above. The version number is read from `CMakeLists.txt`, not a tag, so they can't drift apart.
 
 **macOS code signing/notarization** runs automatically once these repo secrets are set
 (Settings → Secrets and variables → Actions); until then the macOS zip ships **unsigned** and
@@ -193,11 +234,10 @@ the workflow logs a warning instead of failing:
   so those are validated for correct behaviour rather than bit-matched. Remaining: finish Apple
   signing/notarization.
 - **0.9 (TODO)** — Factory presets.
-- **1.0 (TODO)** — Simple installers per platform. JUCE itself only builds the plugin/app
-  binaries, not installers — but since the project already builds with CMake, the plan is to
-  add a `CPack` config to `CMakeLists.txt` and let its built-in generators wrap the native
-  tooling: `productbuild`/`pkgbuild` on macOS, WiX or NSIS on Windows, DEB on Linux. Last item
-  on the roadmap; the per-platform zips remain the distribution method until this lands.
+- **1.0 (done)** — Per-platform installers — `installer/{macos,windows,linux}/` wraps the native
+  packaging tools directly (`pkgbuild`/`productbuild` on macOS, NSIS on Windows, `dpkg-deb` on
+  Linux) rather than a `CPack` layer, built and published by `release.yml` on manual dispatch
+  alongside the existing per-platform zips. See "Installing a release build" above.
 
 ## Thanks
 
