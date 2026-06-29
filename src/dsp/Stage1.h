@@ -36,13 +36,19 @@ class Stage1
 {
 public:
     // Stage-1 feedback floor (Z_upper series R). Theseus R2(100k) with SW1B switching R3(1k) in
-    // parallel (the Hi-Gain switch). Stock (Yellow, SW1B closed) = R2∥R3 ≈ 0.99k; Hi-Gain (Red,
-    // SW1B open) = R2 = 100k. Parts-list confirmed (analysis/theseus_kit_documentation.pdf p29).
+    // parallel (the Hi-Gain switch). Stock (Yellow, SW1B closed) = R2∥R3 ≈ 0.99k.
     static constexpr double R2 = 100.0e3;
     static constexpr double R3 = 1.0e3;
     static constexpr double R6_floor = (R2 * R3) / (R2 + R3); // ≈ 990 Ω — Yellow (stock)
-    static constexpr double HiGain_floor = R2;                // 100 k — Red (Hi-Gain)
     static constexpr double DRIVE_max = 100.0e3;              // DRIVE 100kB linear
+
+    // Hi-Gain floor (Red). The literal Theseus mod opens SW1B → floor = R2 = 100k, which we found
+    // overdrives the channel (its minimum already sits very hot). We have no Red NAM captures to
+    // pin the floor, so it is a VOICING choice: tame it to the Analogman "9 o'clock acts like noon"
+    // feel exactly. The DRIVE knob's 270° sweep is 9 clock-hours (≈7:30→4:30, noon = 0.5); shifting
+    // Red's whole curve up by 3 hours = one-third of the sweep makes 9:00→old-noon and noon→old-3:00.
+    // DRIVE is linear, so a +⅓-knob shift is just +⅓·DRIVE_max of floor resistance over Yellow.
+    static constexpr double HiGain_floor = R6_floor + DRIVE_max / 3.0; // ≈ 34.3 k — Red (tamed Hi-Gain)
 
     explicit Stage1 (bool hiGain = false) : floorR (hiGain ? HiGain_floor : R6_floor) { setDrive (0.5); }
 

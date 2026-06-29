@@ -144,7 +144,7 @@ to the v1.1 perf pass).
 | Stage 1 (IC_A) | Non-inverting — no `PolarityInverterT`; two-one-port solve (no R-type matrix) |
 | Stage 1 Z_lower | C4(10n) series [ R4(27k) ∥ (R5(33k) + C3(10n)) ] — Theseus topology |
 | Stage 1 Z_upper | (floor + DRIVE 0–100k) ∥ C2(100pF); Av(s) = 1 + Z_upper/Z_lower, DC gain 1 |
-| Stage 1 feedback floor | **Yellow R2∥R3 ≈ 990 Ω** (stock) / **Red R2 = 100k** (Hi-Gain). `hiGain` ctor flag |
+| Stage 1 feedback floor | **Yellow R2∥R3 ≈ 990 Ω** (stock) / **Red ≈ 34.3 k** (tamed Hi-Gain = R6_floor + DRIVE_max/3; voicing choice over the literal R2=100k — shifts Red's drive curve +⅓ knob so 9:00≈noon). `hiGain` ctor flag |
 | Input coupling cap | 22n (Theseus; matsumin 10n — both sub-audio) |
 | Stage 2 (IC_B) | **Inverting** ×−22 (R10 220k / R9 10k); inversion via op-amp VCVS terminals; HPF 159 Hz (C7 100n) |
 | Soft-clip SW-1 | MA856 ×4 = `[D4+D5]∥[D2+D3]` ≡ ONE `DiodePairT` n_eff=2·1.512≈3.024, Is=7.74e-13; +R11(6.8k), branch ∥ R10 |

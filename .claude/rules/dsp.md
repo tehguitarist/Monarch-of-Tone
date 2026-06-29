@@ -212,7 +212,8 @@ Never audio-taper DRIVE/TONE/PRESENCE; never linear-taper VOL.
 ## Component Values
 
 See circuit.md §1 (master table) and §6 (diode params). Stage-1 floors: Yellow R2∥R3 ≈ 990Ω, Red
-R2 = 100k (the `hiGain` ctor flag). Input cap 22n; Z_lower = C4(10n) series [R4(27k) ∥ (R5(33k) +
+≈ 34.3k (tamed Hi-Gain = R6_floor + DRIVE_max/3, a voicing choice over the literal R2=100k; the
+`hiGain` ctor flag). Input cap 22n; Z_lower = C4(10n) series [R4(27k) ∥ (R5(33k) +
 C3(10n))]; Z_upper HF cap C2 = 100pF.
 
 ## Signal Calibration
