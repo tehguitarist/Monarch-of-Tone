@@ -163,7 +163,6 @@ void MonarchAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBloc
 
     const int numCh = (int) strips.size();
     scratchDry.setSize (numCh, samplesPerBlock);
-    scratchNodeG.setSize (numCh, samplesPerBlock);
     scratchNodeHC.setSize (numCh, samplesPerBlock);
 
     for (auto& s : strips)
@@ -232,15 +231,21 @@ void MonarchAudioProcessor::updateOversampling (int numCh)
         osRed = make();
     }
 
-    // Re-prepare just the clip-span stages at the oversampled rate (base × 2^log2).
+    // Re-prepare BOTH the linear and clip stages at the oversampled rate (base × 2^log2). The whole
+    // channel now runs oversampled (not just the clip span), so the linear WDF stages' bilinear-
+    // transform frequency warping shrinks with the OS factor — fixing the top-octave droop a
+    // base-rate solve leaves (16 kHz: −2.4 dB @48k → ~0 @192k). At 1x, clipRate == base rate and the
+    // per-channel warp-correction shelf compensates instead. One-block gap on factor change is fine.
     const double clipRate = baseSampleRate * (double) (1 << wantLog2);
     for (auto& s : strips)
     {
+        s.yellow.prepareLinear (clipRate);
+        s.red.prepareLinear (clipRate);
         s.yellow.prepareClip (clipRate);
         s.red.prepareClip (clipRate);
     }
 
-    // Report the added latency (two clip-span oversamplers in series; 0 at 1x).
+    // Report the added latency (two oversamplers in series; 0 at 1x).
     double latency = 0.0;
     if (osYellow != nullptr)
         latency += osYellow->getLatencyInSamples() + osRed->getLatencyInSamples();
@@ -264,8 +269,9 @@ bool MonarchAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) 
     return mainIn == mainOut;
 }
 
-// Process one pedal channel (Yellow or Red) across the whole buffer: base-rate Stage 1 →
-// oversampled clip span → base-rate Tone/Volume, then a click-free wet/dry bypass crossfade.
+// Process one pedal channel (Yellow or Red) across the whole buffer: the WHOLE chain (Stage 1 →
+// clip span → Tone/Volume) runs at the oversampled rate so the linear stages' bilinear warping
+// shrinks with the OS factor, then a click-free wet/dry bypass crossfade.
 // Operates in place on `buf` (already in circuit volts on entry, still in circuit volts on exit).
 void MonarchAudioProcessor::processPedalChannel (juce::AudioBuffer<float>& buf, int numCh,
                                                  int numSamples, bool isYellow,
@@ -289,62 +295,58 @@ void MonarchAudioProcessor::processPedalChannel (juce::AudioBuffer<float>& buf, 
     if (! anyActive)
         return;
 
-    // 1. Base-rate front: capture dry + Stage 1 → NodeG.
+    // 1. Capture dry (for the wet/dry bypass crossfade).
     for (int ch = 0; ch < numCh; ++ch)
     {
         const float* in = buf.getReadPointer (ch);
         double* dry = scratchDry.getWritePointer (ch);
-        double* ng = scratchNodeG.getWritePointer (ch);
-        auto& c = chan ((size_t) ch);
         for (int n = 0; n < numSamples; ++n)
-        {
             dry[n] = (double) in[n];
-            ng[n] = c.processPre (dry[n]);
-        }
     }
 
-    // 2. Nonlinear clip span — oversampled (factor > 1) or direct (1x).
+    // 2. WHOLE channel (Stage 1 → clip span → Tone/Volume) at the oversampled rate (factor > 1) or
+    //    direct (1x). Running the linear stages oversampled too removes their bilinear-transform
+    //    top-octave warping; at 1x the per-channel warp-correction shelf compensates. Wet → scratchNodeHC.
     if (os != nullptr)
     {
-        juce::dsp::AudioBlock<double> ngBlock (scratchNodeG.getArrayOfWritePointers(),
-                                               (size_t) numCh, (size_t) numSamples);
-        auto up = os->processSamplesUp (ngBlock);
+        juce::dsp::AudioBlock<double> dryBlock (scratchDry.getArrayOfWritePointers(),
+                                                (size_t) numCh, (size_t) numSamples);
+        auto up = os->processSamplesUp (dryBlock);
         const int osN = (int) up.getNumSamples();
         for (int ch = 0; ch < numCh; ++ch)
         {
             auto& c = chan ((size_t) ch);
             for (int i = 0; i < osN; ++i)
-                up.setSample (ch, i, c.processClip (up.getSample (ch, i)));
+                up.setSample (ch, i, c.processPost (c.processClip (c.processPre (up.getSample (ch, i)))));
         }
-        juce::dsp::AudioBlock<double> hcBlock (scratchNodeHC.getArrayOfWritePointers(),
-                                               (size_t) numCh, (size_t) numSamples);
-        os->processSamplesDown (hcBlock);
+        juce::dsp::AudioBlock<double> wetBlock (scratchNodeHC.getArrayOfWritePointers(),
+                                                (size_t) numCh, (size_t) numSamples);
+        os->processSamplesDown (wetBlock);
+        // scratchDry is untouched (processSamplesUp takes a const input block) → still valid below.
     }
     else
     {
         for (int ch = 0; ch < numCh; ++ch)
         {
-            const double* ng = scratchNodeG.getReadPointer (ch);
-            double* hc = scratchNodeHC.getWritePointer (ch);
+            const double* dry = scratchDry.getReadPointer (ch);
+            double* wet = scratchNodeHC.getWritePointer (ch);
             auto& c = chan ((size_t) ch);
             for (int n = 0; n < numSamples; ++n)
-                hc[n] = c.processClip (ng[n]);
+                wet[n] = c.processPost (c.processClip (c.processPre (dry[n])));
         }
     }
 
-    // 3. Base-rate back: Tone → Volume, then wet/dry bypass crossfade → buf.
+    // 3. Wet/dry bypass crossfade → buf.
     for (int ch = 0; ch < numCh; ++ch)
     {
         const double* dry = scratchDry.getReadPointer (ch);
-        const double* hc = scratchNodeHC.getReadPointer (ch);
+        const double* wet = scratchNodeHC.getReadPointer (ch);
         float* out = buf.getWritePointer (ch);
-        auto& c = chan ((size_t) ch);
         auto& sm = smoother ((size_t) ch);
         for (int n = 0; n < numSamples; ++n)
         {
-            const double wet = c.processPost (hc[n]);
             const double g = (double) sm.getNextValue();
-            out[n] = (float) (dry[n] + g * (wet - dry[n]));
+            out[n] = (float) (dry[n] + g * (wet[n] - dry[n]));
         }
     }
 }

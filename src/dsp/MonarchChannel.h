@@ -93,14 +93,14 @@ public:
     // the pot's dual action moves Stage 2's flat level, NOT Stage 1's tilt — so this is not in the
     // linear topology; it's the same class of second-order / capture-chain effect as the (retired)
     // TiltShelf and the even-harmonic injection, corrected empirically here. Two physically-keyed,
-    // drive-scaled first-order shelves on Stage 1's output (NodeG, base rate, pre-clip so the
-    // clipper sees the corrected spectrum), each fading to unity by the G4–G5 crossover:
+    // drive-scaled first-order shelves on Stage 1's output (NodeG, pre-clip so the clipper sees the
+    // corrected spectrum), each fading to unity by the G4–G5 crossover:
     //   • HIGH-SHELF, treble lift, fades OUT as drive rises — restores the Stage-1 HF shelf that
     //     Av(s)=1+Z_upper/Z_lower lets collapse at low drive (the original "engaging it is dark").
     //   • LOW-SHELF, bass lift, fades IN as drive rises — counters the documented
     //     bass-bloom-under-drive the model under-does (real pedal blooms low end as it compresses).
-    // 16 kHz stays ~3.8 dB off at every setting: that's the captures' own bandwidth/alias limit
-    // (CLAUDE.md — the plugin's 8×-anti-aliased top is the more-correct version), NOT corrected.
+    // (The top-octave deficit once blamed on capture aliasing was actually bilinear warping of the
+    // base-rate linear solve — now fixed by running the linear stages oversampled; see warp* below.)
     static constexpr double shelfPivotHz = 450.0; // treble high-shelf geometric centre (Hz)
     static constexpr double shelfMaxDb = 5.6;     // HF lift at drive 0 (fades to 0 by ~drive 0.47)
     static constexpr double shelfSlopeDb = 11.8;  // dB of HF lift lost per unit drive
@@ -109,20 +109,34 @@ public:
     static constexpr double bassSlopeDb = 7.5;    // dB of LF lift gained per unit drive past onset
     static constexpr double bassMaxDb = 4.2;      // cap on the LF lift
 
+    // ---- Bilinear-warp top-octave correction (rate-dependent high-shelf, 2026-06-29) ---------
+    // The linear WDF stages now run at the oversampled rate (see PluginProcessor): at 2x+ the
+    // bilinear-transform frequency warping that droops the top octave is gone (measured: 16 kHz
+    // deficit −2.4 dB @48k → −0.2 dB @96k → ~0 @192k). At 1x the linear rate == session rate, so
+    // the warp remains; this shelf approximately compensates the recoverable 8–12 kHz there. Its
+    // lift scales as (48k/rate)^4 — full at 48k, ~0 by 96k — so it self-disables once the rate
+    // already removes the warp. (First-order can't match the steep near-Nyquist cliff; 16 kHz+
+    // stays deficient at 1x — use 2x+ for full top-octave fidelity. Oversampling is the exact fix.)
+    static constexpr double warpPivotHz = 6500.0; // warp-correction high-shelf centre (Hz)
+    static constexpr double warpRefDb = 4.5;      // HF lift at 48 kHz; ×(48k/rate)^4
+
     explicit MonarchChannel (bool hiGain = false) : stage1 (hiGain), hiGainStage1 (hiGain) {}
 
-    // The linear stages run at the base rate; the nonlinear clip span (Stage2/SW1 + rail-sat
-    // + SW2) runs at the OVERSAMPLED rate, so the OS factor changes only the anti-aliasing,
-    // never the linear voicing. Prepare the two groups independently; re-prepare just the clip
-    // group when the OS factor changes. For standalone/1x use, baseRate == clipRate.
-    void prepareLinear (double baseRate)
+    // The WHOLE channel now runs at the OVERSAMPLED rate (PluginProcessor wraps Stage 1, the clip
+    // span, and Tone/Volume in one oversampler), so the linear stages' near-Nyquist bilinear warp
+    // shrinks with the OS factor. Both prepareLinear and prepareClip are re-called at the OS rate on
+    // factor change. `rate` here is that effective (oversampled) rate; for standalone/1x it == base.
+    void prepareLinear (double rate)
     {
-        stage1.prepare (baseRate);
-        tone.prepare (baseRate);
-        volume.prepare (baseRate);
-        shBaseRate = baseRate;
+        stage1.prepare (rate);
+        tone.prepare (rate);
+        volume.prepare (rate);
+        shBaseRate = rate;
         updateDriveShelf (0.5); // default = unity pass-through until setDrive() runs
-        hsX1 = hsY1 = lsX1 = lsY1 = 0.0;
+        // Bilinear-warp top-octave correction: rate-only, full at 48k, self-disabling by ~96k.
+        const double warpDb = warpRefDb * std::pow (48000.0 / shBaseRate, 4.0);
+        shelfCoeffs (1.0, std::pow (10.0, warpDb / 20.0), warpPivotHz, wsB0, wsB1, wsA1);
+        hsX1 = hsY1 = lsX1 = lsY1 = wsX1 = wsY1 = 0.0;
     }
 
     void prepareClip (double clipRate)
@@ -157,7 +171,7 @@ public:
         volume.reset();
         railXprev = 0.0;
         railFprev = 0.0;
-        hsX1 = hsY1 = lsX1 = lsY1 = 0.0;
+        hsX1 = hsY1 = lsX1 = lsY1 = wsX1 = wsY1 = 0.0;
     }
 
     // ---- Parameter setters (call per block; tapers applied inside each stage) ----
@@ -304,9 +318,12 @@ private:
         const double t = hsB0 * x + hsB1 * hsX1 - hsA1 * hsY1; // treble high-shelf
         hsX1 = x;
         hsY1 = t;
-        const double y = lsB0 * t + lsB1 * lsX1 - lsA1 * lsY1; // bass low-shelf
+        const double b = lsB0 * t + lsB1 * lsX1 - lsA1 * lsY1; // bass low-shelf
         lsX1 = t;
-        lsY1 = y;
+        lsY1 = b;
+        const double y = wsB0 * b + wsB1 * wsX1 - wsA1 * wsY1; // bilinear-warp top-octave correction
+        wsX1 = b;
+        wsY1 = y;
         return y;
     }
 
@@ -357,10 +374,12 @@ private:
     double railXprev { 0.0 };                       // ADAA state: previous rail-sat input
     double railFprev { 0.0 };                       // ADAA state: F(railXprev) (F(0)=0)
 
-    // Drive-dependent Stage-1 voicing correction: treble high-shelf (hs*) + bass low-shelf (ls*).
+    // Capture-match correction: treble high-shelf (hs*) + bass low-shelf (ls*) + bilinear-warp
+    // top-octave high-shelf (ws*). shBaseRate is the effective (oversampled) rate.
     double shBaseRate { 48000.0 };
     double hsB0 { 1.0 }, hsB1 { 0.0 }, hsA1 { 0.0 }, hsX1 { 0.0 }, hsY1 { 0.0 };
     double lsB0 { 1.0 }, lsB1 { 0.0 }, lsA1 { 0.0 }, lsX1 { 0.0 }, lsY1 { 0.0 };
+    double wsB0 { 1.0 }, wsB1 { 0.0 }, wsA1 { 0.0 }, wsX1 { 0.0 }, wsY1 { 0.0 };
 
     double clipEnv { 0.0 };   // clipping-depth envelope (gates the even-harmonic coeff)
     double meanSq { 0.0 };    // slow ⟨soft²⟩ (removes only DC from the H2 injection)

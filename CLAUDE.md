@@ -108,19 +108,28 @@ reproduce.
 Best-fit-gain-aligned EQ error (plugin vs captures, 40 Hz–16 kHz, every gain/tone) is a clean,
 tone-independent **tilt that reverses with drive**: treble-short at low drive, bass-short/treble-hot
 at high drive, crossing near G4. Corrected with two drive-scaled first-order shelves on Stage 1's
-output (pre-clip, base rate): a **treble high-shelf** fading OUT with drive (restores the Stage-1 HF
-shelf `Av=1+Z_upper/Z_lower` lets collapse at low drive — the "engaging it is dark" complaint) and a
-**bass low-shelf** fading IN with drive (counters the bass-bloom-under-drive). Result: **50 Hz–10 kHz
-within ~1.1 dB at all gain/tone** (RMS 0.3–0.7), worst ~1.7 dB at two clip-/tone-extreme corners.
-Also *improves* OD/Dist nulls at mid/high drive (G5 OD −18.4→−23.7, G5 Dist −14.9→−19.1). 12.5–16 kHz
-left uncorrected (capture bandwidth/alias limit; the plugin's anti-aliased top is the more-correct one).
+output (pre-clip): a **treble high-shelf** fading OUT with drive (restores the Stage-1 HF shelf
+`Av=1+Z_upper/Z_lower` lets collapse at low drive — the "engaging it is dark" complaint) and a
+**bass low-shelf** fading IN with drive (counters the bass-bloom-under-drive). Also *improves*
+OD/Dist nulls at mid/high drive (G5 OD −18.4→−23.7, G5 Dist −14.9→−19.1).
+
+### Linear stages run oversampled — top-octave warp fix (2026-06-29)
+The remaining top-octave deficit (16 kHz ~−3.8 dB at every setting) was first wrongly blamed on NAM
+capture aliasing — but NAM captures null to ~−50 dB and ARE accurate up there. It's **bilinear-
+transform frequency warping** of the base-rate linear WDF solve (16 kHz deficit collapses −2.4 dB
+@48k → −0.2 @96k → ~0 @192k when the linear stages run faster). Fixed by running the **whole channel
+oversampled** (not just the clip span): both `prepareLinear` and `prepareClip` re-prep at the OS
+rate. **Render/2x+ paths now match 50 Hz–16 kHz within ~1.2 dB at all gain/tone** (worst ~2.3 dB at
+the tone-down top-octave corner). At **1x** the linear rate == session rate so the warp remains; a
+rate-scaled warp high-shelf (`warp*`, `×(48k/rate)^4`) roughly fixes 8–12 kHz but 16 kHz+ stays
+deficient (a first-order shelf can't match the near-Nyquist cliff) — 1x is the low-CPU/approximate-
+top mode, use 2x+ for full fidelity. CPU cost: the linear WDF now runs at the OS rate too (relevant
+to the v1.1 perf pass).
 
 ### Accepted residuals (un-modeled second-order device physics, per user pref for circuit accuracy)
 - OD compresses ~3–4 dB lighter than the real pedal at hot input (Distortion compression good, Δ~2 dB).
-- A small genuine HF-harmonic difference >8 kHz (tone-stage rolloff); and the captures' own 4–6 kHz
-  energy is partly NAM aliasing (the plugin's 8× anti-aliased clip is the more-correct version). The
-  captures roll off hard ≥12.5 kHz (−3.8 dB at 16 kHz at every setting) — a capture bandwidth limit,
-  deliberately NOT EQ-matched.
+- A small genuine HF-harmonic difference >8 kHz (tone-stage rolloff); the captures' own 4–6 kHz
+  energy is partly NAM aliasing (the plugin's 8× anti-aliased clip is the more-correct version).
 - Per-mode capture levels are **normalized** (Boost/OD/Dist sit at the same level, physically
   impossible at fixed volume) — A/B and null tests must re-gain per mode. The plugin's
   Boost>OD>Dist hierarchy is physically correct (diode-clamp ratios).
@@ -148,7 +157,7 @@ left uncorrected (capture bandwidth/alias limit; the plugin's anti-aliased top i
 | Gain peak | +12.85 dB @ ~4.1 kHz (Yellow, drive 0.5). Accurate at base rate — linear stages need no oversampling/prewarp |
 | Op-amp rails | ±3.3 V soft knee @ 9V (Boost-only clip; tone-safe — diodes clip first in OD/Dist). Scaled by supply-voltage mod |
 | Calibration | `circuitVoltsPerFS = 0.87` (real circuit volts internally, not normalized) |
-| Oversampling | live 1/2/4/8x default **2x**; render default **4x** (auto via `isNonRealtime()`); wraps clip span only; bypassed channels skip it |
+| Oversampling | live 1/2/4/8x default **2x**; render default **4x** (auto via `isNonRealtime()`); wraps the **whole channel** (linear stages too, to kill near-Nyquist bilinear warp); bypassed channels skip it |
 
 ## Three Most Likely Implementation Mistakes
 

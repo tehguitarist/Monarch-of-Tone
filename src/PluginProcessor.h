@@ -158,13 +158,14 @@ private:
     std::atomic<float>* pOversampleLive {};
     std::atomic<float>* pOversampleRender {};
 
-    // ---- Oversampling: wraps ONLY each channel's nonlinear clip span (Stage2/SW1 + rail + SW2).
+    // ---- Oversampling: wraps each channel's WHOLE chain (Stage 1 + clip span + Tone/Volume), so
+    // the linear WDF stages' near-Nyquist bilinear warp shrinks with the OS factor (see dsp.md).
     // One oversampler per pedal channel (Yellow, Red), each multi-channel (L/R). Factor is chosen
     // per block from isNonRealtime() (render) vs live; the filter is low-latency IIR for live and
     // max-quality FIR for render. Rebuilt on the audio thread only when the factor/quality/channel
     // count changes (rare, user-driven) — one-block gap accepted per architecture.md.
     std::unique_ptr<juce::dsp::Oversampling<double>> osYellow, osRed;
-    juce::AudioBuffer<double> scratchDry, scratchNodeG, scratchNodeHC;
+    juce::AudioBuffer<double> scratchDry, scratchNodeHC;
     double baseSampleRate { 0.0 };
     int maxBlock { 0 };
     int activeLog2 { -1 };          // current OS exponent: 0 = 1x, 1 = 2x, 2 = 4x, 3 = 8x

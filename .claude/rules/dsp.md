@@ -40,12 +40,19 @@ the source port (instead of `voltage(branch1) − voltage(driveR)`) once drooped
 ~0.2 dB by 5 kHz and dragged the gain peak down ~880 Hz — it looked like bilinear warping but was
 this bug.
 
-### Linear-stage accuracy at base rate
-With the passive-port readout, the WDF matches the analog circuit's bilinear transform to within
-the small expected warp (Stage-1 peak vs analog 3803 Hz: −74 Hz @48k, −23 Hz @96k). **So the
-linear stages are accurate at the base sample rate — no oversampling or prewarping of linear
-stages.** Oversampling is for the *clipping* stages' anti-aliasing only. Prewarping was rejected: a
-fixed prewarp freezes the gain peak, but the analog peak sweeps ~2.8–5.0 kHz with DRIVE.
+### Linear stages run oversampled (top-octave warp fix, 2026-06-29)
+With the passive-port readout the WDF matches the analog circuit's bilinear transform to within the
+expected warp at the gain peak (Stage-1 peak vs analog 3803 Hz: −74 Hz @48k). BUT near Nyquist that
+warp is large: at 48 kHz the **top octave droops** (16 kHz −6.6 dB vs the 192 kHz solve), which A/B
+showed as a real treble deficit vs the captures (NOT capture aliasing — NAM captures null to ~−50 dB
+and are accurate up there). Fix: **the whole channel — linear stages included — now runs at the
+oversampled rate** (`processSamplesUp` wraps `processPre`+`processClip`+`processPost`), so the warp
+shrinks with the OS factor (16 kHz deficit: −2.4 dB @48k → −0.2 @96k → ~0 @192k). Voicing is now
+(correctly) more accurate at higher OS. At **1x** the linear rate == session rate, so the warp
+remains; a per-channel rate-scaled high-shelf (`warp*` in MonarchChannel, `×(48k/rate)^4`) roughly
+compensates the recoverable 8–12 kHz there (16 kHz+ stays deficient at 1x — a first-order shelf
+can't match the near-Nyquist cliff; use 2x+ for full top-octave fidelity). Prewarping was rejected
+earlier (a fixed prewarp freezes the gain peak, but the analog peak sweeps ~2.8–5.0 kHz with DRIVE).
 
 ### prepareToPlay
 Call `.prepare(sampleRate)` on **every** `CapacitorT` in both channels (missing one → silence /
@@ -111,9 +118,11 @@ Hi-Gain is fixed on Red.
 
 ## Oversampling
 
-- `juce::dsp::Oversampling`, one per channel, wrapping **only the clip span** (`processClip`:
-  Stage2/SW1 + rail-sat + SW2). Linear stages stay at base rate → OS factor changes anti-aliasing
-  only, never voicing (`prepareLinear` never re-called on factor change; only `prepareClip`).
+- `juce::dsp::Oversampling`, one per channel, now wrapping **the whole channel** (`processSamplesUp`
+  → `processPre`+`processClip`+`processPost` → `processSamplesDown`), not just the clip span. Both
+  `prepareLinear` AND `prepareClip` are re-called at the oversampled rate on factor change. So the OS
+  factor changes anti-aliasing of the clip stages AND removes the linear stages' near-Nyquist
+  bilinear warp (higher OS = more accurate top octave; see "Linear stages run oversampled" above).
 - Two APVTS settings, both `AudioParameterChoice` "1x"/"2x"/"4x"/"8x":
   `oversampling_realtime` (live, default **2x**) and `oversampling_render` (default **4x**,
   selected when `isNonRealtime()`). **IIR low-latency live, FIR max-quality render.**
@@ -172,17 +181,21 @@ The model-vs-capture EQ error (best-fit-gain-aligned, 40 Hz–16 kHz, every gain
 at high drive, crossing near G4. (The literal 3-terminal DRIVE wiper-tap was re-derived and shown to
 share the 2-terminal model's drive-dependence — the pot's dual action moves Stage 2's flat level,
 not Stage 1's tilt — so this is a second-order/capture-chain effect, not a topology fix.) Corrected
-with **two drive-scaled first-order shelves on Stage 1's output** (`processPre`, base rate, pre-clip
-so the clipper sees the corrected spectrum), each unity by the G4–G5 crossover:
+with **two drive-scaled first-order shelves on Stage 1's output** (`processPre`, pre-clip so the
+clipper sees the corrected spectrum; runs at the oversampled rate with the rest of the channel),
+each unity by the G4–G5 crossover:
 - **Treble high-shelf** (`shelfPivotHz` 450, `shelfMaxDb`/`shelfSlopeDb`): HF lift that fades OUT
   with drive — restores the Stage-1 HF shelf `Av=1+Z_upper/Z_lower` lets collapse at low drive.
 - **Bass low-shelf** (`bassPivotHz` 105, `bassOnsetDrive`/`bassSlopeDb`/`bassMaxDb`): LF lift that
   fades IN with drive — counters the documented bass-bloom-under-drive.
+- **Warp high-shelf** (`warpPivotHz`/`warpRefDb`, rate-scaled `×(48k/rate)^4`): compensates the
+  base-rate bilinear top-octave droop at 1x; self-disables at 2x+ where oversampling fixes it.
 
-Both use the prewarped bilinear `shelfCoeffs` helper (a high-shelf sets Glo=1; a low-shelf sets
-Ghi=1; Glo=Ghi → exact unity). Result: 50 Hz–10 kHz within ~1.1 dB at all gain/tone (RMS 0.3–0.7);
-also *improves* OD/Dist nulls at mid/high drive. 12.5–16 kHz left uncorrected (capture bandwidth
-limit). State (`hs*`/`ls*`) resets in `prepareLinear`/`reset`; coeffs update per block in `setDrive`.
+All use the prewarped bilinear `shelfCoeffs` helper (a high-shelf sets Glo=1; a low-shelf sets
+Ghi=1; Glo=Ghi → exact unity). Result (render/2x+ paths): **50 Hz–16 kHz within ~1.2 dB at all
+gain/tone** (worst ~2.3 dB at the tone-down top-octave corner); also *improves* OD/Dist nulls at
+mid/high drive. State (`hs*`/`ls*`/`ws*`) resets in `prepareLinear`/`reset`; drive-shelf coeffs
+update per block in `setDrive`, the warp shelf in `prepareLinear` (rate-only).
 
 ---
 
