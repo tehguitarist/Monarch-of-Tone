@@ -2,6 +2,8 @@
 
 #include <chowdsp_wdf/chowdsp_wdf.h>
 
+#include "DiodeClipper.h"
+
 namespace monarch
 {
 namespace wdft = chowdsp::wdft;
@@ -23,8 +25,13 @@ namespace wdft = chowdsp::wdft;
  * 1S1588 = 1N914 = 1N4148: single diode each direction (true antiparallel, NOT series
  * strings), so the ideality is n_1S1588 (passed as the DiodePairT `nDiodes` arg, which scales
  * Vt). Validated by symmetric HARD clipping with onset ≈ 0.584 V.
+ *
+ * The diode root is a `RuntimeDiodePairT` (HQ / Eco lever, see SW1SoftClip / DiodeClipper.h):
+ * `setHighQuality(true)` = Best eqn-39 (production), `false` = Good eqn-18 (~half the cost). The
+ * class is templated on `wdft::DiodeQuality` so FeatureProfile can A/B the compile-time choice.
  */
-class SW2HardClip
+template <wdft::DiodeQuality Quality = wdft::DiodeQuality::Best>
+class SW2HardClipT
 {
 public:
     static constexpr double R12 = 1.0e3; // always-present Stage 2 output series R
@@ -34,7 +41,10 @@ public:
     static constexpr double n_1S1588 = 1.752;
     static constexpr double Vt = 25.85e-3;
 
-    SW2HardClip() = default;
+    SW2HardClipT() { dp.setHighQuality (Quality == wdft::DiodeQuality::Best); }
+
+    /** HQ / Eco lever: true = Best eqn-39 solve (production), false = Good eqn-18 (~half the cost). */
+    void setHighQuality (bool shouldBeHighQ) noexcept { dp.setHighQuality (shouldBeHighQ); }
 
     void prepare (double /*sampleRate*/) { reset(); }
 
@@ -52,7 +62,10 @@ public:
 
 private:
     wdft::ResistiveVoltageSourceT<double> src { R12 }; // V(pin7) + series R12 → node_HC
-    wdft::DiodePairT<double, decltype (src), wdft::DiodeQuality::Best> dp { src, Is_1S1588, Vt, n_1S1588 };
+    RuntimeDiodePairT<double, decltype (src)> dp { src, Is_1S1588, Vt, n_1S1588 };
 };
+
+/** Production hard-clip stage: Best-quality diode by default (byte-for-byte unchanged). */
+using SW2HardClip = SW2HardClipT<>;
 
 } // namespace monarch

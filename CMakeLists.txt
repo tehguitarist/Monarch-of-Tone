@@ -311,3 +311,77 @@ target_link_libraries(ControlSweep
         juce::juce_dsp
         juce::juce_recommended_config_flags
 )
+
+# ============================================================================================
+#  Performance & fidelity probes (build.md). Registered with ctest as FINITE-ONLY checks below:
+#  they assert no NaN/Inf and (FeatureProfile) the HQ bit-identical guard — never an absolute
+#  CPU %, which varies with CI hardware. PerfBenchmark / OSFidelity drive the full processor
+#  (need oversampling + reported latency); FeatureProfile is header-only DSP (isolates the lever).
+# ============================================================================================
+
+# FeatureProfile — header-only: CPU + accuracy of the diode-quality HQ/Eco lever, + bit-id guard.
+add_executable(FeatureProfile tests/FeatureProfile.cpp)
+target_link_libraries(FeatureProfile PRIVATE xsimd::xsimd chowdsp::chowdsp_wdf)
+target_compile_options(FeatureProfile PRIVATE ${MONARCH_WARNING_FLAGS})
+
+# PerfBenchmark — full processor: CPU % of realtime + latency per OS factor × clip mode.
+juce_add_console_app(PerfBenchmark PRODUCT_NAME "PerfBenchmark")
+target_sources(PerfBenchmark
+    PRIVATE
+        tests/PerfBenchmark.cpp
+        src/PluginProcessor.cpp
+        src/PluginEditor.cpp
+        src/ui/MonarchLookAndFeel.cpp
+        src/ui/PedalFace.cpp
+)
+target_include_directories(PerfBenchmark PRIVATE src)
+target_compile_definitions(PerfBenchmark
+    PRIVATE
+        "JucePlugin_Name=\"Monarch of Tone\""
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0
+)
+target_link_libraries(PerfBenchmark
+    PRIVATE
+        xsimd::xsimd
+        chowdsp::chowdsp_wdf
+        MonarchAssets
+        juce::juce_audio_utils
+        juce::juce_dsp
+        juce::juce_recommended_config_flags
+)
+
+# OSFidelity — full processor: how close 1x/2x/4x sit to 8x (small-signal FR + harmonic/aliasing).
+juce_add_console_app(OSFidelity PRODUCT_NAME "OSFidelity")
+target_sources(OSFidelity
+    PRIVATE
+        tests/OSFidelity.cpp
+        src/PluginProcessor.cpp
+        src/PluginEditor.cpp
+        src/ui/MonarchLookAndFeel.cpp
+        src/ui/PedalFace.cpp
+)
+target_include_directories(OSFidelity PRIVATE src)
+target_compile_definitions(OSFidelity
+    PRIVATE
+        "JucePlugin_Name=\"Monarch of Tone\""
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0
+)
+target_link_libraries(OSFidelity
+    PRIVATE
+        xsimd::xsimd
+        chowdsp::chowdsp_wdf
+        MonarchAssets
+        juce::juce_audio_utils
+        juce::juce_dsp
+        juce::juce_recommended_config_flags
+)
+
+# ---- ctest registration: finite-only probe gates + the existing DSP validation tests ----
+enable_testing()
+add_test(NAME FeatureProfile COMMAND FeatureProfile)
+add_test(NAME PerfBenchmark  COMMAND PerfBenchmark)
+add_test(NAME OSFidelity     COMMAND OSFidelity)
+add_test(NAME FullChain_DualChannel COMMAND FullChain_DualChannel)
+add_test(NAME ControlSweep   COMMAND ControlSweep)

@@ -2,6 +2,8 @@
 
 #include <chowdsp_wdf/chowdsp_wdf.h>
 
+#include "DiodeClipper.h"
+
 namespace monarch
 {
 namespace wdft = chowdsp::wdft;
@@ -30,8 +32,15 @@ namespace wdft = chowdsp::wdft;
  *
  * Inverting (the −22 sign rides on i_in and the output read). Validated by symmetric soft
  * clipping with onset ≈ 1.64 V in tests/SW1SoftClip_Sine.cpp.
+ *
+ * The diode root is a `RuntimeDiodePairT` (HQ / Eco lever): `setHighQuality(true)` selects the
+ * "Best" eqn-39 solve (production, byte-for-byte identical to the validated voicing); `false`
+ * selects the "Good" eqn-18 solve (~half the diode transcendental cost). The class is also
+ * templated on `wdft::DiodeQuality` so FeatureProfile can A/B a pure compile-time choice — the
+ * template only sets the INITIAL highQ state; production uses the default (`Best`).
  */
-class SW1SoftClip
+template <wdft::DiodeQuality Quality = wdft::DiodeQuality::Best>
+class SW1SoftClipT
 {
 public:
     static constexpr double R9 = 10.0e3;
@@ -45,7 +54,10 @@ public:
     static constexpr double Vt = 25.85e-3;
     static constexpr double n_eff = 2.0 * n_MA856; // ≈ 3.024 (back-to-back 2-diode series)
 
-    SW1SoftClip() = default;
+    SW1SoftClipT() { dp.setHighQuality (Quality == wdft::DiodeQuality::Best); }
+
+    /** HQ / Eco lever: true = Best eqn-39 solve (production), false = Good eqn-18 (~half the cost). */
+    void setHighQuality (bool shouldBeHighQ) noexcept { dp.setHighQuality (shouldBeHighQ); }
 
     void prepare (double sampleRate)
     {
@@ -84,7 +96,10 @@ private:
     wdft::ResistiveCurrentSourceT<double> iSrc { R10 }; // current source ‖ R10
     wdft::ResistorT<double> r11 { R11 };
     wdft::WDFSeriesT<double, decltype (r11), decltype (iSrc)> fbSeries { r11, iSrc };
-    wdft::DiodePairT<double, decltype (fbSeries), wdft::DiodeQuality::Best> dp { fbSeries, Is_MA856, Vt, n_eff };
+    RuntimeDiodePairT<double, decltype (fbSeries)> dp { fbSeries, Is_MA856, Vt, n_eff };
 };
+
+/** Production soft-clip stage: Best-quality diode by default (byte-for-byte unchanged). */
+using SW1SoftClip = SW1SoftClipT<>;
 
 } // namespace monarch

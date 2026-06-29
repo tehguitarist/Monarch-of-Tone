@@ -207,6 +207,19 @@ public:
         sw2On = (mode == 2);
     }
 
+    /** Diode-solve quality (Best eqn-39 vs Good eqn-18). NOT a user control: the FeatureProfile
+        probe (tests/FeatureProfile.cpp) measured this "lever" and found it negligible on BOTH axes
+        — Best vs Good null at −76 dB (OD), and identical CPU (both already use the cheap omega4
+        kernel; Best just calls it twice). So there is no HQ/Eco button — the oversampling factor is
+        the real CPU/quality control (see the README "Performance" note). This setter stays internal,
+        defaulting to Best, purely so FeatureProfile can A/B the two solves and guard against the
+        production path silently changing. Production always runs Best (byte-for-byte unchanged). */
+    void setHighQuality (bool highQ) noexcept
+    {
+        sw1.setHighQuality (highQ);
+        sw2.setHighQuality (highQ);
+    }
+
     // Base-rate front: input network + Stage 1 → V(NodeG), then the drive-dependent voicing
     // correction (high-shelf; unity pass-through once drive ≳ 0.47, see shelf* consts).
     inline double processPre (double x) noexcept { return driveShelf (stage1.processSample (x)); }

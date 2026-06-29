@@ -76,6 +76,34 @@ against another). The remaining high-drive residual was traced circuit-accuratel
 accepted as device-physics / capture aliasing, not a model error. See `analysis/` for the
 harness, and `analysis/VALIDATION_REPORT.md` for the full per-capture breakdown.
 
+## Performance
+
+Monarch of Tone solves the actual circuit, sample by sample, rather than approximating it with a
+fixed filter — and at higher oversampling it solves the *whole* channel (both gain stages, both
+clippers and the tone network) several times per output sample. That faithfulness is why it asks
+for a little more CPU than a lookup-table overdrive, and it's why **the Oversampling control is
+your quality-vs-CPU dial**: turn it up for the cleanest highs and lowest aliasing, turn it down to
+save CPU. There is deliberately no separate "HQ" button — oversampling already *is* that button,
+and it does more (it's the only setting that measurably changes the sound).
+
+Measured with the bundled `PerfBenchmark` probe — one CPU core, 48 kHz, **both channels active in
+series**, stereo. Your DAW's CPU meter will read lower on a single mono track or with a channel
+bypassed:
+
+| Oversampling | CPU (≈ % of one core) | Added latency | Best for |
+|---|---|---|---|
+| **1×** | ~2–3% | 0 samples | Tracking / low-latency live use; highs are slightly soft |
+| **2×** *(live default)* | ~4–5% | 6 samples | Everyday playing — the recommended balance |
+| **4×** | ~8–11% | 9 samples | Higher-fidelity highs when CPU allows |
+| **8×** | ~15–22% | 10 samples | Maximum fidelity |
+| **Render** *(auto, offline bounce)* | — | 119 samples | Engages automatically when your DAW exports |
+
+The Live and Render oversampling amounts are set independently, so you can play at 2× and still
+bounce at full quality automatically. Higher oversampling mainly improves the **top octave**
+(≈8 kHz and up) and reduces aliasing on bright, high-gain settings; through the low and mid range
+the difference is small. Absolute percentages depend on your CPU — rerun `PerfBenchmark` for your
+own machine (see below).
+
 ## Building
 
 **Requirements:** CMake 3.15+, a C++17 compiler. AU + VST3 + Standalone on macOS 10.13+; VST3 +
@@ -103,7 +131,19 @@ not required for normal use, but handy if you're poking at the DSP:
 | `UISnapshot` | Headless render of the plugin editor to a PNG — no display needed |
 | `PedalRender` | Renders a WAV file through the real processor at given control settings, for A/B against a capture |
 | `ControlSweep` | Drives every control through its full range across all clip-mode combinations and OS factors, checking for NaNs/instability |
+| `PerfBenchmark` | Renders through the real processor and reports CPU % of realtime + latency per oversampling factor × clip mode (source of the Performance table above) |
+| `OSFidelity` | Measures how close 1×/2×/4× sit to 8× — small-signal frequency response and harmonic-vs-aliasing under clipping |
+| `FeatureProfile` | Measures the CPU **and** accuracy of each performance feature together, so the data decides what (if anything) deserves a quality toggle |
 | `Stage1_FreqResponse`, `Stage2_Gain`, `SW1SoftClip_Sine`, `SW2HardClip_Sine`, `ToneStage_FreqResponse`, `VolumePot_Taper`, `Stage1_HiGain`, `FullChain_DualChannel`, `SmokeTest_RC` | Per-stage DSP correctness tests (see `tests/`) |
+
+The probes and key stability tests are registered with CTest as finite-only checks (they assert no
+NaN/Inf and the diode-solver bit-identical guard — never an absolute CPU %, which varies by
+machine). Run them with:
+
+```bash
+cmake --build build           # build everything, including the probes
+ctest --test-dir build --output-on-failure
+```
 
 ## Where to find things
 
