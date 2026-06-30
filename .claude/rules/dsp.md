@@ -188,8 +188,15 @@ each unity by the G4–G5 crossover:
   with drive — restores the Stage-1 HF shelf `Av=1+Z_upper/Z_lower` lets collapse at low drive.
 - **Bass low-shelf** (`bassPivotHz` 105, `bassOnsetDrive`/`bassSlopeDb`/`bassMaxDb`): LF lift that
   fades IN with drive — counters the documented bass-bloom-under-drive.
-- **Warp high-shelf** (`warpPivotHz`/`warpRefDb`, rate-scaled `×(48k/rate)^4`): compensates the
-  base-rate bilinear top-octave droop at 1x; self-disables at 2x+ where oversampling fixes it.
+- **Warp high-shelf** (`warpPivotHz` 6.5k / `warpScaleDb`/`warpExp`, rate-scaled `×(48k/rate)^warpExp`,
+  capped `warpMaxDb`, then **DC-normalized**): compensates the finite-rate bilinear top-octave droop.
+  Recalibrated 06-30 — it was previously self-disabled by 2x (`^4`), which left the live default (2x)
+  ~2–3 dB darker on top than the render path (4x/8x); now FIT to the warp-free-baseline-vs-8x deficit
+  so **2x and 4x match 8x** through the audible top (DC–8 kHz ≤0.2 dB, 12 kHz ~0.4 dB, only the 16 kHz
+  edge ~1.8 dB short at 2x — a first-order shelf can't reach Nyquist without over-brightening the
+  6–8 kHz presence band, so the moderate pivot is deliberate). The DC-normalization (divide by H(z=1))
+  keeps low/mid at exact unity at every rate — without it the near-Nyquist prewarp droops the whole
+  spectrum (several dB at 1x). 1x stays the low-CPU/approximate-top mode (warpMaxDb cap).
 
 All use the prewarped bilinear `shelfCoeffs` helper (a high-shelf sets Glo=1; a low-shelf sets
 Ghi=1; Glo=Ghi → exact unity). Result (render/2x+ paths): **50 Hz–16 kHz within ~1.2 dB at all
@@ -212,9 +219,9 @@ Never audio-taper DRIVE/TONE/PRESENCE; never linear-taper VOL.
 ## Component Values
 
 See circuit.md §1 (master table) and §6 (diode params). Stage-1 floors: Yellow R2∥R3 ≈ 990Ω, Red
-≈ 34.3k (tamed Hi-Gain = R6_floor + DRIVE_max/3, a voicing choice over the literal R2=100k; the
-`hiGain` ctor flag). Input cap 22n; Z_lower = C4(10n) series [R4(27k) ∥ (R5(33k) +
-C3(10n))]; Z_upper HF cap C2 = 100pF.
+≈ 17.7k (tamed Hi-Gain = R6_floor + DRIVE_max/6, a voicing choice over the literal R2=100k — Red@d
+≈ Yellow@(d+1/6); the `hiGain` ctor flag). Input cap 22n; Z_lower = C4(10n) series [R4(27k) ∥
+(R5(33k) + C3(10n))]; Z_upper HF cap C2 = 100pF.
 
 ## Signal Calibration
 

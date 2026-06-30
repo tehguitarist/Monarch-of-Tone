@@ -63,7 +63,7 @@ don't proceed on FAIL). All gates currently **PASS** (auval PASS). Each has a de
 |-------|------|-----------------------|
 | RC smoke | `SmokeTest_RC` | −3 dB at the theoretical corner |
 | Stage 1 | `Stage1_FreqResponse` | peak gain +12.85 dB, DC shelf ≈unity, DRIVE monotonic; peak freq accurate at base rate |
-| Stage 1 Hi-Gain | `Stage1_HiGain` | Red hotter everywhere, monotonic, "9-o'clock ≈ noon" |
+| Stage 1 Hi-Gain | `Stage1_HiGain` | Red hotter everywhere, monotonic, Red@d ≈ Yellow@(d+1/6) |
 | Stage 2 | `Stage2_Gain` | inverting −22 passband, HPF corner 159 Hz |
 | SW-1 soft | `SW1SoftClip_Sine` | symmetric soft clip, knee ≈1.64 V (confirms n_eff≈3.024) |
 | SW-2 hard | `SW2HardClip_Sine` | symmetric hard clamp ≈±0.55 V |

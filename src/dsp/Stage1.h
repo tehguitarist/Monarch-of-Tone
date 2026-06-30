@@ -44,11 +44,13 @@ public:
 
     // Hi-Gain floor (Red). The literal Theseus mod opens SW1B → floor = R2 = 100k, which we found
     // overdrives the channel (its minimum already sits very hot). We have no Red NAM captures to
-    // pin the floor, so it is a VOICING choice: tame it to the Analogman "9 o'clock acts like noon"
-    // feel exactly. The DRIVE knob's 270° sweep is 9 clock-hours (≈7:30→4:30, noon = 0.5); shifting
-    // Red's whole curve up by 3 hours = one-third of the sweep makes 9:00→old-noon and noon→old-3:00.
-    // DRIVE is linear, so a +⅓-knob shift is just +⅓·DRIVE_max of floor resistance over Yellow.
-    static constexpr double HiGain_floor = R6_floor + DRIVE_max / 3.0; // ≈ 34.3 k — Red (tamed Hi-Gain)
+    // pin the floor, so it is a VOICING choice. The DRIVE knob's 270° sweep is 9 clock-hours
+    // (≈7:30→4:30, noon = 0.5), and DRIVE is linear, so an +N-knob-fraction shift over Yellow is
+    // just +(fraction)·DRIVE_max of floor resistance — Red at drive d then behaves like Yellow at
+    // (d + fraction). The first tame was +⅓ knob (≈34.3 k); A/B'd as still too hot (Red's minimum
+    // landed near Yellow noon by ear), so it is pulled back to +⅙ knob: Red 7:00≈Yellow 9:00,
+    // Red noon≈Yellow ~1:30 — clearly the hotter channel, but no longer a big gain jump.
+    static constexpr double HiGain_floor = R6_floor + DRIVE_max / 6.0; // ≈ 17.7 k — Red (tamed Hi-Gain)
 
     explicit Stage1 (bool hiGain = false) : floorR (hiGain ? HiGain_floor : R6_floor) { setDrive (0.5); }
 

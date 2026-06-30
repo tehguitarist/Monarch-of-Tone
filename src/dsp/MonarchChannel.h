@@ -109,16 +109,28 @@ public:
     static constexpr double bassSlopeDb = 7.5;    // dB of LF lift gained per unit drive past onset
     static constexpr double bassMaxDb = 4.2;      // cap on the LF lift
 
-    // ---- Bilinear-warp top-octave correction (rate-dependent high-shelf, 2026-06-29) ---------
-    // The linear WDF stages now run at the oversampled rate (see PluginProcessor): at 2x+ the
-    // bilinear-transform frequency warping that droops the top octave is gone (measured: 16 kHz
-    // deficit −2.4 dB @48k → −0.2 dB @96k → ~0 @192k). At 1x the linear rate == session rate, so
-    // the warp remains; this shelf approximately compensates the recoverable 8–12 kHz there. Its
-    // lift scales as (48k/rate)^4 — full at 48k, ~0 by 96k — so it self-disables once the rate
-    // already removes the warp. (First-order can't match the steep near-Nyquist cliff; 16 kHz+
-    // stays deficient at 1x — use 2x+ for full top-octave fidelity. Oversampling is the exact fix.)
+    // ---- Bilinear-warp top-octave correction (rate-dependent high-shelf, 2026-06-29; recal 06-30) -
+    // The linear WDF stages run at the oversampled rate (see PluginProcessor), but the bilinear
+    // transform still warps the top octave DOWN at finite rates — the deficit vs the fully-resolved
+    // 8x solve, measured at gain-2 Boost (16 kHz): −7.4 dB @1x(48k), −2.7 dB @2x(96k), −0.55 dB
+    // @4x(192k), 0 @8x. Earlier this shelf was deliberately self-disabled by 2x (×(48k/rate)^4) on
+    // the assumption 2x was "good enough" — but that left a 2–3 dB top-octave gap between the live
+    // default (2x) and the render path (4x/8x), i.e. the bounce sounded brighter than playback.
+    // Recalibrated (06-30) to track the actual deficit so 2x and 4x match 8x: lift =
+    // warpScaleDb·(48k/rate)^warpExp at warpPivotHz, capped at warpMaxDb, then DC-NORMALIZED (see
+    // prepareLinear) so the low/mid stay at unity at every rate. (scale,exp) were FIT (exact
+    // prewarped-bilinear, per OS rate) to the warp-free-baseline-vs-8x deficit at 6/8/12/16 kHz.
+    // A MODERATE pivot (6.5 k) is chosen on purpose over a higher one: a first-order shelf can't be
+    // flat at 8 k AND steep at 16 k, and matching the 6–8 kHz PRESENCE band (where the guitar has
+    // energy) to 8x matters far more than the 16 kHz edge (which carries no musical content). Result
+    // vs 8x: DC–8 kHz within ~0.2 dB, 12 kHz ~0.4 dB, 16 kHz ~1.8 dB short at 2x (≈0.35 dB at 4x).
+    // The low warpMaxDb cap holds 1x sane (a first-order shelf can't match 1x's near-Nyquist cliff —
+    // 1x stays the low-CPU/approximate-top mode); 2x+ is full fidelity and live(2x)↔render(4x/8x)
+    // now share the audible top octave. The DC-normalization is what lets the cap stay clean at 1x.
     static constexpr double warpPivotHz = 6500.0; // warp-correction high-shelf centre (Hz)
-    static constexpr double warpRefDb = 4.5;      // HF lift at 48 kHz; ×(48k/rate)^4
+    static constexpr double warpScaleDb = 10.6;   // base HF lift at 48k; ×(48k/rate)^warpExp
+    static constexpr double warpExp = 2.20;       // rate falloff from the fitted ghi₂ₓ/ghi₄ₓ ratio
+    static constexpr double warpMaxDb = 3.0;      // cap (1x; kept low so the prewarped shelf holds unity DC)
 
     explicit MonarchChannel (bool hiGain = false) : stage1 (hiGain), hiGainStage1 (hiGain) {}
 
@@ -133,9 +145,18 @@ public:
         volume.prepare (rate);
         shBaseRate = rate;
         updateDriveShelf (0.5); // default = unity pass-through until setDrive() runs
-        // Bilinear-warp top-octave correction: rate-only, full at 48k, self-disabling by ~96k.
-        const double warpDb = warpRefDb * std::pow (48000.0 / shBaseRate, 4.0);
+        // Bilinear-warp top-octave correction: rate-only, tracks the measured 1x/2x/4x→8x deficit
+        // so the live (2x) and render (4x/8x) paths share the same top octave (see warp* consts).
+        const double warpDb = std::min (warpMaxDb, warpScaleDb * std::pow (48000.0 / shBaseRate, warpExp));
         shelfCoeffs (1.0, std::pow (10.0, warpDb / 20.0), warpPivotHz, wsB0, wsB1, wsA1);
+        // DC-normalize the warp shelf: a prewarped first-order high-shelf with a pivot up near the
+        // (oversampled) Nyquist loses unity DC gain — the whole spectrum droops a few tenths of a dB
+        // (and several dB at 1x), an audible broadband tone/level shift. Dividing by the measured DC
+        // gain restores exact unity at DC at every rate, so we can place the pivot high enough to
+        // reach the 16 kHz deficit while the low/mid stay untouched. H(z=1) = (b0+b1)/(1+a1).
+        const double wsDc = (wsB0 + wsB1) / (1.0 + wsA1);
+        wsB0 /= wsDc;
+        wsB1 /= wsDc;
         hsX1 = hsY1 = lsX1 = lsY1 = wsX1 = wsY1 = 0.0;
     }
 

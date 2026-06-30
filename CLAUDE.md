@@ -43,7 +43,7 @@ cmake --build build --target Monarch_AU     # AU (primary) / Monarch_VST3 / Mona
 clang-format -i src/**/*.{cpp,h}
 ```
 
-**CMake minimum:** 3.15 | **C++ standard:** 17 | **macOS target:** 10.13+ | **Version:** 1.1.0
+**CMake minimum:** 3.15 | **C++ standard:** 17 | **macOS target:** 10.13+ | **Version:** 1.2.0
 
 ---
 
@@ -120,11 +120,17 @@ transform frequency warping** of the base-rate linear WDF solve (16 kHz deficit 
 @48k → −0.2 @96k → ~0 @192k when the linear stages run faster). Fixed by running the **whole channel
 oversampled** (not just the clip span): both `prepareLinear` and `prepareClip` re-prep at the OS
 rate. **Render/2x+ paths now match 50 Hz–16 kHz within ~1.2 dB at all gain/tone** (worst ~2.3 dB at
-the tone-down top-octave corner). At **1x** the linear rate == session rate so the warp remains; a
-rate-scaled warp high-shelf (`warp*`, `×(48k/rate)^4`) roughly fixes 8–12 kHz but 16 kHz+ stays
-deficient (a first-order shelf can't match the near-Nyquist cliff) — 1x is the low-CPU/approximate-
-top mode, use 2x+ for full fidelity. CPU cost: the linear WDF now runs at the OS rate too (relevant
-to the v1.1 perf pass).
+the tone-down top-octave corner). A **rate-scaled warp high-shelf** (`warp*` in MonarchChannel,
+DC-normalized) corrects the residual finite-rate droop. **Recalibrated 2026-06-30:** it was
+previously self-disabled by 2x (`×(48k/rate)^4`), which left the live default (2x) ~2–3 dB darker on
+top than the render path (4x/8x) — a tone difference between playback and bounce. It's now FIT to the
+warp-free-baseline-vs-8x deficit so **2x and 4x match 8x** through the audible top (DC–8 kHz ≤0.2 dB,
+12 kHz ~0.4 dB; only the 16 kHz edge is ~1.8 dB short at 2x — a first-order shelf can't reach Nyquist
+without over-brightening the 6–8 kHz presence band, so the moderate 6.5 k pivot is deliberate). The
+DC-normalization (divide by H(z=1)) holds low/mid at exact unity at every rate (without it the
+near-Nyquist prewarp droops the whole spectrum, several dB at 1x). **1x** stays the low-CPU/
+approximate-top mode (its 16 kHz is still deficient — use 2x+ for full fidelity). CPU cost: the
+linear WDF now runs at the OS rate too (relevant to the v1.1 perf pass).
 
 ### Accepted residuals (un-modeled second-order device physics, per user pref for circuit accuracy)
 - OD compresses ~3–4 dB lighter than the real pedal at hot input (Distortion compression good, Δ~2 dB).
@@ -144,7 +150,7 @@ to the v1.1 perf pass).
 | Stage 1 (IC_A) | Non-inverting — no `PolarityInverterT`; two-one-port solve (no R-type matrix) |
 | Stage 1 Z_lower | C4(10n) series [ R4(27k) ∥ (R5(33k) + C3(10n)) ] — Theseus topology |
 | Stage 1 Z_upper | (floor + DRIVE 0–100k) ∥ C2(100pF); Av(s) = 1 + Z_upper/Z_lower, DC gain 1 |
-| Stage 1 feedback floor | **Yellow R2∥R3 ≈ 990 Ω** (stock) / **Red ≈ 34.3 k** (tamed Hi-Gain = R6_floor + DRIVE_max/3; voicing choice over the literal R2=100k — shifts Red's drive curve +⅓ knob so 9:00≈noon). `hiGain` ctor flag |
+| Stage 1 feedback floor | **Yellow R2∥R3 ≈ 990 Ω** (stock) / **Red ≈ 17.7 k** (tamed Hi-Gain = R6_floor + DRIVE_max/6; voicing choice over the literal R2=100k — shifts Red's drive curve +⅙ knob, i.e. Red@d≈Yellow@(d+1/6); an earlier +⅓ tame A/B'd as still too hot). `hiGain` ctor flag |
 | Input coupling cap | 22n (Theseus; matsumin 10n — both sub-audio) |
 | Stage 2 (IC_B) | **Inverting** ×−22 (R10 220k / R9 10k); inversion via op-amp VCVS terminals; HPF 159 Hz (C7 100n) |
 | Soft-clip SW-1 | MA856 ×4 = `[D4+D5]∥[D2+D3]` ≡ ONE `DiodePairT` n_eff=2·1.512≈3.024, Is=7.74e-13; +R11(6.8k), branch ∥ R10 |

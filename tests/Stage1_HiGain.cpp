@@ -1,14 +1,15 @@
 // Stage 1 Hi-Gain mod — validation gate Step 4b.
 //
 // The Hi-Gain mod (fixed-on for the Red channel) raises the Stage-1 feedback floor resistor,
-// shifting the whole DRIVE range UP. Analogman describe it as "the drive at 9 o'clock acts like
-// it's at noon" — and Stage1.h tunes the floor so that mapping holds exactly (a deliberate voicing
-// choice over the literal R2=100k mod, which we measured as too hot; no Red captures exist).
+// shifting the whole DRIVE range UP. Stage1.h tunes the floor as a deliberate voicing choice over
+// the literal R2=100k mod (measured as too hot; no Red captures exist). The shift is +⅙ of the
+// knob sweep: Red at drive d behaves like Yellow at (d + 1/6) — clearly the hotter channel without
+// a big gain jump (an earlier +⅓ tame A/B'd as still too hot).
 //
 // This test compares the stock Stage 1 (Yellow, floor = R6_floor ≈ 990 Ω) against the Hi-Gain
-// Stage 1 (Red, floor = HiGain_floor ≈ 34.3 k) and verifies:
+// Stage 1 (Red, floor = HiGain_floor ≈ 17.7 k) and verifies:
 //   - Hi-Gain gain > stock gain at every DRIVE position (it is hotter everywhere),
-//   - the clock alignment: Red @9:00 ≈ Yellow @noon AND Red @noon ≈ Yellow @3:00,
+//   - the +⅙-knob alignment: Red @d ≈ Yellow @(d + 1/6),
 //   - DRIVE still increases gain monotonically in Hi-Gain, and no NaN/instability.
 // Measures the actual dB shift from the implemented WDF model (not assumed).
 
@@ -44,6 +45,7 @@ double measureGainDB (monarch::Stage1& stage, double freq, double amp)
 constexpr double drive_9oclock = 1.5 / 9.0;  // ≈ 0.167
 constexpr double drive_noon = 0.50;
 constexpr double drive_3oclock = 7.5 / 9.0;  // ≈ 0.833
+constexpr double hiGainShift = 1.0 / 6.0;    // Red runs +⅙ knob hotter than Yellow
 } // namespace
 
 int main()
@@ -79,26 +81,26 @@ int main()
         std::printf ("  %6.2f   %10.2f  %10.2f  %8.2f\n", d, gs, gh, gh - gs);
     }
 
-    // Hi-Gain is TAMED to the Analogman "9 o'clock acts like noon" feel (Stage1.h HiGain_floor):
-    // Red's curve is shifted up by exactly one-third of the knob sweep, so Red@9:00 ≈ Yellow@noon
-    // and Red@noon ≈ Yellow@3:00. Verify both alignments hold (no Red captures exist; this IS the
-    // spec). The shift is a pure resistance offset, so the two stages match to well under a dB.
+    // Hi-Gain is TAMED to +⅙ knob (Stage1.h HiGain_floor): Red at drive d behaves like Yellow at
+    // (d + 1/6). Verify the alignment at two interior points (Red@9:00 ≈ Yellow@(9:00+⅙) and
+    // Red@noon ≈ Yellow@(noon+⅙)); no Red captures exist, so this IS the spec. The shift is a pure
+    // resistance offset, so the two stages match to well under a dB.
     auto gainAt = [&] (monarch::Stage1& st, double d) { st.setDrive (d); return measureGainDB (st, probeFreq, amp); };
     const double redAt9 = gainAt (hiGain, drive_9oclock);
-    const double yellowAtNoon = gainAt (stock, drive_noon);
+    const double yellowAt9plus = gainAt (stock, drive_9oclock + hiGainShift);
     const double redAtNoon = gainAt (hiGain, drive_noon);
-    const double yellowAt3 = gainAt (stock, drive_3oclock);
-    const double align9toNoon = redAt9 - yellowAtNoon;
-    const double alignNoonTo3 = redAtNoon - yellowAt3;
+    const double yellowAtNoonPlus = gainAt (stock, drive_noon + hiGainShift);
+    const double align9 = redAt9 - yellowAt9plus;
+    const double alignNoon = redAtNoon - yellowAtNoonPlus;
 
-    std::printf ("\n  Clock alignment (tamed Hi-Gain):\n");
-    std::printf ("    Red @9:00 %.2f dB  vs  Yellow @noon %.2f dB  → Δ %+.2f dB\n", redAt9, yellowAtNoon, align9toNoon);
-    std::printf ("    Red @noon %.2f dB  vs  Yellow @3:00 %.2f dB  → Δ %+.2f dB\n", redAtNoon, yellowAt3, alignNoonTo3);
+    std::printf ("\n  +1/6-knob alignment (tamed Hi-Gain):\n");
+    std::printf ("    Red @9:00 %.2f dB  vs  Yellow @9:00+1/6 %.2f dB  → Δ %+.2f dB\n", redAt9, yellowAt9plus, align9);
+    std::printf ("    Red @noon %.2f dB  vs  Yellow @noon+1/6 %.2f dB  → Δ %+.2f dB\n", redAtNoon, yellowAtNoonPlus, alignNoon);
 
-    const bool alignOk = std::abs (align9toNoon) < 0.6 && std::abs (alignNoonTo3) < 0.6;
+    const bool alignOk = std::abs (align9) < 0.6 && std::abs (alignNoon) < 0.6;
     const bool pass = hotterEverywhere && hiGainMonotonic && alignOk && ! nanSeen;
 
-    std::printf ("\n  hiGain hotter everywhere: %s | hiGain DRIVE↑gain↑: %s | 9:00≈noon & noon≈3:00: %s | no NaN: %s\n",
+    std::printf ("\n  hiGain hotter everywhere: %s | hiGain DRIVE↑gain↑: %s | Red@d≈Yellow@(d+1/6): %s | no NaN: %s\n",
                  hotterEverywhere ? "ok" : "FAIL", hiGainMonotonic ? "ok" : "FAIL",
                  alignOk ? "ok" : "FAIL", nanSeen ? "FAIL" : "ok");
     std::printf ("%s\n", pass ? "PASS" : "FAIL");

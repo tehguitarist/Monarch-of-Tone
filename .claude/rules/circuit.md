@@ -27,8 +27,8 @@ the model's value/topology is a deliberate choice over a source, the decisions l
 | Pin3 bias R | 1M | Input | pin3(+)→BIAS; DC bias / return for the coupling cap |
 | Stage 1 Z_lower | C4=10n, R4=27k, R5=33k, C3=10n | Stage 1 | NodeF→GND = **C4 series [ R4 ∥ (R5 + C3) ]** (Theseus topology — single shared cap to GND). DC gain = 1 |
 | Stage 1 Z_upper HF cap | 100pF | Stage 1 | NodeF↔NodeG, ∥ (floor+DRIVE) |
-| Stage 1 feedback floor | Yellow **R2∥R3 ≈ 990 Ω**, Red **≈ 34.3 k** (tamed Hi-Gain) | Stage 1 | Stock (Yellow) = R2∥R3. Hi-Gain (Red) floor is a VOICING choice = R6_floor + DRIVE_max/3 (not the literal R2=100k — that was too hot); shifts Red's curve +⅓ knob so 9:00≈noon. Floor + DRIVE = Z_upper resistive leg |
-| DRIVE pot | 100kB linear | Stage 1 | 2-terminal rheostat in Z_upper; floor+DRIVE = 0.99k–100k (Yellow) / 34.3k–134k (Red) |
+| Stage 1 feedback floor | Yellow **R2∥R3 ≈ 990 Ω**, Red **≈ 17.7 k** (tamed Hi-Gain) | Stage 1 | Stock (Yellow) = R2∥R3. Hi-Gain (Red) floor is a VOICING choice = R6_floor + DRIVE_max/6 (not the literal R2=100k — that was too hot); shifts Red's curve +⅙ knob, i.e. Red@d≈Yellow@(d+1/6) (an earlier +⅓ tame A/B'd as still too hot). Floor + DRIVE = Z_upper resistive leg |
+| DRIVE pot | 100kB linear | Stage 1 | 2-terminal rheostat in Z_upper; floor+DRIVE = 0.99k–100k (Yellow) / 17.7k–118k (Red) |
 | Stage 2 input coupling | 100nF | Stage 2 | HPF f_c = 159 Hz w/ R9 |
 | Stage 2 input R (R9) | 10k | Stage 2 | gain = −R10/R9 = −22 |
 | Stage 2 feedback R (R10) | 220k | Stage 2 | always present |
@@ -57,12 +57,13 @@ the model's value/topology is a deliberate choice over a source, the decisions l
 - **Soft-clip diodes MA856** (Vf≈0.82V single). The matsumin 1N914+1N4004 pairing is a DIY
   substitution artifact, not the original — disregard. BAS33 (Theseus) is a close cross-check.
 - **Hard-clip diodes 1S1588 = 1N914 = 1N4148** — identical Shockley parameters.
-- **Stage-1 floor: Yellow R2∥R3 ≈ 990Ω, Red ≈ 34.3k (tamed Hi-Gain).** Stock (Yellow) runs the low
+- **Stage-1 floor: Yellow R2∥R3 ≈ 990Ω, Red ≈ 17.7k (tamed Hi-Gain).** Stock (Yellow) runs the low
   ~1k floor → nearly-clean minimum. The literal Theseus Hi-Gain mod opens SW1B → floor = R2 = 100k,
   but that was measured as too hot (its minimum already very driven). With no Red NAM captures to
-  constrain it, the Red floor is set as a VOICING choice to `R6_floor + DRIVE_max/3 ≈ 34.3k`, which
-  shifts Red's whole DRIVE curve up by exactly one-third of the knob sweep so "9 o'clock acts like
-  noon" (and noon like 3 o'clock) holds precisely — see `tests/Stage1_HiGain.cpp` (Δ ≈ 0 dB).
+  constrain it, the Red floor is set as a VOICING choice to `R6_floor + DRIVE_max/6 ≈ 17.7k`, which
+  shifts Red's whole DRIVE curve up by exactly one-sixth of the knob sweep so Red@d ≈ Yellow@(d+1/6)
+  holds precisely — see `tests/Stage1_HiGain.cpp` (Δ ≈ 0 dB). (An earlier +⅓-knob tame ≈34.3k A/B'd
+  as still too hot — Red's minimum landed near Yellow noon by ear — so it was pulled back to +⅙.)
 - **Tapers (parts-list confirmed):** DRIVE 100kB linear, TONE 25kB linear, Presence 50kB linear,
   VOL 100kA audio. Only VOL is audio taper. The VOL audio fraction is `pow(10, 1.8·(x−1))` (noon
   = −18 dB) — fitted to the captures (the ideal-log 2.0/−20 dB was ~2 dB too quiet at noon).
@@ -99,7 +100,7 @@ IN ─┬─ R5(1M) → GND                      [input pulldown]
 
 IC_A (non-inverting, no PolarityInverterT): pin3(+)=in, pin2(−)=NodeF, pin1=NodeG=out
   Z_lower (NodeF→GND): C4(10n) series [ R4(27k) ∥ (R5(33k)+C3(10n)) ]
-  Z_upper (NodeF→NodeG): (floor + DRIVE 0–100k) ∥ C2(100pF)   [floor = 990Ω Yellow / 34.3k Red (tamed Hi-Gain)]
+  Z_upper (NodeF→NodeG): (floor + DRIVE 0–100k) ∥ C2(100pF)   [floor = 990Ω Yellow / 17.7k Red (tamed Hi-Gain)]
   Av(s) = 1 + Z_upper/Z_lower ;  DC gain = 1
 
 NodeG → R9(10k) → C7(100n) [HPF 159 Hz] → IC_B pin6(−)
