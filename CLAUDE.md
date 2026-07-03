@@ -104,7 +104,7 @@ reproduce.
   (the pot's dual action moves Stage 2's flat *level*, not Stage 1's *tilt*). So the real pedal's
   drive-INDEPENDENT clean EQ is not explainable by the linear topology; corrected empirically (below).
 
-### Drive-dependent two-shelf capture-match correction (`MonarchChannel`, 2026-06-29)
+### Drive-dependent shelf + presence-bump capture-match corrections (`MonarchChannel`, 2026-06-29 / 2026-07-03)
 Best-fit-gain-aligned EQ error (plugin vs captures, 40 Hz–16 kHz, every gain/tone) is a clean,
 tone-independent **tilt that reverses with drive**: treble-short at low drive, bass-short/treble-hot
 at high drive, crossing near G4. Corrected with two drive-scaled first-order shelves on Stage 1's
@@ -112,6 +112,15 @@ output (pre-clip): a **treble high-shelf** fading OUT with drive (restores the S
 `Av=1+Z_upper/Z_lower` lets collapse at low drive — the "engaging it is dark" complaint) and a
 **bass low-shelf** fading IN with drive (counters the bass-bloom-under-drive). Also *improves*
 OD/Dist nulls at mid/high drive (G5 OD −18.4→−23.7, G5 Dist −14.9→−19.1).
+
+A third correction (2026-07-03) adds a **low-mid presence bump** (RBJ peaking biquad, 335 Hz, Q=0.5,
+placed after the shelves in the same driveShelf chain): the real JRC4580D produces ~3–4 dB of body
+in the 200–500 Hz range that the ideal-op-amp model structurally omits (confirmed by schematic-checker:
+no resonant LC element exists in the circuit; all upstream reactive networks are real-pole RC — so
+this is finite-gain-bandwidth device physics, not a topology gap). Fitted to Boost-mode captures
+(least clipping-masked) across G2–G10: gain fades from **4.0 dB** at low drive to a **2.6 dB floor**
+at high drive; center and Q are drive-constant. No resonant circuit element → empirical correction
+like the shelves, placed at Stage-1 output so all clip modes inherit it identically.
 
 ### Linear stages run oversampled — top-octave warp fix (2026-06-29)
 The remaining top-octave deficit (16 kHz ~−3.8 dB at every setting) was first wrongly blamed on NAM

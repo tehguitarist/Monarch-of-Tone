@@ -174,35 +174,33 @@ The fixed processor-level **capture-match tilt shelf** (`TiltShelf`, PluginProce
 **retired** (`kEnabled = false`) and superseded by the drive-dependent correction below — a fixed
 shelf cannot match a tilt that reverses sign with drive. Code kept for A/B only.
 
-## Drive-dependent capture-match shelves (`MonarchChannel::updateDriveShelf` / `driveShelf`)
+## Drive-dependent capture-match corrections (`MonarchChannel::updateDriveShelf` / `driveShelf`)
 
-The model-vs-capture EQ error (best-fit-gain-aligned, 40 Hz–16 kHz, every gain/tone) is a clean,
-**tone-independent tilt that reverses with drive**: treble-short at low drive, bass-short/treble-hot
-at high drive, crossing near G4. (The literal 3-terminal DRIVE wiper-tap was re-derived and shown to
-share the 2-terminal model's drive-dependence — the pot's dual action moves Stage 2's flat level,
-not Stage 1's tilt — so this is a second-order/capture-chain effect, not a topology fix.) Corrected
-with **two drive-scaled first-order shelves on Stage 1's output** (`processPre`, pre-clip so the
-clipper sees the corrected spectrum; runs at the oversampled rate with the rest of the channel),
-each unity by the G4–G5 crossover:
+Three corrections chained in `driveShelf` (Stage-1 output, pre-clip, at the oversampled rate):
+
+**1. Treble high-shelf + bass low-shelf** (2026-06-29): the model-vs-capture EQ error is a clean,
+tone-independent tilt that reverses with drive. Corrected with two drive-scaled first-order shelves:
 - **Treble high-shelf** (`shelfPivotHz` 450, `shelfMaxDb`/`shelfSlopeDb`): HF lift that fades OUT
-  with drive — restores the Stage-1 HF shelf `Av=1+Z_upper/Z_lower` lets collapse at low drive.
+  with drive — restores the Stage-1 HF shelf collapse at low drive.
 - **Bass low-shelf** (`bassPivotHz` 105, `bassOnsetDrive`/`bassSlopeDb`/`bassMaxDb`): LF lift that
-  fades IN with drive — counters the documented bass-bloom-under-drive.
-- **Warp high-shelf** (`warpPivotHz` 6.5k / `warpScaleDb`/`warpExp`, rate-scaled `×(48k/rate)^warpExp`,
-  capped `warpMaxDb`, then **DC-normalized**): compensates the finite-rate bilinear top-octave droop.
-  Recalibrated 06-30 — it was previously self-disabled by 2x (`^4`), which left the live default (2x)
-  ~2–3 dB darker on top than the render path (4x/8x); now FIT to the warp-free-baseline-vs-8x deficit
-  so **2x and 4x match 8x** through the audible top (DC–8 kHz ≤0.2 dB, 12 kHz ~0.4 dB, only the 16 kHz
-  edge ~1.8 dB short at 2x — a first-order shelf can't reach Nyquist without over-brightening the
-  6–8 kHz presence band, so the moderate pivot is deliberate). The DC-normalization (divide by H(z=1))
-  keeps low/mid at exact unity at every rate — without it the near-Nyquist prewarp droops the whole
-  spectrum (several dB at 1x). 1x stays the low-CPU/approximate-top mode (warpMaxDb cap).
+  fades IN with drive — counters bass-bloom-under-drive.
 
-All use the prewarped bilinear `shelfCoeffs` helper (a high-shelf sets Glo=1; a low-shelf sets
-Ghi=1; Glo=Ghi → exact unity). Result (render/2x+ paths): **50 Hz–16 kHz within ~1.2 dB at all
-gain/tone** (worst ~2.3 dB at the tone-down top-octave corner); also *improves* OD/Dist nulls at
-mid/high drive. State (`hs*`/`ls*`/`ws*`) resets in `prepareLinear`/`reset`; drive-shelf coeffs
-update per block in `setDrive`, the warp shelf in `prepareLinear` (rate-only).
+**2. Low-mid presence bump** (2026-07-03): the real JRC4580D produces ~3–4 dB of body at 200–500 Hz
+that the ideal-op-amp model structurally omits (no resonant LC element in the circuit — schematic-
+checker confirmed every reactive network is real-pole RC only; cause is finite gain-bandwidth
+interaction with the feedback network, same category as the tilt). Fitted to Boost-mode captures
+(G2–G10): **RBJ peaking biquad**, 335 Hz, Q=0.5 (~150–700 Hz -3dB bandwidth); gain drive-dependent:
+- `peakBaseDb = 4.0` at drive=0, fading to `peakFloorDb = 2.6` at drive=1 (slope 1.7 dB/unit)
+- Center and Q are drive-constant (the fit showed only gain varies with drive)
+- Placed before the warp shelf so it too runs at the oversampled rate
+
+**3. Warp high-shelf** (`warpPivotHz` 6.5k, rate-scaled, DC-normalized): compensates the finite-rate
+bilinear top-octave droop. Recalibrated 06-30 — now FIT to the warp-free-baseline-vs-8x deficit
+so **2x and 4x match 8x** through the audible top. See CLAUDE.md for calibration detail.
+
+All four state variables reset in `prepareLinear`/`reset`; drive-shelf coefficients (including peak
+biquad) update every block via `setDrive` → `updateDriveShelf`; warp shelf in `prepareLinear` (rate-only).
+State: `hs*/ls*` = shelf first-order; `pk*` = peaking biquad (5 coeffs, 4 state vars); `ws*` = warp shelf.
 
 ---
 
