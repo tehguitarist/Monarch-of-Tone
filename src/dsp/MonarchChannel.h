@@ -132,6 +132,26 @@ public:
     static constexpr double warpExp = 2.20;       // rate falloff from the fitted ghi₂ₓ/ghi₄ₓ ratio
     static constexpr double warpMaxDb = 3.0;      // cap (1x; kept low so the prewarped shelf holds unity DC)
 
+    // ---- Overdrive clip-depth-gated low-mid restoration (2026-07-04) --------------------------
+    // Farina linear-TF audit vs the captures (analysis/mid_eq_audit.py) shows the Overdrive channel
+    // ALONE falls short in the low mids as it is driven HARD: a broad, ~flat shortfall of ~1.8 dB
+    // below ~500 Hz that appears only at high clip depth (≈0 at normal levels, growing to −1.8 dB at
+    // the hottest −6 dB sweep), CONSISTENT across every gain. Distortion matches (<0.6 dB) and Boost
+    // has a separate knob-tilt — so this is OD-specific: the soft feedback clipper compresses the low
+    // mids more than the real pedal's does. Restored with a first-order LOW-SHELF on the clip output
+    // (post-clip, so clipping can't re-compress it), its lift BLENDED IN by the existing clip-depth
+    // envelope `clipEnv` and applied ONLY in OD (sw1On): near-zero at normal playing, reaching the
+    // shelf only when digging in hard. It is NOT a fixed pre-clip bump — that (the reverted 335 Hz
+    // peak) failed: wrong drive-profile, and pre-clip compression ate it (see CLAUDE.md).
+    // Calibrated against the captures by the artifact-immune TIME-DOMAIN null across all gains (a
+    // swept-sine linear_tf mis-reads a clip-gated correction — its gate modulates across the sweep,
+    // corrupting the deconvolution). Roughly halves the hot-drive deficit at every gain (G5 60–500 Hz
+    // −1.6→−0.8, overall null −1.2 dB), inert (≤0.1 dB null) at normal levels, byte-identical in
+    // Boost/Distortion, worst case ~+0.3 dB null at the G10+hot extreme (max drive + hottest input).
+    static constexpr double odShelfPivotHz = 520.0; // low-shelf corner (Hz)
+    static constexpr double odShelfMaxDb = 2.0;     // shelf lift at full clip-depth gate (dB)
+    static constexpr double odGateScale = 12.0;     // clipEnv→gate steepness (tanh): engages only under hard clip
+
     explicit MonarchChannel (bool hiGain = false) : stage1 (hiGain), hiGainStage1 (hiGain) {}
 
     // The WHOLE channel now runs at the OVERSAMPLED rate (PluginProcessor wraps Stage 1, the clip
@@ -157,7 +177,9 @@ public:
         const double wsDc = (wsB0 + wsB1) / (1.0 + wsA1);
         wsB0 /= wsDc;
         wsB1 /= wsDc;
-        hsX1 = hsY1 = lsX1 = lsY1 = wsX1 = wsY1 = 0.0;
+        // OD clip-gated low-shelf: fixed coeffs at the OS rate; a low-shelf sets ghi=1, glo=lift.
+        shelfCoeffs (std::pow (10.0, odShelfMaxDb / 20.0), 1.0, odShelfPivotHz, olB0, olB1, olA1);
+        hsX1 = hsY1 = lsX1 = lsY1 = wsX1 = wsY1 = olX1 = olY1 = 0.0;
     }
 
     void prepareClip (double clipRate)
@@ -192,7 +214,7 @@ public:
         volume.reset();
         railXprev = 0.0;
         railFprev = 0.0;
-        hsX1 = hsY1 = lsX1 = lsY1 = wsX1 = wsY1 = 0.0;
+        hsX1 = hsY1 = lsX1 = lsY1 = wsX1 = wsY1 = olX1 = olY1 = 0.0;
     }
 
     // ---- Parameter setters (call per block; tapers applied inside each stage) ----
@@ -252,7 +274,21 @@ public:
         double pin7 = sw1On ? sw1.processSample (nodeG) : stage2.processSample (nodeG);
         pin7 = railSaturateADAA (pin7); // op-amp output ceiling, antialiased (Boost always; Dist via Stage2)
         const double hc = sw2On ? sw2.processSample (pin7) : pin7;
-        return injectEvenHarmonic (hc, nodeG);
+        return odLowShelf (injectEvenHarmonic (hc, nodeG));
+    }
+
+    // OD-only clip-depth-gated low-mid restoration (see odShelf* consts). The low-shelf runs
+    // continuously (state stays coherent across mode changes); its lift is BLENDED IN only in
+    // Overdrive and only in proportion to clip depth, so it is inert in Boost/Distortion and at
+    // normal OD levels, engaging solely when the soft clipper is being driven hard. `clipEnv` is
+    // the same clip-depth envelope injectEvenHarmonic maintains (updated just above, this sample).
+    inline double odLowShelf (double x) noexcept
+    {
+        const double shelfed = olB0 * x + olB1 * olX1 - olA1 * olY1;
+        olX1 = x;
+        olY1 = shelfed;
+        const double gate = sw1On ? std::tanh (odGateScale * clipEnv) : 0.0;
+        return x + gate * (shelfed - x);
     }
 
     // Base-rate back: Tone → Volume → output.
@@ -414,6 +450,9 @@ private:
     double hsB0 { 1.0 }, hsB1 { 0.0 }, hsA1 { 0.0 }, hsX1 { 0.0 }, hsY1 { 0.0 };
     double lsB0 { 1.0 }, lsB1 { 0.0 }, lsA1 { 0.0 }, lsX1 { 0.0 }, lsY1 { 0.0 };
     double wsB0 { 1.0 }, wsB1 { 0.0 }, wsA1 { 0.0 }, wsX1 { 0.0 }, wsY1 { 0.0 };
+
+    // OD clip-depth-gated low-mid restoration (ol* = OD low-shelf; runs post-clip at the OS rate).
+    double olB0 { 1.0 }, olB1 { 0.0 }, olA1 { 0.0 }, olX1 { 0.0 }, olY1 { 0.0 };
 
     double clipEnv { 0.0 };   // clipping-depth envelope (gates the even-harmonic coeff)
     double meanSq { 0.0 };    // slow ⟨soft²⟩ (removes only DC from the H2 injection)

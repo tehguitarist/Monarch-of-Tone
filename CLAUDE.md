@@ -103,20 +103,40 @@ reproduce.
   numerically — it has the *same* drive-dependence of the Stage-1 tilt as the 2-terminal model
   (the pot's dual action moves Stage 2's flat *level*, not Stage 1's *tilt*). So the real pedal's
   drive-INDEPENDENT clean EQ is not explainable by the linear topology; corrected empirically (below).
-- **Low-mid "presence bump" (335 Hz peaking biquad, +4→2.6 dB) to add 200–500 Hz body** (2026-07-03,
-  reverted 2026-07-04): committed then **verified against the captures and REVERTED — it is a
-  regression.** The bump was fit by a *tilt-corrected-excess* method (fit a straight line through the
-  100 Hz & 1 kHz shoulders, call the curvature between them a "deficit") — but that straight-line
-  reference is the artifact: the plugin already follows the pedal's actual curved mid response. The
-  canonical best-fit-gain **null test** (which a genuine mid deficit *would* show as a shallow
-  mid-band null, and which can't be fooled by a real broadband tilt) proved the mids already matched:
-  before the bump, 100 Hz–1 kHz nulled at **−20 to −30 dB** across G2–G6 all modes; the +3–4 dB bump
-  dragged them to −13 to −16 dB (overall full-band null worse by ~2–4 dB mean, up to +7.5 dB worse at
-  low-mid gain; e.g. OD G5 mid-band −28.5→−16.9). Only marginal help (~1–2 dB) at extreme gain
-  G7–G10. **Lesson: validate any EQ correction with `null_test.py` (best-fit-gain), NOT a
-  tilt-subtraction excess plot — the latter invented a deficit that wasn't there.** A perceived
-  "more mids on the real pedal" is not corroborated by the nulls; re-investigate only with a
-  best-fit-gain-aligned measurement showing a shallow mid-band null.
+- **Low-mid "presence bump" (335 Hz peaking biquad, fixed +4→2.6 dB pre-clip) to add 200–500 Hz
+  body** (2026-07-03, reverted 2026-07-04): the *fixed* bump was a **regression and was reverted** —
+  but the underlying instinct was partly right (see the nuance below). It was fit by a flawed
+  *tilt-corrected-excess* method (straight line through the 100 Hz & 1 kHz shoulders, curvature
+  between = "deficit") which massively overstated the size and got the drive-profile backwards. As a
+  fixed pre-clip bump it was largest at low drive (no deficit there) and compressed away at hard drive
+  (where the deficit is), so the best-fit-gain null got worse everywhere (overall worse ~2–4 dB mean,
+  up to +7.5 dB at low-mid gain; e.g. OD G5 overall −21→−15).
+  - **The nuance (measured 2026-07-04, the authoritative view):** a **small, real, drive-dependent**
+    low-mid deficit DOES exist, but ONLY in hard-driven Overdrive. Farina linear-TF (`analyze.py
+    linear_tf`, which removes the distortion and isolates the linear EQ) vs the captures, normalized at
+    1 kHz, 200–500 Hz: OD G5 = **−0.3 dB at light drive → −1.6 dB at hot drive (−6 dB sweep)**;
+    Clean/Boost +0.5 dB and Distortion −0.3 dB both already match. So the perceived "real pedal has
+    more mids in OD" is CORRECT but it's a ~1.5 dB, drive-gated, OD-only effect — not the 3–4 dB
+    fixed bump that was tried.
+  - **Metric lesson (important):** for a small linear-EQ question, the **Farina `linear_tf`** is the
+    right tool. Both other methods fail here in opposite directions: the tilt-subtraction plot
+    *invented* a large deficit; the best-fit-gain **null test** *masked* the real one (a global gain +
+    the loud fundamental/harmonics swamp a 1–2 dB linear feature — OD G5 nulled deep yet had a real
+    −1.6 dB mid dip). Use `null_test.py` for overall waveform match, `linear_tf` for EQ shape.
+  - **The correct fix that WAS built (2026-07-04, `MonarchChannel::odLowShelf`):** a clip-depth-gated
+    low-shelf on the OD clip output — `gate = sw1On ? tanh(odGateScale·clipEnv) : 0`, 2.0 dB @ 520 Hz,
+    gate 12. OD-only (Boost/Dist byte-identical), inert at normal levels, engages only under hard clip;
+    roughly halves the hot-drive deficit (OD G5 60–500 Hz −1.6→−0.8, overall null −1.2 dB) with the
+    time-domain null neutral at normal levels and worst-case ~+0.3 dB at the G10+hot extreme. See
+    dsp.md "OD clip-depth-gated low-mid restoration".
+  - **Validation-metric lesson (the crux both failures share):** match the metric to the question.
+    `null_test.py` (best-fit-gain, time-domain) = overall waveform match, and it MASKS a small linear
+    feature. Farina `linear_tf` = linear EQ shape, but it MIS-READS a *clip-gated* correction (the
+    gate modulates across the sweep → deconvolution artifact showing a false deficit at moderate
+    drive). So: use `linear_tf` to FIND the linear deficit, but the **time-domain null is the
+    arbiter for validating a clip-gated correction**. The tilt-subtraction excess plot *invented* a
+    deficit and must not be used. The reusable audit encoding all four guardrails is
+    `analysis/mid_eq_audit.py` (→ `analysis/MID_EQ_AUDIT.md`).
 
 ### Drive-dependent two-shelf capture-match correction (`MonarchChannel`, 2026-06-29)
 Best-fit-gain-aligned EQ error (plugin vs captures, 40 Hz–16 kHz, every gain/tone) is a clean,

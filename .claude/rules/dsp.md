@@ -170,6 +170,25 @@ clip-depth-gated (clean stays symmetric) and DC-free (slow running-mean removal)
 - Per-mode coefficients (`asymOD/Dist/Boost`, `asymLowOD/Dist/Boost`). Empirical model of the
   coupling-cap blocking-distortion device physics, not a circuit element.
 
+## OD clip-depth-gated low-mid restoration (`MonarchChannel::odLowShelf`)
+
+Farina `linear_tf` audit vs the captures (`analysis/mid_eq_audit.py`) found the **Overdrive channel
+alone** falls short in the low mids as it is driven HARD: a broad, ~flat shortfall of **~1.8 dB below
+~500 Hz** that appears only at high clip depth (≈0 at normal levels, growing to −1.8 dB at the
+hottest −6 dB sweep), consistent across every gain. Distortion matches (<0.6 dB) and Boost has a
+separate knob-tilt — so it's OD-specific (the soft feedback clipper compresses the low mids more than
+the real pedal's). Restored with a **first-order low-shelf on the clip output** (post-clip, so
+clipping can't re-compress it; `odShelfMaxDb=2.0` @ `odShelfPivotHz=520`), its contribution BLENDED
+IN by `gate = sw1On ? tanh(odGateScale·clipEnv) : 0` — **OD-only** (Boost/Dist stay byte-identical)
+and gated by the existing clip-depth envelope so it's inert at normal levels and engages only when
+digging in hard. Calibrated (`odGateScale=12`) to roughly halve the hot-drive deficit while keeping
+the **time-domain null** neutral at normal levels (worst case ~+0.3 dB at the G10+hot extreme).
+
+> **Metric caveat (load-bearing):** validate a clip-gated correction with the **time-domain null**,
+> NOT the swept-sine `linear_tf` — the gate modulates across the sweep, which corrupts the Farina
+> deconvolution (it shows a spurious deficit at moderate drive that the null proves isn't real). The
+> reverted fixed 335 Hz pre-clip "presence bump" is the cautionary tale (see CLAUDE.md).
+
 The fixed processor-level **capture-match tilt shelf** (`TiltShelf`, PluginProcessor.h) is
 **retired** (`kEnabled = false`) and superseded by the drive-dependent correction below — a fixed
 shelf cannot match a tilt that reverses sign with drive. Code kept for A/B only.
