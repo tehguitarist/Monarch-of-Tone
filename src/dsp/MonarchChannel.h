@@ -109,6 +109,30 @@ public:
     static constexpr double bassSlopeDb = 7.5;    // dB of LF lift gained per unit drive past onset
     static constexpr double bassMaxDb = 4.2;      // cap on the LF lift
 
+    // ---- Low-mid presence bump (peaking filter, 2026-06-30) -----------------------------------
+    // A/B'd against the NAM captures at fine (≈7% bandwidth) resolution after subtracting the
+    // tilt above: a genuine, LOCALIZED deficit (not a tilt) centred ≈300–350 Hz, ~150–700 Hz wide,
+    // present at every drive in Boost (least clipping-masked mode; -3.6 dB at G2 down to a ~-2.6 dB
+    // floor by G8-G10) and OD (scales the other way — shallower at low drive, deeper at high — most
+    // likely masked/partially refilled there by clip-stage harmonic energy in-band, not genuinely
+    // absent). No resonant element (LC tank, complex-pole pair) exists anywhere in the documented
+    // circuit (schematic-checker confirmed: every reactive network upstream of Tone is a real-pole
+    // RC ladder, which can only ever produce a shelf, never a peak) — so like the tilt shelves and
+    // even-harmonic injection above, this is a second-order/non-ideal device effect (most plausibly
+    // the real JRC4580's finite gain-bandwidth interacting with the feedback network, which our
+    // ideal-op-amp model omits), corrected empirically. Placed alongside the tilt shelves (Stage 1
+    // output, pre-clip) so all clip modes inherit it identically — the per-mode "masking" differences
+    // measured are exactly what real downstream clipping nonlinearity would do to a fixed upstream
+    // deficit, so this does NOT need a per-mode coefficient. A peaking (bell) biquad was fit per
+    // drive to the Boost-mode deficit (least masked): centre and Q came back essentially CONSTANT
+    // (≈335 Hz, Q≈0.5) while the needed gain fell linearly with drive from ≈4 dB to a ≈2.6 dB floor
+    // — so only the gain is drive-scaled.
+    static constexpr double peakPivotHz = 335.0;  // presence-bump centre (Hz)
+    static constexpr double peakQ = 0.5;          // bandwidth (~150–700 Hz at -3dB, fit to the data)
+    static constexpr double peakBaseDb = 4.0;      // bump gain at drive 0 (dB); fitted to Boost captures G2
+    static constexpr double peakSlopeDb = 1.7;    // dB of bump lost per unit drive
+    static constexpr double peakFloorDb = 2.6;    // floor at max drive (dB); fitted to Boost captures G8-G10
+
     // ---- Bilinear-warp top-octave correction (rate-dependent high-shelf, 2026-06-29; recal 06-30) -
     // The linear WDF stages run at the oversampled rate (see PluginProcessor), but the bilinear
     // transform still warps the top octave DOWN at finite rates — the deficit vs the fully-resolved
@@ -157,7 +181,7 @@ public:
         const double wsDc = (wsB0 + wsB1) / (1.0 + wsA1);
         wsB0 /= wsDc;
         wsB1 /= wsDc;
-        hsX1 = hsY1 = lsX1 = lsY1 = wsX1 = wsY1 = 0.0;
+        hsX1 = hsY1 = lsX1 = lsY1 = pkX1 = pkX2 = pkY1 = pkY2 = wsX1 = wsY1 = 0.0;
     }
 
     void prepareClip (double clipRate)
@@ -192,7 +216,7 @@ public:
         volume.reset();
         railXprev = 0.0;
         railFprev = 0.0;
-        hsX1 = hsY1 = lsX1 = lsY1 = wsX1 = wsY1 = 0.0;
+        hsX1 = hsY1 = lsX1 = lsY1 = pkX1 = pkX2 = pkY1 = pkY2 = wsX1 = wsY1 = 0.0;
     }
 
     // ---- Parameter setters (call per block; tapers applied inside each stage) ----
@@ -337,14 +361,33 @@ private:
         b1 = ghi * (wz - K) / a0;
     }
 
-    // Drive-dependent capture-match correction (see shelf*/bass* consts): a treble HIGH-SHELF that
-    // fades OUT with drive + a bass LOW-SHELF that fades IN with drive, both on Stage 1's output.
+    // RBJ peaking (bell) biquad — standard digital-domain design (Audio EQ Cookbook), no separate
+    // prewarp step (w0 is already the discrete-time centre frequency). Writes a Direct-Form-I biquad.
+    void peakCoeffs (double centreHz, double gainDb, double Q,
+                     double& b0, double& b1, double& b2, double& a1, double& a2) const noexcept
+    {
+        const double A = std::pow (10.0, gainDb / 40.0);
+        const double w0 = 2.0 * M_PI * centreHz / shBaseRate;
+        const double alpha = std::sin (w0) / (2.0 * Q);
+        const double a0 = 1.0 + alpha / A;
+        b0 = (1.0 + alpha * A) / a0;
+        b1 = (-2.0 * std::cos (w0)) / a0;
+        b2 = (1.0 - alpha * A) / a0;
+        a1 = (-2.0 * std::cos (w0)) / a0;
+        a2 = (1.0 - alpha / A) / a0;
+    }
+
+    // Drive-dependent capture-match correction (see shelf*/bass*/peak* consts): a treble HIGH-SHELF
+    // that fades OUT with drive, a bass LOW-SHELF that fades IN with drive, and a low-mid PRESENCE
+    // BUMP whose gain fades (but never to zero) with drive — all on Stage 1's output.
     void updateDriveShelf (double drive01) noexcept
     {
         const double trebleDb = std::max (0.0, shelfMaxDb - shelfSlopeDb * drive01);          // HF lift
         const double bassDb = std::min (bassMaxDb, std::max (0.0, bassSlopeDb * (drive01 - bassOnsetDrive)));
+        const double peakDb = std::max (peakFloorDb, peakBaseDb - peakSlopeDb * drive01);     // presence bump
         shelfCoeffs (1.0, std::pow (10.0, trebleDb / 20.0), shelfPivotHz, hsB0, hsB1, hsA1);  // high-shelf
         shelfCoeffs (std::pow (10.0, bassDb / 20.0), 1.0, bassPivotHz, lsB0, lsB1, lsA1);     // low-shelf
+        peakCoeffs (peakPivotHz, peakDb, peakQ, pkB0, pkB1, pkB2, pkA1, pkA2);                // presence bump
     }
 
     inline double driveShelf (double x) noexcept
@@ -355,8 +398,11 @@ private:
         const double b = lsB0 * t + lsB1 * lsX1 - lsA1 * lsY1; // bass low-shelf
         lsX1 = t;
         lsY1 = b;
-        const double y = wsB0 * b + wsB1 * wsX1 - wsA1 * wsY1; // bilinear-warp top-octave correction
-        wsX1 = b;
+        const double k = pkB0 * b + pkB1 * pkX1 + pkB2 * pkX2 - pkA1 * pkY1 - pkA2 * pkY2; // presence bump
+        pkX2 = pkX1; pkX1 = b;
+        pkY2 = pkY1; pkY1 = k;
+        const double y = wsB0 * k + wsB1 * wsX1 - wsA1 * wsY1; // bilinear-warp top-octave correction
+        wsX1 = k;
         wsY1 = y;
         return y;
     }
@@ -408,11 +454,14 @@ private:
     double railXprev { 0.0 };                       // ADAA state: previous rail-sat input
     double railFprev { 0.0 };                       // ADAA state: F(railXprev) (F(0)=0)
 
-    // Capture-match correction: treble high-shelf (hs*) + bass low-shelf (ls*) + bilinear-warp
-    // top-octave high-shelf (ws*). shBaseRate is the effective (oversampled) rate.
+    // Capture-match correction: treble high-shelf (hs*) + bass low-shelf (ls*) + low-mid presence
+    // bump biquad (pk*) + bilinear-warp top-octave high-shelf (ws*). shBaseRate is the effective
+    // (oversampled) rate.
     double shBaseRate { 48000.0 };
     double hsB0 { 1.0 }, hsB1 { 0.0 }, hsA1 { 0.0 }, hsX1 { 0.0 }, hsY1 { 0.0 };
     double lsB0 { 1.0 }, lsB1 { 0.0 }, lsA1 { 0.0 }, lsX1 { 0.0 }, lsY1 { 0.0 };
+    double pkB0 { 1.0 }, pkB1 { 0.0 }, pkB2 { 0.0 }, pkA1 { 0.0 }, pkA2 { 0.0 };
+    double pkX1 { 0.0 }, pkX2 { 0.0 }, pkY1 { 0.0 }, pkY2 { 0.0 };
     double wsB0 { 1.0 }, wsB1 { 0.0 }, wsA1 { 0.0 }, wsX1 { 0.0 }, wsY1 { 0.0 };
 
     double clipEnv { 0.0 };   // clipping-depth envelope (gates the even-harmonic coeff)
