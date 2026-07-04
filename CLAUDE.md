@@ -147,6 +147,18 @@ output (pre-clip): a **treble high-shelf** fading OUT with drive (restores the S
 **bass low-shelf** fading IN with drive (counters the bass-bloom-under-drive). Also *improves*
 OD/Dist nulls at mid/high drive (G5 OD −18.4→−23.7, G5 Dist −14.9→−19.1).
 
+**Low-drive bass-cut bell + fixed HF trim (`MonarchChannel`, 2026-07-04, v1.3):** a later A/B (by ear
++ harmonic-immune tone bursts) found Boost/Clean ran **~+3 dB too bassy below ~250 Hz at low drive**
+(G2), a bump PEAKING ~180 Hz that reverses to ~−1.8 dB thin by G10. Audible only in Boost (OD/Dist
+clipping masks it). Fixed with a drive-gated **bass cut bell** (`bassCut*`, 160 Hz, Q 0.7) that fades
+OUT by G5 — a bell not a shelf (a shelf over-cuts sub-100, under-cuts the 150–220 peak). Validated:
+driven-sweep nulls **improve 1–2.8 dB at G2–G4 in ALL three modes**; only cost is a small clean-sweep
+(below-playing-level) regression at G2/G3 leaving them at −15…−18 dB (the excess is level-dependent, a
+knob-keyed cut can't fully separate the quiet clean sweep from playing level). A separate **fixed HF-trim
+high-shelf** (`hfTrim*`, −1.3 dB @ 4.5 kHz) eases the slightly-hot top end to match the captures within
+~0.3 dB across 2–4.5 kHz (above that the captures roll off/alias — 6 kHz has a spurious −15 dB dip — so
+the trim is conservative and by-ear-confirmable, NOT fit to those artifacts). See dsp.md drive-shelf section.
+
 ### Linear stages run oversampled — top-octave warp fix (2026-06-29)
 The remaining top-octave deficit (16 kHz ~−3.8 dB at every setting) was first wrongly blamed on NAM
 capture aliasing — but NAM captures null to ~−50 dB and ARE accurate up there. It's **bilinear-

@@ -104,10 +104,26 @@ public:
     static constexpr double shelfPivotHz = 450.0; // treble high-shelf geometric centre (Hz)
     static constexpr double shelfMaxDb = 5.6;     // HF lift at drive 0 (fades to 0 by ~drive 0.47)
     static constexpr double shelfSlopeDb = 11.8;  // dB of HF lift lost per unit drive
-    static constexpr double bassPivotHz = 105.0;  // bass low-shelf geometric centre (Hz)
-    static constexpr double bassOnsetDrive = 0.25;// bass lift starts engaging above this drive
-    static constexpr double bassSlopeDb = 7.5;    // dB of LF lift gained per unit drive past onset
-    static constexpr double bassMaxDb = 4.2;      // cap on the LF lift
+    // The Clean/Boost EQ error vs the captures is a bass TILT that reverses with drive — the plugin
+    // runs ~+3 dB too bassy (a bump PEAKING ~180 Hz) at low drive (G2) and ~−1.8 dB too thin at high
+    // drive (G10). The two ends need different SHAPES (a bell at low drive, a shelf at high drive), so
+    // they are two separate drive-dependent corrections:
+    //   • bass BOOST low-shelf, fades IN with drive — counters the high-drive bass-bloom (original).
+    static constexpr double bassPivotHz = 105.0;       // bass boost low-shelf centre (Hz)
+    static constexpr double bassOnsetDrive = 0.25;     // boost engages above this drive
+    static constexpr double bassBoostSlopeDb = 7.5;    // dB of LF boost per unit drive past onset
+    static constexpr double bassBoostMaxDb = 4.2;      // cap on the high-drive LF boost
+    //   • bass CUT bell, fades OUT with drive — removes the low-drive low-mid EXCESS (peaks ~180 Hz,
+    //     so a peaking bell, NOT a shelf: a shelf over-cuts the sub-100 and under-cuts the 150-220 peak).
+    static constexpr double bassCutPivotHz = 160.0;    // cut-bell centre (Hz)
+    static constexpr double bassCutQ = 0.7;            // cut-bell width
+    static constexpr double bassCutOffDrive = 0.5;     // cut fades to 0 at this drive (== G5)
+    static constexpr double bassCutSlopeDb = 13.0;     // dB of cut per unit drive below the cutoff
+    static constexpr double bassCutMaxDb = 4.0;        // cap on the low-drive cut
+    // Fixed (drive-independent) HF trim high-shelf: eases the plugin's slightly-hot top end toward
+    // the captures (matches them within ~0.3 dB across 2-4.5k, where the captures are reliable).
+    static constexpr double hfTrimPivotHz = 4500.0;    // HF-trim high-shelf centre (Hz)
+    static constexpr double hfTrimDb = -1.3;           // HF cut above the pivot (dB)
 
     // ---- Bilinear-warp top-octave correction (rate-dependent high-shelf, 2026-06-29; recal 06-30) -
     // The linear WDF stages run at the oversampled rate (see PluginProcessor), but the bilinear
@@ -179,7 +195,9 @@ public:
         wsB1 /= wsDc;
         // OD clip-gated low-shelf: fixed coeffs at the OS rate; a low-shelf sets ghi=1, glo=lift.
         shelfCoeffs (std::pow (10.0, odShelfMaxDb / 20.0), 1.0, odShelfPivotHz, olB0, olB1, olA1);
-        hsX1 = hsY1 = lsX1 = lsY1 = wsX1 = wsY1 = olX1 = olY1 = 0.0;
+        // Fixed HF-trim high-shelf (drive-independent): eases the slightly-hot top end (glo=1, ghi=cut).
+        shelfCoeffs (1.0, std::pow (10.0, hfTrimDb / 20.0), hfTrimPivotHz, htB0, htB1, htA1);
+        hsX1 = hsY1 = lsX1 = lsY1 = wsX1 = wsY1 = olX1 = olY1 = htX1 = htY1 = bcX1 = bcX2 = bcY1 = bcY2 = 0.0;
     }
 
     void prepareClip (double clipRate)
@@ -214,7 +232,7 @@ public:
         volume.reset();
         railXprev = 0.0;
         railFprev = 0.0;
-        hsX1 = hsY1 = lsX1 = lsY1 = wsX1 = wsY1 = olX1 = olY1 = 0.0;
+        hsX1 = hsY1 = lsX1 = lsY1 = wsX1 = wsY1 = olX1 = olY1 = htX1 = htY1 = bcX1 = bcX2 = bcY1 = bcY2 = 0.0;
     }
 
     // ---- Parameter setters (call per block; tapers applied inside each stage) ----
@@ -373,14 +391,32 @@ private:
         b1 = ghi * (wz - K) / a0;
     }
 
+    // RBJ peaking (bell) biquad — standard digital-domain design (Audio EQ Cookbook). Direct-Form-I.
+    void peakCoeffs (double centreHz, double gainDb, double Q,
+                     double& b0, double& b1, double& b2, double& a1, double& a2) const noexcept
+    {
+        const double A = std::pow (10.0, gainDb / 40.0);
+        const double w0 = 2.0 * M_PI * centreHz / shBaseRate;
+        const double alpha = std::sin (w0) / (2.0 * Q);
+        const double a0 = 1.0 + alpha / A;
+        b0 = (1.0 + alpha * A) / a0;
+        b1 = (-2.0 * std::cos (w0)) / a0;
+        b2 = (1.0 - alpha * A) / a0;
+        a1 = (-2.0 * std::cos (w0)) / a0;
+        a2 = (1.0 - alpha / A) / a0;
+    }
+
     // Drive-dependent capture-match correction (see shelf*/bass* consts): a treble HIGH-SHELF that
-    // fades OUT with drive + a bass LOW-SHELF that fades IN with drive, both on Stage 1's output.
+    // fades OUT with drive, a bass BOOST low-shelf that fades IN with drive (high-drive bloom), and a
+    // bass CUT bell that fades OUT with drive (low-drive low-mid excess). All on Stage 1's output.
     void updateDriveShelf (double drive01) noexcept
     {
         const double trebleDb = std::max (0.0, shelfMaxDb - shelfSlopeDb * drive01);          // HF lift
-        const double bassDb = std::min (bassMaxDb, std::max (0.0, bassSlopeDb * (drive01 - bassOnsetDrive)));
-        shelfCoeffs (1.0, std::pow (10.0, trebleDb / 20.0), shelfPivotHz, hsB0, hsB1, hsA1);  // high-shelf
-        shelfCoeffs (std::pow (10.0, bassDb / 20.0), 1.0, bassPivotHz, lsB0, lsB1, lsA1);     // low-shelf
+        const double bassBoostDb = std::min (bassBoostMaxDb, std::max (0.0, bassBoostSlopeDb * (drive01 - bassOnsetDrive)));
+        const double bassCutDb = -std::min (bassCutMaxDb, std::max (0.0, bassCutSlopeDb * (bassCutOffDrive - drive01)));
+        shelfCoeffs (1.0, std::pow (10.0, trebleDb / 20.0), shelfPivotHz, hsB0, hsB1, hsA1);  // treble high-shelf
+        shelfCoeffs (std::pow (10.0, bassBoostDb / 20.0), 1.0, bassPivotHz, lsB0, lsB1, lsA1); // bass boost low-shelf
+        peakCoeffs (bassCutPivotHz, bassCutDb, bassCutQ, bcB0, bcB1, bcB2, bcA1, bcA2);        // bass cut bell
     }
 
     inline double driveShelf (double x) noexcept
@@ -388,12 +424,18 @@ private:
         const double t = hsB0 * x + hsB1 * hsX1 - hsA1 * hsY1; // treble high-shelf
         hsX1 = x;
         hsY1 = t;
-        const double b = lsB0 * t + lsB1 * lsX1 - lsA1 * lsY1; // bass low-shelf
+        const double b = lsB0 * t + lsB1 * lsX1 - lsA1 * lsY1; // bass boost low-shelf
         lsX1 = t;
         lsY1 = b;
-        const double y = wsB0 * b + wsB1 * wsX1 - wsA1 * wsY1; // bilinear-warp top-octave correction
-        wsX1 = b;
-        wsY1 = y;
+        const double c = bcB0 * b + bcB1 * bcX1 + bcB2 * bcX2 - bcA1 * bcY1 - bcA2 * bcY2; // bass cut bell
+        bcX2 = bcX1; bcX1 = b;
+        bcY2 = bcY1; bcY1 = c;
+        const double w = wsB0 * c + wsB1 * wsX1 - wsA1 * wsY1; // bilinear-warp top-octave correction
+        wsX1 = c;
+        wsY1 = w;
+        const double y = htB0 * w + htB1 * htX1 - htA1 * htY1; // fixed HF trim (ease the top toward captures)
+        htX1 = w;
+        htY1 = y;
         return y;
     }
 
@@ -450,6 +492,9 @@ private:
     double hsB0 { 1.0 }, hsB1 { 0.0 }, hsA1 { 0.0 }, hsX1 { 0.0 }, hsY1 { 0.0 };
     double lsB0 { 1.0 }, lsB1 { 0.0 }, lsA1 { 0.0 }, lsX1 { 0.0 }, lsY1 { 0.0 };
     double wsB0 { 1.0 }, wsB1 { 0.0 }, wsA1 { 0.0 }, wsX1 { 0.0 }, wsY1 { 0.0 };
+    double htB0 { 1.0 }, htB1 { 0.0 }, htA1 { 0.0 }, htX1 { 0.0 }, htY1 { 0.0 }; // fixed HF-trim high-shelf
+    double bcB0 { 1.0 }, bcB1 { 0.0 }, bcB2 { 0.0 }, bcA1 { 0.0 }, bcA2 { 0.0 };  // drive-gated bass-cut bell
+    double bcX1 { 0.0 }, bcX2 { 0.0 }, bcY1 { 0.0 }, bcY2 { 0.0 };
 
     // OD clip-depth-gated low-mid restoration (ol* = OD low-shelf; runs post-clip at the OS rate).
     double olB0 { 1.0 }, olB1 { 0.0 }, olA1 { 0.0 }, olX1 { 0.0 }, olY1 { 0.0 };

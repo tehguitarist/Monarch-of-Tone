@@ -205,8 +205,21 @@ clipper sees the corrected spectrum; runs at the oversampled rate with the rest 
 each unity by the G4–G5 crossover:
 - **Treble high-shelf** (`shelfPivotHz` 450, `shelfMaxDb`/`shelfSlopeDb`): HF lift that fades OUT
   with drive — restores the Stage-1 HF shelf `Av=1+Z_upper/Z_lower` lets collapse at low drive.
-- **Bass low-shelf** (`bassPivotHz` 105, `bassOnsetDrive`/`bassSlopeDb`/`bassMaxDb`): LF lift that
-  fades IN with drive — counters the documented bass-bloom-under-drive.
+- **Bass boost low-shelf** (`bassPivotHz` 105, `bassOnsetDrive`/`bassBoostSlopeDb`/`bassBoostMaxDb`):
+  LF lift that fades IN with drive — counters the documented bass-bloom-under-drive.
+- **Bass cut bell** (`bassCutPivotHz` 160, `bassCutQ` 0.7, fades OUT with drive to 0 by `bassCutOffDrive`
+  =0.5≈G5; `bassCutSlopeDb`/`bassCutMaxDb`, a peaking biquad `bc*`, 2026-07-04): removes the **low-drive
+  low-mid EXCESS** — Boost/Clean ran ~+3 dB too bassy below ~250 Hz at G2 (a bump PEAKING ~180 Hz, so a
+  bell not a shelf — a shelf over-cuts sub-100 and under-cuts the 150–220 peak). It's OFF by G5 (leaves
+  the mid/high-drive voicing untouched). Applies to all modes (pre-clip) but is only audible in Boost —
+  OD/Dist clipping masks the excess. Validated: driven-sweep nulls **improve 1–2.8 dB at G2–G4 across all
+  three modes**; the only cost is a small clean-sweep (very-quiet, below playing level) regression at
+  G2/G3 that leaves them at still-excellent −15 to −18 dB (the excess is level-dependent — bigger at
+  playing level than at the near-silent clean sweep — and a knob-keyed cut can't tell them apart).
+- **Fixed HF-trim high-shelf** (`hfTrimPivotHz` 4.5k, `hfTrimDb` −1.3, drive-independent, `ht*`,
+  2026-07-04): eases the slightly-hot top end so the plugin matches the captures within ~0.3 dB across
+  2–4.5 kHz (where the captures are reliable; above that they roll off/alias erratically — 6 kHz shows a
+  spurious −15 dB dip — so this is a conservative, by-ear-confirmable cut, NOT fit to those artifacts).
 - **Warp high-shelf** (`warpPivotHz` 6.5k / `warpScaleDb`/`warpExp`, rate-scaled `×(48k/rate)^warpExp`,
   capped `warpMaxDb`, then **DC-normalized**): compensates the finite-rate bilinear top-octave droop.
   Recalibrated 06-30 — it was previously self-disabled by 2x (`^4`), which left the live default (2x)
@@ -220,8 +233,8 @@ each unity by the G4–G5 crossover:
 All use the prewarped bilinear `shelfCoeffs` helper (a high-shelf sets Glo=1; a low-shelf sets
 Ghi=1; Glo=Ghi → exact unity). Result (render/2x+ paths): **50 Hz–16 kHz within ~1.2 dB at all
 gain/tone** (worst ~2.3 dB at the tone-down top-octave corner); also *improves* OD/Dist nulls at
-mid/high drive. State (`hs*`/`ls*`/`ws*`) resets in `prepareLinear`/`reset`; drive-shelf coeffs
-update per block in `setDrive`, the warp shelf in `prepareLinear` (rate-only).
+mid/high drive. State (`hs*`/`ls*`/`bc*`/`ws*`/`ht*`) resets in `prepareLinear`/`reset`; drive-shelf +
+bass-cut-bell coeffs update per block in `setDrive`, the warp + HF-trim shelves in `prepareLinear` (rate-only).
 
 ---
 
