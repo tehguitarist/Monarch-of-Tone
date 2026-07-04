@@ -150,7 +150,8 @@ OD/Dist nulls at mid/high drive (G5 OD −18.4→−23.7, G5 Dist −14.9→−1
 **Low-drive bass-cut bell + fixed HF trim (`MonarchChannel`, 2026-07-04, v1.3):** a later A/B (by ear
 + harmonic-immune tone bursts) found Boost/Clean ran **~+3 dB too bassy below ~250 Hz at low drive**
 (G2), a bump PEAKING ~180 Hz that reverses to ~−1.8 dB thin by G10. Audible only in Boost (OD/Dist
-clipping masks it). Fixed with a drive-gated **bass cut bell** (`bassCut*`, 160 Hz, Q 0.7) that fades
+clipping masks it). Fixed with a drive-gated **bass cut bell** (`bassCut*`, 185 Hz, Q 0.45 — a WIDE
+bell, refined 07-05 from 160/Q0.7 to flatten the broad 100–330 Hz excess to ±0.2 dB) that fades
 OUT by G5 — a bell not a shelf (a shelf over-cuts sub-100, under-cuts the 150–220 peak). Validated:
 driven-sweep nulls **improve 1–2.8 dB at G2–G4 in ALL three modes**; only cost is a small clean-sweep
 (below-playing-level) regression at G2/G3 leaving them at −15…−18 dB (the excess is level-dependent, a

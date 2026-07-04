@@ -113,13 +113,14 @@ public:
     static constexpr double bassOnsetDrive = 0.25;     // boost engages above this drive
     static constexpr double bassBoostSlopeDb = 7.5;    // dB of LF boost per unit drive past onset
     static constexpr double bassBoostMaxDb = 4.2;      // cap on the high-drive LF boost
-    //   • bass CUT bell, fades OUT with drive — removes the low-drive low-mid EXCESS (peaks ~180 Hz,
-    //     so a peaking bell, NOT a shelf: a shelf over-cuts the sub-100 and under-cuts the 150-220 peak).
-    static constexpr double bassCutPivotHz = 160.0;    // cut-bell centre (Hz)
-    static constexpr double bassCutQ = 0.7;            // cut-bell width
+    //   • bass CUT bell, fades OUT with drive — removes the low-drive low-mid EXCESS. A WIDE peaking
+    //     bell (not a shelf: a shelf over-cuts sub-100 and under-cuts the peak): the excess is broad
+    //     (100-330 Hz, peaking ~200), so a low-Q bell centred 185 flattens it to ±0.2 dB at G2.
+    static constexpr double bassCutPivotHz = 185.0;    // cut-bell centre (Hz)
+    static constexpr double bassCutQ = 0.45;           // cut-bell width (low Q = wide, covers 100-330)
     static constexpr double bassCutOffDrive = 0.5;     // cut fades to 0 at this drive (== G5)
     static constexpr double bassCutSlopeDb = 13.0;     // dB of cut per unit drive below the cutoff
-    static constexpr double bassCutMaxDb = 4.0;        // cap on the low-drive cut
+    static constexpr double bassCutMaxDb = 4.6;        // cap on the low-drive cut
     // Fixed (drive-independent) HF trim high-shelf: eases the plugin's slightly-hot top end toward
     // the captures (matches them within ~0.3 dB across 2-4.5k, where the captures are reliable).
     static constexpr double hfTrimPivotHz = 4500.0;    // HF-trim high-shelf centre (Hz)

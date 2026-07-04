@@ -207,10 +207,12 @@ each unity by the G4–G5 crossover:
   with drive — restores the Stage-1 HF shelf `Av=1+Z_upper/Z_lower` lets collapse at low drive.
 - **Bass boost low-shelf** (`bassPivotHz` 105, `bassOnsetDrive`/`bassBoostSlopeDb`/`bassBoostMaxDb`):
   LF lift that fades IN with drive — counters the documented bass-bloom-under-drive.
-- **Bass cut bell** (`bassCutPivotHz` 160, `bassCutQ` 0.7, fades OUT with drive to 0 by `bassCutOffDrive`
-  =0.5≈G5; `bassCutSlopeDb`/`bassCutMaxDb`, a peaking biquad `bc*`, 2026-07-04): removes the **low-drive
-  low-mid EXCESS** — Boost/Clean ran ~+3 dB too bassy below ~250 Hz at G2 (a bump PEAKING ~180 Hz, so a
-  bell not a shelf — a shelf over-cuts sub-100 and under-cuts the 150–220 peak). It's OFF by G5 (leaves
+- **Bass cut bell** (`bassCutPivotHz` 185, `bassCutQ` 0.45 — a WIDE bell, fades OUT with drive to 0 by
+  `bassCutOffDrive`=0.5≈G5; `bassCutSlopeDb`/`bassCutMaxDb`, a peaking biquad `bc*`, 2026-07-04): removes
+  the **low-drive low-mid EXCESS** — Boost/Clean ran ~+3 dB too bassy below ~250 Hz at G2 (a broad bump
+  spanning 100–330 Hz, so a bell not a shelf — a shelf over-cuts sub-100 and under-cuts the peak; and the
+  bell must be WIDE/low-Q to flatten the whole 100–330 span — a narrow bell centred at 160 left a +0.7 dB
+  residual at 220–280). Refined 07-05 (160/Q0.7 → 185/Q0.45) to flatten it to ±0.2 dB at G2. OFF by G5 (leaves
   the mid/high-drive voicing untouched). Applies to all modes (pre-clip) but is only audible in Boost —
   OD/Dist clipping masks the excess. Validated: driven-sweep nulls **improve 1–2.8 dB at G2–G4 across all
   three modes**; the only cost is a small clean-sweep (very-quiet, below playing level) regression at
