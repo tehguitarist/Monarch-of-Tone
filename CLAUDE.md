@@ -43,7 +43,7 @@ cmake --build build --target Monarch_AU     # AU (primary) / Monarch_VST3 / Mona
 clang-format -i src/**/*.{cpp,h}
 ```
 
-**CMake minimum:** 3.15 | **C++ standard:** 17 | **macOS target:** 10.13+ | **Version:** 1.2.0
+**CMake minimum:** 3.15 | **C++ standard:** 17 | **macOS target:** 10.13+ | **Version:** 1.3.0
 
 ---
 
