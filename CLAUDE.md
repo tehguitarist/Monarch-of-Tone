@@ -160,6 +160,12 @@ high-shelf** (`hfTrim*`, −1.3 dB @ 4.5 kHz) eases the slightly-hot top end to 
 ~0.3 dB across 2–4.5 kHz (above that the captures roll off/alias — 6 kHz has a spurious −15 dB dip — so
 the trim is conservative and by-ear-confirmable, NOT fit to those artifacts). See dsp.md drive-shelf section.
 
+> **Deferred note — Red drive-shelf keying:** these drive-dependent EQ shelves are keyed to the raw DRIVE
+> knob and fit to the Yellow captures. On Red, gain/clipping/harmonics track the ACTUAL gain (so Red@d ≈
+> Yellow@(d+1⁄6) there), but the knob-keyed EQ correction does NOT shift by 1⁄6 → Red over-cuts the low
+> mids ~1–2 dB at LOW drive. Left as-is (Red has no NAM reference; unvalidatable either way). Potential
+> fix + rationale in dsp.md drive-shelf section ("Deferred refinement — Red drive-shelf keying").
+
 ### Linear stages run oversampled — top-octave warp fix (2026-06-29)
 The remaining top-octave deficit (16 kHz ~−3.8 dB at every setting) was first wrongly blamed on NAM
 capture aliasing — but NAM captures null to ~−50 dB and ARE accurate up there. It's **bilinear-

@@ -238,6 +238,16 @@ gain/tone** (worst ~2.3 dB at the tone-down top-octave corner); also *improves* 
 mid/high drive. State (`hs*`/`ls*`/`bc*`/`ws*`/`ht*`) resets in `prepareLinear`/`reset`; drive-shelf +
 bass-cut-bell coeffs update per block in `setDrive`, the warp + HF-trim shelves in `prepareLinear` (rate-only).
 
+> **Deferred refinement — Red drive-shelf keying (2026-07-05, not yet needed):** these drive-dependent
+> shelves are keyed to `drive01` (the raw knob) and were fit to the **Yellow/stock** captures. On **Red**
+> (fixed Hi-Gain, floor = R6_floor + DRIVE_max/6 → Red@d ≈ Yellow@(d+1⁄6)), the gain/clipping/harmonics
+> track the ACTUAL Stage-1 output (`nodeG`/`clipEnv`), so they correctly behave like Yellow@(d+1⁄6). But
+> the EQ-correction shelves, being knob-keyed, apply Yellow@d's curve at Red's knob d — i.e. they do NOT
+> shift by 1⁄6 the way the gain does. Effect: at LOW Red drive the bass cut bell over-cuts ~1–2 dB vs a
+> gain-matched Yellow. **Potential fix:** on the hiGain channel, key the shelves off an EFFECTIVE drive
+> `drive01 + 1⁄6` (clamped) so Red is a fully consistent gain-shifted Yellow in EQ too. Left as-is for now
+> because Red has NO NAM reference — neither keying is validated, so it's a voicing choice either way.
+
 ---
 
 ## Pot Tapers
