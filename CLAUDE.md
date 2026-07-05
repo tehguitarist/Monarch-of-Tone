@@ -73,10 +73,11 @@ preset browser. Supply-voltage mod (9/12/18V) and rail-saturation ADAA are in. L
 engineering: CI/CD (`.github/workflows/`), cross-platform VST3, and per-platform installers
 (`installer/`) — see README.
 
-**Calibration result (Step 11, real-pedal A/B):** the plugin nulls against 44 NAM captures (drive
-G2–G10, tone T2–T8, Clean/OD/Dist) at **−7.6 to −21.7 dB, median −14.7**, down to ~−22 dB through
-mid gain (G4–G6). Best per-mode null at the labelled mid-gain settings: Clean/Boost −20.7, OD
-−18.5, Dist −17.6 dB. Excellent to mid gain; shallower only at very high drive (G8–G10) — an
+**Calibration result (Step 11, real-pedal A/B; refreshed v1.3 2026-07-05):** the plugin nulls against
+44 NAM captures (drive G2–G10, tone T2–T8, Clean/OD/Dist) at **−6.4 to −22.3 dB, median −16.6**, down
+to ~−22 dB through mid gain (G4–G6). Best per-mode null at the labelled mid-gain settings (G5 T5):
+Clean/Boost −21.2, OD −21.4, Dist −20.6 dB (OD/Dist up ~3 dB from the v1.2 baseline after the
+odLowShelf + bass-tilt work). Excellent to mid gain; shallower only at very high drive (G8–G10) — an
 accepted device-physics / capture-aliasing residual, not a topology error (every Stage-1 value +
 topology re-traced exact against the Theseus schematic). The 44 captures (`analysis/pedal_export2/`,
 842 MB) are **local-only, gitignored** — re-capture against `analysis/test_signal_48k.wav` to
