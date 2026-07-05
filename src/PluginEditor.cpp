@@ -1,5 +1,11 @@
 #include "PluginEditor.h"
 
+// Build version for the UI, sourced from CMake PROJECT_VERSION (see CMakeLists target defs).
+// Fallback keeps the non-plugin tools (which compile this file) building without the define.
+#ifndef MONARCH_VERSION_STRING
+ #define MONARCH_VERSION_STRING "dev"
+#endif
+
 using namespace juce;
 
 namespace
@@ -92,6 +98,10 @@ MonarchAudioProcessorEditor::MonarchAudioProcessorEditor (MonarchAudioProcessor&
     setupOSLabel (osLiveLabel, "LIVE", Justification::centredRight);
     setupOSLabel (osRenderLabel, "RENDER", Justification::centredRight);
     setupOSLabel (osSizeLabel, "UI SIZE", Justification::centredRight);
+    // Version, centred in the strip. From the build (JucePlugin_VersionString == CMake PROJECT_VERSION),
+    // never hardcoded, so a version bump flows through automatically. Dimmed — informational, not a control.
+    setupOSLabel (osVersionLabel, "v" MONARCH_VERSION_STRING, Justification::centred);
+    osVersionLabel.setColour (Label::textColourId, Colour (MonarchLookAndFeel::cOSLabel).withAlpha (0.55f));
 
     auto setupOSBox = [this] (ComboBox& box) {
         box.addItemList (kOsChoices, 1);
@@ -159,6 +169,7 @@ void MonarchAudioProcessorEditor::refreshFonts (float sc)
     osLiveLabel.setFont (bold (7.0f * sc).withExtraKerningFactor (0.10f));
     osRenderLabel.setFont (bold (7.0f * sc).withExtraKerningFactor (0.10f));
     osSizeLabel.setFont (bold (7.0f * sc).withExtraKerningFactor (0.10f));
+    osVersionLabel.setFont (bold (7.0f * sc).withExtraKerningFactor (0.10f));
 }
 
 void MonarchAudioProcessorEditor::resized()
@@ -222,6 +233,9 @@ void MonarchAudioProcessorEditor::resized()
     scaleBtn.setBounds (os.removeFromRight (i (48)).reduced (0, boxVPad));
     os.removeFromRight (i (5));
     osSizeLabel.setBounds (os.removeFromRight (i (42)));
+
+    // Version fills the centre gap between the RENDER box and the UI-SIZE controls (centred text).
+    osVersionLabel.setBounds (os);
 
     scaleBtn.setButtonText (String (roundToInt (currentScale * 100.0f)) + "%");
 

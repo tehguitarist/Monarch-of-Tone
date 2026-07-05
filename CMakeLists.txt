@@ -82,6 +82,7 @@ target_compile_definitions(Monarch
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
         JUCE_VST3_CAN_REPLACE_VST2=0
+        MONARCH_VERSION_STRING="${PROJECT_VERSION}"
 )
 
 target_compile_options(Monarch
@@ -238,6 +239,7 @@ target_compile_definitions(UISnapshot
         "JucePlugin_Name=\"Monarch of Tone\""
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
+        MONARCH_VERSION_STRING="${PROJECT_VERSION}"
 )
 
 target_link_libraries(UISnapshot

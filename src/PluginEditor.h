@@ -46,7 +46,7 @@ private:
     float vuInDecay { 0.0f }, vuOutDecay { 0.0f };
 
     // ---- Oversampling strip ----
-    juce::Label osLabel, osLiveLabel, osRenderLabel, osSizeLabel;
+    juce::Label osLabel, osLiveLabel, osRenderLabel, osSizeLabel, osVersionLabel;
     juce::ComboBox osRealtimeBox, osRenderBox;
     juce::TextButton scaleBtn;
     std::unique_ptr<juce::ComboBoxParameterAttachment> osRealtimeAttach, osRenderAttach;
