@@ -23,6 +23,15 @@ private:
     void refreshFonts (float sc);
     void showScaleMenu();
 
+    // Applies the equal-and-opposite CHANGE to the other trim, preserving the pair's existing
+    // offset (delta-linked, so enabling the lock never snaps a knob). No-op when the lock is off.
+    // `trimLinkBusy` breaks the A→B→A feedback loop the two parameter attachments would otherwise
+    // bounce through.
+    void mirrorTrim (bool sourceIsInput);
+    bool trimLinkBusy { false };
+    double lastInputTrim { 0.0 };
+    double lastOutputTrim { 0.0 };
+
     // Base (1x) window size. The pedal face is the centre; the side panels (trim + VU) and the
     // oversampling strip are the "peripheral" shared-look elements. kBaseW dropped 694→592 so the
     // pedal face is 20% narrower (510→408) with the fixed-width side panels unchanged; then
@@ -30,6 +39,10 @@ private:
     // are fixed-width in px, so all the extra window width goes to the pedal face.
     static constexpr int kBaseW = 612;
     static constexpr int kBaseH = 354;
+
+    // Trim knob range, ± dB. Must match the input_trim/output_trim NormalisableRange in
+    // MonarchAudioProcessor::createParameterLayout().
+    static constexpr double kTrimRange = 18.0;
 
     MonarchAudioProcessor& audioProcessor;
     MonarchLookAndFeel lnf;
@@ -40,16 +53,18 @@ private:
     juce::Label inputSectionLabel, outputSectionLabel;
     juce::Slider inputTrim, outputTrim;
     juce::Label inputTrimSub, outputTrimSub;
-    juce::Label inputTrimValue, outputTrimValue; // fixed (always-visible) dB readout, -12.0 to +12.0
+    juce::Label inputTrimValue, outputTrimValue; // fixed (always-visible) dB readout, -18.0 to +18.0
     VUMeter inputVU, outputVU;
     std::unique_ptr<juce::SliderParameterAttachment> inputTrimAttach, outputTrimAttach;
     float vuInDecay { 0.0f }, vuOutDecay { 0.0f };
 
     // ---- Oversampling strip ----
-    juce::Label osLabel, osLiveLabel, osRenderLabel, osSizeLabel, osVersionLabel;
+    juce::Label osLabel, osLiveLabel, osRenderLabel, osSizeLabel, osVersionLabel, trimLockLabel;
     juce::ComboBox osRealtimeBox, osRenderBox;
     juce::TextButton scaleBtn;
+    juce::TextButton trimLockButton { "LOCK" };
     std::unique_ptr<juce::ComboBoxParameterAttachment> osRealtimeAttach, osRenderAttach;
+    std::unique_ptr<juce::ButtonParameterAttachment> trimLockAttach;
 
     std::unique_ptr<PedalFace> pedalFace; // the unique purple/gold centre
     juce::Rectangle<int> pedalFaceArea;

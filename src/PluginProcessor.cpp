@@ -123,13 +123,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout MonarchAudioProcessor::creat
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "input_trim", 1 },
         "Input Trim",
-        juce::NormalisableRange<float> (-12.0f, 12.0f),
+        juce::NormalisableRange<float> (-18.0f, 18.0f),
         0.0f));
 
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "output_trim", 1 },
         "Output Trim",
-        juce::NormalisableRange<float> (-12.0f, 12.0f),
+        juce::NormalisableRange<float> (-18.0f, 18.0f),
         0.0f));
 
     // Supply-voltage mod (9/12/18 V) — simulates running the pedal at a higher supply (more
@@ -151,6 +151,16 @@ juce::AudioProcessorValueTreeState::ParameterLayout MonarchAudioProcessor::creat
         "Oversampling (Render)",
         oversamplingChoices,
         2));
+
+    // Trim lock: while on, moving either trim applies the equal-and-opposite CHANGE to the other
+    // (delta-linked). UI-side coupling only — no DSP of its own — but lives in APVTS so it
+    // saves/restores with the session and is host-automatable. Defaults ON for fresh instances.
+    // Appended LAST deliberately: parameter order is the host's automation index, so adding here
+    // leaves existing sessions' automation lanes unshifted.
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        juce::ParameterID { "trim_lock", 1 },
+        "Trim Lock",
+        true));
 
     return { params.begin(), params.end() };
 }

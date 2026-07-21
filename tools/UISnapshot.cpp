@@ -28,7 +28,9 @@ int main (int argc, char* argv[])
         std::fprintf (stderr, "no editor\n");
         return 1;
     }
-    editor->setSize (roundToInt (694 * scale), roundToInt (354 * scale));
+    // Must match MonarchAudioProcessorEditor::kBaseW/kBaseH (they're private) — setSize bypasses
+    // the aspect-lock constrainer, so a stale base here silently renders a distorted layout.
+    editor->setSize (roundToInt (612 * scale), roundToInt (354 * scale));
 
     Image img (Image::ARGB, editor->getWidth(), editor->getHeight(), true);
     {

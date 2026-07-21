@@ -380,8 +380,37 @@ target_link_libraries(OSFidelity
         juce::juce_recommended_config_flags
 )
 
+# TrimLock — editor-level: the input/output trim LOCK delta-coupling acceptance table.
+juce_add_console_app(TrimLock PRODUCT_NAME "TrimLock")
+target_sources(TrimLock
+    PRIVATE
+        tests/TrimLock.cpp
+        src/PluginProcessor.cpp
+        src/PluginEditor.cpp
+        src/ui/MonarchLookAndFeel.cpp
+        src/ui/PedalFace.cpp
+)
+target_include_directories(TrimLock PRIVATE src)
+target_compile_definitions(TrimLock
+    PRIVATE
+        "JucePlugin_Name=\"Monarch of Tone\""
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0
+        MONARCH_VERSION_STRING="${PROJECT_VERSION}"
+)
+target_link_libraries(TrimLock
+    PRIVATE
+        xsimd::xsimd
+        chowdsp::chowdsp_wdf
+        MonarchAssets
+        juce::juce_audio_utils
+        juce::juce_dsp
+        juce::juce_recommended_config_flags
+)
+
 # ---- ctest registration: finite-only probe gates + the existing DSP validation tests ----
 enable_testing()
+add_test(NAME TrimLock       COMMAND TrimLock)
 add_test(NAME FeatureProfile COMMAND FeatureProfile)
 add_test(NAME PerfBenchmark  COMMAND PerfBenchmark)
 add_test(NAME OSFidelity     COMMAND OSFidelity)

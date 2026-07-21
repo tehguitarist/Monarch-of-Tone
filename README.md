@@ -31,8 +31,9 @@ design is prized.
 - **Supply-voltage mod (9V / 12V / 18V)** — simulates running the pedal on a hotter supply:
   more op-amp headroom (mostly audible in Boost), diode clipping thresholds untouched, exactly
   mirroring what the real "18V mod" does to the hardware
-- **Per-channel Presence trim**, independent Input/Output trim (±12 dB) with VU metering for
-  studio gain-staging
+- **Per-channel Presence trim**, independent Input/Output trim (±18 dB) with VU metering for
+  studio gain-staging, and a **Trim Lock** toggle (default on) that ties the two trims together —
+  raising one lowers the other by the same amount, preserving whatever offset was already dialled in
 - **Switchable oversampling** — separate Live and Render settings, the render path
   auto-engaging when your DAW bounces
 - **5 factory presets** (Blues, High Gain, Rhythm Crunch, Edge-of-Breakup, Fuzz), browsable

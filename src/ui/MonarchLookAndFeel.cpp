@@ -137,6 +137,20 @@ void MonarchLookAndFeel::drawButtonBackground (Graphics& g, Button& button, cons
         g.drawRoundedRectangle (bounds.reduced (0.5f), corner, 1.0f);
         return;
     }
+    if (button.getComponentID() == "ostoggle")
+    {
+        // Lit-on / dim-off toggle in the OS strip. Same geometry as the "scale" button above, but
+        // the fill/outline follow the TOGGLE state (not the momentary press) so the on/off state is
+        // readable at a glance; off dims down to the strip background so it recedes.
+        const auto bounds = button.getLocalBounds().toFloat();
+        const float corner = 4.0f;
+        const bool on = button.getToggleState();
+        g.setColour (Colour (on ? cOSBtnActiveBg : cOSBackground));
+        g.fillRoundedRectangle (bounds, corner);
+        g.setColour (Colour (on ? cOSBtnActiveBdr : cOSBorder));
+        g.drawRoundedRectangle (bounds.reduced (0.5f), corner, 1.0f);
+        return;
+    }
     LookAndFeel_V4::drawButtonBackground (g, button, bg, highlighted, isDown);
 }
 

@@ -81,8 +81,19 @@ MonarchAudioProcessorEditor::MonarchAudioProcessorEditor (MonarchAudioProcessor&
     auto formatTrim = [] (double dB) { return String (dB, 1) + " dB"; };
     inputTrimValue.setText (formatTrim (inputTrim.getValue()), dontSendNotification);
     outputTrimValue.setText (formatTrim (outputTrim.getValue()), dontSendNotification);
-    inputTrim.onValueChange = [this, formatTrim] { inputTrimValue.setText (formatTrim (inputTrim.getValue()), dontSendNotification); };
-    outputTrim.onValueChange = [this, formatTrim] { outputTrimValue.setText (formatTrim (outputTrim.getValue()), dontSendNotification); };
+    inputTrim.onValueChange = [this, formatTrim] {
+        inputTrimValue.setText (formatTrim (inputTrim.getValue()), dontSendNotification);
+        mirrorTrim (true);
+    };
+    outputTrim.onValueChange = [this, formatTrim] {
+        outputTrimValue.setText (formatTrim (outputTrim.getValue()), dontSendNotification);
+        mirrorTrim (false);
+    };
+
+    // Seed the delta caches AFTER the attachments have pushed the restored parameter values into
+    // the sliders, so a session recalled with non-zero trims doesn't read as a jump on the first move.
+    lastInputTrim = inputTrim.getValue();
+    lastOutputTrim = outputTrim.getValue();
 
     addAndMakeVisible (inputVU);
     addAndMakeVisible (outputVU);
@@ -98,6 +109,7 @@ MonarchAudioProcessorEditor::MonarchAudioProcessorEditor (MonarchAudioProcessor&
     setupOSLabel (osLiveLabel, "LIVE", Justification::centredRight);
     setupOSLabel (osRenderLabel, "RENDER", Justification::centredRight);
     setupOSLabel (osSizeLabel, "UI SIZE", Justification::centredRight);
+    setupOSLabel (trimLockLabel, "TRIM", Justification::centredRight);
     // Version, centred in the strip. From the build (JucePlugin_VersionString == CMake PROJECT_VERSION),
     // never hardcoded, so a version bump flows through automatically. Dimmed — informational, not a control.
     setupOSLabel (osVersionLabel, "v" MONARCH_VERSION_STRING, Justification::centred);
@@ -116,6 +128,17 @@ MonarchAudioProcessorEditor::MonarchAudioProcessorEditor (MonarchAudioProcessor&
         *audioProcessor.apvts.getParameter ("oversampling_realtime"), osRealtimeBox);
     osRenderAttach = std::make_unique<ComboBoxParameterAttachment> (
         *audioProcessor.apvts.getParameter ("oversampling_render"), osRenderBox);
+
+    // Trim lock — ties the two trims together (delta-linked; see mirrorTrim). "ostoggle" gives it
+    // the lit-on/dim-off treatment in the L&F; the text colour follows the toggle state via the
+    // on/off colour IDs (LookAndFeel_V4::drawButtonText picks between them).
+    trimLockButton.setComponentID ("ostoggle");
+    trimLockButton.setClickingTogglesState (true);
+    trimLockButton.setColour (TextButton::textColourOnId, Colour (MonarchLookAndFeel::cOSBtnActive));
+    trimLockButton.setColour (TextButton::textColourOffId, Colour (MonarchLookAndFeel::cOSLabel));
+    addAndMakeVisible (trimLockButton);
+    trimLockAttach = std::make_unique<ButtonParameterAttachment> (
+        *audioProcessor.apvts.getParameter ("trim_lock"), trimLockButton);
 
     scaleBtn.setComponentID ("scale");
     scaleBtn.setColour (TextButton::buttonColourId, Colour (MonarchLookAndFeel::cOSBtnActiveBg));
@@ -169,6 +192,7 @@ void MonarchAudioProcessorEditor::refreshFonts (float sc)
     osLiveLabel.setFont (bold (7.0f * sc).withExtraKerningFactor (0.10f));
     osRenderLabel.setFont (bold (7.0f * sc).withExtraKerningFactor (0.10f));
     osSizeLabel.setFont (bold (7.0f * sc).withExtraKerningFactor (0.10f));
+    trimLockLabel.setFont (bold (7.0f * sc).withExtraKerningFactor (0.10f));
     osVersionLabel.setFont (bold (7.0f * sc).withExtraKerningFactor (0.10f));
 }
 
@@ -229,6 +253,13 @@ void MonarchAudioProcessorEditor::resized()
     osRenderLabel.setBounds (os.removeFromLeft (i (40)));
     os.removeFromLeft (i (5));
     osRenderBox.setBounds (os.removeFromLeft (i (36)).reduced (0, boxVPad));
+    os.removeFromLeft (i (12));
+    trimLockLabel.setBounds (os.removeFromLeft (i (24)));
+    os.removeFromLeft (i (5));
+    // LOCK is 4 glyphs against the 2-glyph OS boxes and getTextButtonFont floors the size at 7 px,
+    // so below ~0.75× the text stops shrinking with the box; give it ~1.5× the 36 px OS-box width
+    // so the word still fits at the 0.5× minimum. The centre version label absorbs the extra width.
+    trimLockButton.setBounds (os.removeFromLeft (i (52)).reduced (0, boxVPad));
 
     scaleBtn.setBounds (os.removeFromRight (i (48)).reduced (0, boxVPad));
     os.removeFromRight (i (5));
@@ -261,6 +292,36 @@ void MonarchAudioProcessorEditor::timerCallback()
 
     if (pedalFace != nullptr)
         pedalFace->updateLEDs();
+}
+
+void MonarchAudioProcessorEditor::mirrorTrim (bool sourceIsInput)
+{
+    const Slider& src = sourceIsInput ? inputTrim : outputTrim;
+    double& srcLast = sourceIsInput ? lastInputTrim : lastOutputTrim;
+    const double dstLast = sourceIsInput ? lastOutputTrim : lastInputTrim;
+
+    // Cache the new source value FIRST and unconditionally — the delta must be measured against the
+    // previous position even when the lock is off, otherwise the first move after enabling it would
+    // be computed from a stale reference and jump the other knob.
+    const double delta = src.getValue() - srcLast;
+    srcLast = src.getValue();
+
+    // trimLinkBusy: this call is the echo of our own write to the other parameter — that side's
+    // cache has just been refreshed above, which is all this pass needs to do.
+    if (trimLinkBusy || ! trimLockButton.getToggleState() || delta == 0.0)
+        return;
+
+    // Equal and opposite CHANGE, relative to where the other knob already sits — so the pair's
+    // existing offset is preserved and the starting values don't matter. Clamped at the rails.
+    const auto target = (float) jlimit (-kTrimRange, kTrimRange, dstLast - delta);
+
+    if (auto* param = audioProcessor.apvts.getParameter (sourceIsInput ? "output_trim" : "input_trim"))
+    {
+        const ScopedValueSetter<bool> guard (trimLinkBusy, true);
+        param->beginChangeGesture();
+        param->setValueNotifyingHost (param->convertTo0to1 (target));
+        param->endChangeGesture();
+    }
 }
 
 void MonarchAudioProcessorEditor::showScaleMenu()
