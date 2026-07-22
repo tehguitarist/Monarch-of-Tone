@@ -72,6 +72,7 @@ don't proceed on FAIL). All gates currently **PASS** (auval PASS). Each has a de
 | Full chain | `FullChain_DualChannel` | Boost>OD>Dist hierarchy, Boost rail-bounded, Red→Yellow series stable, no NaN |
 | Oversampling | (auval + DSP regression) | clip-span only; voicing OS-independent |
 | Final sweep | `tools/ControlSweep` | full range × all clip combos × 4 OS factors + bypass + render: 0 non-finite, bounded, stable |
+| Trim Lock | `TrimLock` | editor-level: ±18 dB range on both trims, `trim_lock` defaults on, delta-linked mirroring (incl. no-snap-on-enable + rail clamp) matches the acceptance table |
 
 **Calibration / null validation** (Step 11, real-pedal A/B): see CLAUDE.md. The plugin nulls
 against 44 NAM captures at −6.4 to −22.3 dB (median −16.6, v1.3). Harness: `analysis/null_test.py`,

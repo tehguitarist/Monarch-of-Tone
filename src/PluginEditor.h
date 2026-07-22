@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <memory>
 
 #include <juce_audio_processors/juce_audio_processors.h>
@@ -8,6 +9,20 @@
 #include "ui/MonarchLookAndFeel.h"
 #include "ui/PedalFace.h"
 #include "ui/VUMeter.h"
+
+// Subclass so textWasEdited() — which fires AFTER hideEditor has copied the raw
+// user text into the label — is the hook for parsing, clamping, and applying the
+// typed value through the APVTS parameter (never the slider directly).
+struct EditableTrimLabel : public juce::Label
+{
+    void textWasEdited() override
+    {
+        juce::Label::textWasEdited();
+        if (onTrimEdit)
+            onTrimEdit();
+    }
+    std::function<void()> onTrimEdit;
+};
 
 class MonarchAudioProcessorEditor : public juce::AudioProcessorEditor, private juce::Timer
 {
@@ -53,7 +68,7 @@ private:
     juce::Label inputSectionLabel, outputSectionLabel;
     juce::Slider inputTrim, outputTrim;
     juce::Label inputTrimSub, outputTrimSub;
-    juce::Label inputTrimValue, outputTrimValue; // fixed (always-visible) dB readout, -18.0 to +18.0
+    EditableTrimLabel inputTrimValue, outputTrimValue; // dB readout, double-click to edit
     VUMeter inputVU, outputVU;
     std::unique_ptr<juce::SliderParameterAttachment> inputTrimAttach, outputTrimAttach;
     float vuInDecay { 0.0f }, vuOutDecay { 0.0f };

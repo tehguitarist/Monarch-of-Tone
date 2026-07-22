@@ -22,7 +22,9 @@ Two layers:
 
 LookAndFeel overrides: halo trim knob (`drawRotarySlider`, ID "trim"), image knobs (main +
 "presence"), OS combo boxes (`drawComboBox` + fonts), bypass footswitch (`drawButtonBackground`,
-ID "bypass"), and the UI-size scale button (ID "scale", drawn to match the OS combo boxes).
+ID "bypass"), the UI-size scale button (ID "scale", drawn to match the OS combo boxes), and the
+lit-on/dim-off toggle style (ID "ostoggle", drawn to match the OS combo boxes but keyed on
+`getToggleState()` — currently used by the Trim Lock button).
 
 ## Layout
 
@@ -60,8 +62,16 @@ black knurled knobs, chrome footswitches.
 - **LEDs** (×2, `LEDIndicator`): Yellow LED left, Red LED right; ON = active, dim = bypassed (from
   `bypassedYellow/Red`). **A/B badges** — small gold "B" outside the Yellow LED, "A" outside the
   Red LED — identify the real signal order (Red = A first, Yellow = B second); non-interactive.
-- **Input/Output trim** (peripheral side panels): ±12 dB halo knobs with a fixed, always-visible dB
+- **Input/Output trim** (peripheral side panels): ±18 dB halo knobs with a fixed, always-visible dB
   readout label (`Slider::onValueChange`, not a hover tooltip).
+- **Trim Lock** (`trimLockButton`, peripheral strip, between the RENDER combo and the version
+  string): a "LOCK" toggle bound to `trim_lock`, lit-on/dim-off via the `"ostoggle"` L&F component
+  ID (`MonarchLookAndFeel::drawButtonBackground`). While on, moving either trim knob mirrors the
+  equal-and-opposite **change** onto the other (delta-linked — the pair's existing offset is
+  preserved, so enabling the lock never snaps a knob); off, the knobs are independent. Defaults ON.
+  Sized ~1.5× a 2-glyph OS combo box so "LOCK" doesn't truncate at the 0.5× minimum UI scale (the
+  L&F floors button text at 7 px, so below ~0.75× the font stops shrinking with the box). Logic in
+  `MonarchAudioProcessorEditor::mirrorTrim`.
 - **Oversampling** (peripheral strip): two combo boxes, "Live" and "Render" (1x/2x/4x/8x). Render
   engages automatically when the DAW bounces. Plus the UI-size button (scale popup menu, with "set
   current scale as default").

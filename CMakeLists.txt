@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.15)
 
-project(MonarchOfTone VERSION 1.3.0)
+project(MonarchOfTone VERSION 1.3.1)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -410,9 +410,9 @@ target_link_libraries(TrimLock
 
 # ---- ctest registration: finite-only probe gates + the existing DSP validation tests ----
 enable_testing()
-add_test(NAME TrimLock       COMMAND TrimLock)
-add_test(NAME FeatureProfile COMMAND FeatureProfile)
-add_test(NAME PerfBenchmark  COMMAND PerfBenchmark)
-add_test(NAME OSFidelity     COMMAND OSFidelity)
+add_test(NAME TrimLock          COMMAND TrimLock)
+add_test(NAME FeatureProfile    COMMAND FeatureProfile)
+add_test(NAME PerfBenchmark     COMMAND PerfBenchmark)
+add_test(NAME OSFidelity        COMMAND OSFidelity)
 add_test(NAME FullChain_DualChannel COMMAND FullChain_DualChannel)
 add_test(NAME ControlSweep   COMMAND ControlSweep)

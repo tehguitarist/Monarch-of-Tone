@@ -154,9 +154,10 @@ void MonarchLookAndFeel::drawButtonBackground (Graphics& g, Button& button, cons
     LookAndFeel_V4::drawButtonBackground (g, button, bg, highlighted, isDown);
 }
 
-Font MonarchLookAndFeel::getTextButtonFont (TextButton&, int buttonHeight)
+Font MonarchLookAndFeel::getTextButtonFont (TextButton& btn, int buttonHeight)
 {
-    return Font (FontOptions (jmax (7.0f, (float) buttonHeight * 0.5f), Font::bold));
+    const float factor = (btn.getComponentID() == "ostoggle" || btn.getComponentID() == "scale") ? 0.38f : 0.5f;
+    return Font (FontOptions (jmax (7.0f, (float) buttonHeight * factor), Font::bold));
 }
 
 void MonarchLookAndFeel::drawBypassFootswitch (Graphics& g, Rectangle<float> b, bool isButtonDown)

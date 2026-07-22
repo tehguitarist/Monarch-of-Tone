@@ -47,8 +47,9 @@ not signal order (see Threading).
 | `presence_{yellow,red}` | Presence | 0–1 | 0.0 | Linear; default fully CCW (no boost) |
 | `clipping_mode_{yellow,red}` | Clipping | 0/1/2 | 1 | Choice: Boost / Overdrive / Distortion |
 | `bypass_{yellow,red}` | Bypass | bool | false | `AudioParameterBool` |
-| `input_trim` | Input Trim | −12…+12 dB | 0.0 | Plugin-only; `AudioParameterFloat` |
-| `output_trim` | Output Trim | −12…+12 dB | 0.0 | Plugin-only |
+| `input_trim` | Input Trim | −18…+18 dB | 0.0 | Plugin-only; `AudioParameterFloat` |
+| `output_trim` | Output Trim | −18…+18 dB | 0.0 | Plugin-only |
+| `trim_lock` | Trim Lock | bool | **true** | `AudioParameterBool`; UI-side coupling only (no DSP) — while on, moving either trim mirrors the equal-and-opposite CHANGE onto the other (delta-linked, preserves the pair's existing offset). See ui.md "Trim Lock" |
 | `supply_voltage` | Supply Voltage | 0/1/2 | 0 (9V) | Choice 9V/12V/18V — scales op-amp rails only |
 | `oversampling_realtime` | Oversampling (Live) | 0/1/2/3 | **1 (2x)** | Choice 1x/2x/4x/8x — live playback |
 | `oversampling_render` | Oversampling (Render) | 0/1/2/3 | **2 (4x)** | Choice — when `isNonRealtime()` |

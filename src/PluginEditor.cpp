@@ -15,6 +15,33 @@ const StringArray kOsChoices { "1x", "2x", "4x", "8x" };
 constexpr float kScales[] = { 0.50f, 0.75f, 1.00f, 1.25f, 1.50f, 1.75f, 2.00f, 2.25f, 2.50f };
 constexpr const char* kScaleLabels[] = { "50%", "75%", "100%", "125%", "150%",
                                          "175%", "200%", "225%", "250%" };
+
+// Rejects any string that isn't a bare float literal (optional leading sign,
+// digits, at most one dot, at least one digit).  String::getFloatValue()
+// returns 0.0 for junk, so we gate on this before parsing to avoid slamming
+// the trim to 0 dB on a typo.
+static bool isPlainNumber (const String& s)
+{
+    if (s.isEmpty()) return false;
+    const char* ptr = s.toRawUTF8();
+    if (*ptr == '+' || *ptr == '-') ++ptr;
+    if (*ptr == '\0') return false;
+    bool hasDot = false, hasDigit = false;
+    while (*ptr != '\0')
+    {
+        if (*ptr == '.')
+        {
+            if (hasDot) return false;
+            hasDot = true;
+        }
+        else if (*ptr >= '0' && *ptr <= '9')
+            hasDigit = true;
+        else
+            return false;
+        ++ptr;
+    }
+    return hasDigit;
+}
 } // namespace
 
 MonarchAudioProcessorEditor::MonarchAudioProcessorEditor (MonarchAudioProcessor& p)
@@ -61,6 +88,52 @@ MonarchAudioProcessorEditor::MonarchAudioProcessorEditor (MonarchAudioProcessor&
     };
     setupTrimValue (inputTrimValue);
     setupTrimValue (outputTrimValue);
+
+    // Double-click the dB readout to type an exact value.  Applied through the
+    // APVTS parameter (not Slider::setValue) so trim lock and host automation
+    // see the change — the attachment → onValueChange → mirrorTrim chain is the
+    // single path for both knob drags and typed entries.
+    auto setupEditableTrim = [this] (EditableTrimLabel& l, const String& paramID, Slider& s)
+    {
+        l.setEditable (false, true, false);
+        l.setColour (Label::backgroundWhenEditingColourId, Colour (MonarchLookAndFeel::cOSBtnActiveBg));
+        l.setColour (Label::textWhenEditingColourId,       Colour (MonarchLookAndFeel::cOSBtnActive));
+        l.setColour (Label::outlineWhenEditingColourId,    Colour (MonarchLookAndFeel::cOSBtnActiveBdr));
+        l.onEditorShow = [&l]
+        {
+            if (auto* ed = l.getCurrentTextEditor())
+                ed->setJustification (Justification::centred);
+        };
+
+        l.onTrimEdit = [this, &l, paramID, &s]
+        {
+            String typed = l.getText().trim();
+            if (typed.endsWithIgnoreCase ("dB"))
+                typed = typed.dropLastCharacters (2).trim();
+
+            float v = 0.0f;
+            const bool valid = isPlainNumber (typed);
+            if (valid)
+                v = jlimit ((float) -kTrimRange, (float) kTrimRange, typed.getFloatValue());
+
+            if (valid)
+                if (auto* param = audioProcessor.apvts.getParameter (paramID))
+                {
+                    param->beginChangeGesture();
+                    param->setValueNotifyingHost (param->convertTo0to1 (v));
+                    param->endChangeGesture();
+                }
+
+            // Re-render the canonical "<v> dB" text in every case — accepted,
+            // clamped, or rejected.  By this point hideEditor has already copied
+            // the raw user text into the label, so we push the formatted value
+            // afterwards via onValueChange (the slider is at its final value;
+            // mirrorTrim sees a zero delta and no-ops).
+            s.onValueChange();
+        };
+    };
+    setupEditableTrim (inputTrimValue,  "input_trim",  inputTrim);
+    setupEditableTrim (outputTrimValue, "output_trim", outputTrim);
 
     const float pi = MathConstants<float>::pi;
     auto setupTrim = [this, pi] (Slider& s) {
@@ -256,10 +329,8 @@ void MonarchAudioProcessorEditor::resized()
     os.removeFromLeft (i (12));
     trimLockLabel.setBounds (os.removeFromLeft (i (24)));
     os.removeFromLeft (i (5));
-    // LOCK is 4 glyphs against the 2-glyph OS boxes and getTextButtonFont floors the size at 7 px,
-    // so below ~0.75× the text stops shrinking with the box; give it ~1.5× the 36 px OS-box width
-    // so the word still fits at the 0.5× minimum. The centre version label absorbs the extra width.
-    trimLockButton.setBounds (os.removeFromLeft (i (52)).reduced (0, boxVPad));
+    // LOCK button matches the OS-selector boxes for width and font size.
+    trimLockButton.setBounds (os.removeFromLeft (i (36)).reduced (0, boxVPad));
 
     scaleBtn.setBounds (os.removeFromRight (i (48)).reduced (0, boxVPad));
     os.removeFromRight (i (5));
