@@ -22,6 +22,7 @@ import sys
 import numpy as np
 from scipy.io import wavfile
 from scipy.signal import welch
+from scipy import signal as sps
 
 import gen_test_signal as gts
 
@@ -234,6 +235,154 @@ def dynamics(x, name, f, n_windows=8):
 
 def compression(x):
     return [(d, db(rms(seg(x, f"lvl_{d}")))) for d in gts.LEVEL_STEPS_DB]
+
+
+# --------------------------------------------------------- comprehensive_report.py compatibility
+# Second, independent metric family imported from the Guitar-Pedal-Plugin-Template harness
+# (analysis/comprehensive_report.py + dashboard_gen.py there — see that project's analysis/
+# README.md) to drive the per-band JSON the dashboard renders: Welch/CSD transfer (coarser but
+# very robust) instead of the Farina linear_tf() above, and a harmonic-gated Farina THD curve
+# instead of thd_vs_freq(). The CLI report + metrics above are untouched and still what
+# run_validation.py / internal_checks.py / mid_eq_audit.py use.
+ORIG = "analysis/test_signal_48k.wav"
+ORDER_LIMIT_MARGIN = 0.95   # keep order N only while N*f <= SWEEP_F1*this (edge spike sits AT f1/N)
+
+load = load_mono   # comprehensive_report.py's naming for this module's WAV loader
+
+
+def is_full_length(x, orig, frac=0.95):
+    """Guard against truncated captures: a short file's missing segments read as zeros and produce
+    garbage (huge fake deltas / -200 dB nulls) rather than an honest skip. Check BEFORE align()
+    (align pads to full length, which would defeat this check)."""
+    return len(x) >= frac * len(orig)
+
+
+def align(render, orig):
+    """Integer-sample align `render` to `orig` via FFT cross-correlation on the clean sweep."""
+    a, b = TIMES["sweep_clean"]
+    ref = orig[int(a * FS):int(b * FS)]
+    s = render[int(a * FS):int(min(len(render), (b + 0.5) * FS))]
+    n = min(len(ref), len(s))
+    corr = sps.correlate(s[:n] - s[:n].mean(), ref[:n] - ref[:n].mean(), mode="full", method="fft")
+    lag = int(np.argmax(np.abs(corr))) - (n - 1)
+    if lag > 0:
+        render = render[lag:]
+    elif lag < 0:
+        render = np.concatenate([np.zeros(-lag), render])
+    if len(render) < len(orig):
+        render = np.concatenate([render, np.zeros(len(orig) - len(render))])
+    return render[:len(orig)], lag
+
+
+def seg_of(x, name):
+    t0, t1 = TIMES[name]
+    return x[int(t0 * FS):int(t1 * FS)]
+
+
+def transfer(out, inp):
+    """Welch/CSD magnitude transfer function, dB — see the module docstring above this section."""
+    f, Pxy = sps.csd(inp, out, FS, nperseg=8192)
+    f, Pxx = sps.welch(inp, FS, nperseg=8192)
+    H = np.abs(Pxy) / (Pxx + 1e-20)
+    return f, 20 * np.log10(H + 1e-12)
+
+
+def fractional_octave_freqs(f_lo=20.0, f_hi=20000.0, frac=3):
+    import math
+    n = int(math.floor(frac * math.log2(f_hi / f_lo)))
+    return [f_lo * 2.0 ** (i / frac) for i in range(n + 1)]
+
+
+def thd(x, f0):
+    """Discrete-tone THD%: harmonics 2..8 RSS re the fundamental, +-3 bin window."""
+    w = np.hanning(len(x)); X = np.abs(np.fft.rfft(x * w)); fr = np.fft.rfftfreq(len(x), 1 / FS)
+    def amp(fc):
+        i = int(np.argmin(np.abs(fr - fc))); return np.max(X[max(0, i - 3):i + 4])
+    fund = amp(f0)
+    harm = np.sqrt(sum(amp(f0 * k) ** 2 for k in range(2, 9)))
+    return 100 * harm / (fund + 1e-20), fund
+
+
+def harmonic_thd_curve(capture_sweep, ref_sweep, max_order=7, order_limit=True):
+    """Continuous THD(f) via Farina exponential-sweep harmonic separation. Deconvolve the captured
+    driven sweep against the clean reference sweep; the N-th harmonic IR is time-advanced by
+    dt_N = T*ln(N)/ln(f1/f0), so gate each, FFT, and map to the fundamental axis. Returns
+    (freqs, thd_pct, {order: |H|}).
+
+    ORDER LIMITING (default on): the reference sweep has no energy above SWEEP_F1 (20 kHz), so
+    order N is only measurable while N*f <= SWEEP_F1 — past that the regularised division blows up
+    and produces a spurious edge spike at f = SWEEP_F1/N. Nothing below ~2714 Hz (7th order) is
+    affected; above ~9.5 kHz no order past H2 is measurable, and above ~12 kHz THD doesn't exist at
+    48 kHz at all (H2 lands past Nyquist)."""
+    n = min(len(capture_sweep), len(ref_sweep))
+    y = capture_sweep[:n].astype(np.float64); x = ref_sweep[:n].astype(np.float64)
+    nfft = 1 << int(np.ceil(np.log2(2 * n)))
+    X = np.fft.rfft(x, nfft); Y = np.fft.rfft(y, nfft)
+    eps = 1e-6 * np.mean(np.abs(X) ** 2)
+    ir = np.fft.irfft(Y * np.conj(X) / (np.abs(X) ** 2 + eps), nfft)
+    T_sweep = n / FS
+    R = np.log(gts.SWEEP_F1 / gts.SWEEP_F0)
+
+    def gated_spectrum(order):
+        dt = T_sweep * np.log(order) / R
+        center = int(round((-dt) * FS)) % nfft
+        if order == 1:
+            half = int(0.04 * FS)
+        else:
+            gap = (T_sweep / R) * np.log((order + 1) / order)   # secs to the next-higher order
+            half = int(0.35 * gap * FS)                          # 35% of the gap -> no overlap
+        half = max(half, int(0.01 * FS))
+        idx = (np.arange(center - half, center + half) % nfft)
+        spec = np.fft.rfft(ir[idx] * np.hanning(len(idx)), nfft)
+        return np.fft.rfftfreq(nfft, 1 / FS), np.abs(spec)
+
+    fr, H1 = gated_spectrum(1)
+    Hn = {1: H1}
+    for N in range(2, max_order + 1):
+        frN, mag = gated_spectrum(N)
+        Hn[N] = np.interp(fr, frN / N, mag, left=0.0, right=0.0)   # remap harmonic->fundamental axis
+        if order_limit:
+            Hn[N] = np.where(N * fr <= gts.SWEEP_F1 * ORDER_LIMIT_MARGIN, Hn[N], 0.0)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        harm = np.sqrt(sum(Hn[N] ** 2 for N in range(2, max_order + 1)))
+        thd_pct = 100.0 * harm / (H1 + 1e-20)
+    return fr, thd_pct, Hn
+
+
+def thd_max_measurable_hz(max_order=2):
+    """Highest fundamental at which THD is measurable from this sweep, using orders up to
+    `max_order`. THD needs at least H2, so the ceiling is SWEEP_F1*margin/2 ~= 9.5 kHz — and no
+    test signal can beat FS/4 = 12 kHz at 48 kHz, because H2 lands past Nyquist above that."""
+    return min(gts.SWEEP_F1 * ORDER_LIMIT_MARGIN / max_order, FS / (2.0 * max_order))
+
+
+def frac_align(test, ref):
+    """Shift `test` by a FRACTIONAL number of samples to best line up with `ref` (FFT phase ramp;
+    parabolic refinement of the xcorr peak). Integer alignment isn't enough for a deep null —
+    1 sample at 20 kHz is ~150 deg of phase error."""
+    n = min(len(test), len(ref))
+    a = test[:n] - test[:n].mean(); b = ref[:n] - ref[:n].mean()
+    corr = sps.correlate(a, b, mode="full", method="fft")
+    k = int(np.argmax(np.abs(corr)))
+    if 0 < k < len(corr) - 1:
+        y0, y1, y2 = np.abs(corr[k - 1]), np.abs(corr[k]), np.abs(corr[k + 1])
+        denom = (y0 - 2 * y1 + y2); delta = 0.5 * (y0 - y2) / denom if denom else 0.0
+    else:
+        delta = 0.0
+    lag = (k - (n - 1)) + delta
+    X = np.fft.rfft(test); freqs = np.fft.rfftfreq(len(test))
+    return np.fft.irfft(X * np.exp(-1j * 2 * np.pi * freqs * (-lag)), len(test))
+
+
+def null_depth(ref, test):
+    """Optimal-gain-match `test` to `ref`, subtract, return (null_dB, applied_gain_dB). frac_align
+    `test` first — this is the RAW null against whatever's passed in, no integer-lag search (see
+    null_test.best_null for the version run_validation.py uses, which also does an integer-lag
+    search before the fractional one)."""
+    g = float(np.dot(ref, test) / (np.dot(test, test) + 1e-30))
+    resid = ref - g * test
+    null_db = 20 * np.log10((np.sqrt(np.mean(resid ** 2)) + 1e-20) / (np.sqrt(np.mean(ref ** 2)) + 1e-20))
+    return null_db, 20 * np.log10(abs(g) + 1e-20)
 
 
 # ------------------------------------------------------------------------------------- report

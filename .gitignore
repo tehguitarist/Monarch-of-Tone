@@ -19,3 +19,9 @@ analysis/venv/
 analysis/pedal_export2/
 analysis/Pedal_export/
 analysis/__pycache__/
+
+# comprehensive_report.py's disk cache + generated dashboard/JSON — regenerable from the (also
+# gitignored) local captures; keep only the reports/*.example.* reference files under version control.
+analysis/.cache/
+analysis/reports/comprehensive_data.json
+analysis/reports/dashboard.html
