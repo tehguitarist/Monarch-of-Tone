@@ -60,6 +60,14 @@ clang-format -i src/**/*.{cpp,h}
   fidelity (diode-stage ADAA, finer NR iteration, etc.) as a candidate for an optional "HQ" mode
   rather than the default path — **discuss with the user before implementing an HQ toggle**; this
   is a flag for a future decision, not a green light to add it now.
+- **v1.4 — FR / harmonic accuracy pass (TODO). → `analysis/FR_THD_AUDIT.md`** — full findings,
+  evidence and the ordered P0–P5 work plan live there; don't re-derive them here. Headline: a
+  **sub-64 Hz shortfall of 3–6 dB present in the raw circuit at every drive** (P1, biggest win —
+  also causes the LF THD gap), **asymmetric op-amp rail saturation** to supply Boost's missing
+  even harmonics (H2/H4/H6 are 26–46 dB short while H3/H5/H7 match within ~1 dB) (P2), the
+  even-harmonic series shape in OD/Dist (P3), and a **+1 dB 1.6–5 kHz tilt** (P4). Do P1 first and
+  re-run `comprehensive_report.py` before fitting P2/P3 — more low end into the clipper moves the
+  harmonic baseline. Audit tool: `analysis/fr_thd_audit.py`.
 
 ---
 
@@ -236,6 +244,14 @@ linear WDF now runs at the OS rate too (relevant to the v1.1 perf pass).
   `null_test.py` (sub-sample-aligned null depth + per-mode LS-gain), `run_validation.py` (renders
   the plugin at every capture's settings, writes `VALIDATION_REPORT.md`), `internal_checks.py`
   (volume/knob/sample-rate/aliasing for axes with no hardware reference), `null_optimize.py`.
+- `comprehensive_report.py` (renders all 44 captures → `reports/comprehensive_data.json`: FR, THD
+  and H2–H7 per band per sweep level) + `dashboard_gen.py` (→ `reports/dashboard.html`).
+  `fr_thd_audit.py` reads that JSON and produces the tables in **`FR_THD_AUDIT.md`** (the v1.4
+  findings + plan) — its `raw` view strips `driveShelf()` to separate a mis-tuned correction shelf
+  from a real circuit gap, and its `alias` view shows which bands are not measurable at all.
+- **Bands that are NOT trustworthy:** FR above ~8 kHz (±18 dB capture-side spread) and THD above
+  ~5 kHz (Farina is H2-only there; the discrete-tone fallback aliases onto the fundamental at 6 and
+  8 kHz — the captures read up to 291% THD). Don't fit anything to them. See FR_THD_AUDIT.md §4.
 - `tools/PedalRender` renders a WAV through the real processor (Yellow-only) for A/B:
   `PedalRender in.wav out.wav drive tone vol pres clip`.
 
