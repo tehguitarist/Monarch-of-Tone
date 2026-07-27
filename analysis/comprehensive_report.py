@@ -49,24 +49,57 @@ CACHE_DIR = "analysis/.cache/pedal_features"
 CACHE_VERSION = 1  # bump to invalidate every cache entry after a change to the analysis below
 DRIVEN_SWEEPS = ("sweep_drv_-18", "sweep_drv_-12", "sweep_drv_-6")
 ALL_SWEEP_LEVELS = ("sweep_clean",) + DRIVEN_SWEEPS
-FARINA_CEILING_HZ = A.thd_max_measurable_hz(max_order=2)
 THD_ANCHORS = (100, 200, 400)
 HARMONIC_ORDERS = tuple(range(2, 8))
 TONE_FREQS = G.TONE_FREQS
+
+# --- where THD stops being measurable (FR_THD_AUDIT.md Finding 4 / P0) -----------------------
+# THD is an RSS of H2..H7, and for a symmetric clipper it is DOMINATED by the odd orders — H3
+# above all. `thd_max_measurable_hz(2)` (~9.5 kHz) is only where H2 alone still survives the
+# sweep's order limit; a band that has lost H3 no longer reports THD, it reports H2, and the two
+# are not comparable to the bands below. So trust the Farina THD only while H3 is measurable
+# (~6.3 kHz). Above that BOTH paths fail: Farina is H2-only, and the discrete-tone fallback
+# aliases (below). This deliberately routes the 6451/8128 Hz bands to 'na' — the dramatic THD
+# cliff they used to draw on the dashboard was a measurement artifact, not plugin error.
+THD_FARINA_CEILING_HZ = A.thd_max_measurable_hz(max_order=3)
+# H2 vs frequency is a single-order view, so it stays valid up to the H2 limit (~9.5 kHz).
+H2_CEILING_HZ = A.thd_max_measurable_hz(max_order=2)
+ALIAS_GUARD_HZ = 50.0  # a folded harmonic this close to f0 (or DC) contaminates the estimator
+
+# FR bands worth scoring. Below 40 Hz the sweep has little energy (N-004); above 8 kHz the NAM
+# captures themselves spread by +18.8/-4.4 dB (FR_THD_AUDIT.md Finding 2) — reference noise, not
+# plugin error. dashboard_gen.py reads these back out of `meta` so both agree by construction.
+FR_TRUST_LO, FR_TRUST_HI = 40.0, 8000.0
+
+
+def discrete_tone_is_valid(f0, fs=A.FS):
+    """False when `analyze.thd`'s k=2..8 sum is contaminated by aliasing at this fundamental.
+
+    Above fs/(2k) the k-th harmonic folds back below Nyquist; if it lands on the fundamental (or
+    DC) the estimator counts SIGNAL as distortion. At fs=48k that kills f0=6000 (H7 folds to 6 kHz,
+    H8 to DC) and f0=8000 (H5 and H7 fold to 8 kHz, H6 to DC) — the captures read up to 291% THD
+    there, which is physically impossible. `fr_thd_audit.py alias` prints the full landing map."""
+    for k in range(2, 9):
+        fold = (k * f0) % fs
+        if fold > fs / 2:
+            fold = fs - fold
+        if abs(fold - f0) < ALIAS_GUARD_HZ or fold < ALIAS_GUARD_HZ:
+            return False
+    return True
 
 
 def build_band_source_map(bands):
     """Return list of (band_hz, source_str) — 'farina', 'discrete', or 'na'."""
     result = []
     for b in bands:
-        if b <= FARINA_CEILING_HZ + 1e-6:
+        if b <= THD_FARINA_CEILING_HZ + 1e-6:
             result.append((b, "farina"))
             continue
         nearest_tone = min(TONE_FREQS, key=lambda t: abs(t - b))
-        if abs(nearest_tone - b) / b < 0.06 and nearest_tone > FARINA_CEILING_HZ:
-            result.append((b, "discrete"))
-        else:
-            result.append((b, "na"))
+        usable_tone = (abs(nearest_tone - b) / b < 0.06
+                       and nearest_tone > THD_FARINA_CEILING_HZ
+                       and discrete_tone_is_valid(nearest_tone))
+        result.append((b, "discrete" if usable_tone else "na"))
     return result
 
 
@@ -170,12 +203,8 @@ def fr_at_bands(cap_al, ren_al, orig, sweep_name, bands, pedal_features):
     return plugin_db, pedal_db, float(gain_db)
 
 
-def thd_at_bands(cap_al, ren_al, orig, sweep_name, band_source_map, pedal_features):
+def thd_at_bands(ren_al, sweep_name, band_source_map, pedal_features, cap_farina, ren_farina):
     """Return (plugin_pct, pedal_pct, source) arrays at each band."""
-    ref = A.seg_of(orig, sweep_name)   # this level's own pristine reference — see compute_pedal_features
-    ren_sweep = A.seg_of(ren_al, sweep_name)
-
-    farina_cache = {}
     tone_cache = {}
 
     plugin_pct = []
@@ -184,18 +213,10 @@ def thd_at_bands(cap_al, ren_al, orig, sweep_name, band_source_map, pedal_featur
 
     for band_hz, source in band_source_map:
         if source == "farina":
-            if "ren" not in farina_cache:
-                fr_c, thd_c, _ = pedal_features["farina"][sweep_name]
-                fr_r, thd_r, _ = A.harmonic_thd_curve(ren_sweep, ref, max_order=7)
-                farina_cache["cap_fr"] = fr_c
-                farina_cache["cap_thd"] = thd_c
-                farina_cache["ren_fr"] = fr_r
-                farina_cache["ren_thd"] = thd_r
-                farina_cache["ren"] = True
-            p_cap = float(np.interp(band_hz, farina_cache["cap_fr"], farina_cache["cap_thd"]))
-            p_ren = float(np.interp(band_hz, farina_cache["ren_fr"], farina_cache["ren_thd"]))
-            plugin_pct.append(p_ren)
-            pedal_pct.append(p_cap)
+            fr_c, thd_c, _ = cap_farina
+            fr_r, thd_r, _ = ren_farina
+            plugin_pct.append(float(np.interp(band_hz, fr_r, thd_r)))
+            pedal_pct.append(float(np.interp(band_hz, fr_c, thd_c)))
             sources.append("farina")
         elif source == "discrete":
             nearest_tone = min(TONE_FREQS, key=lambda t: abs(t - band_hz))
@@ -219,13 +240,10 @@ def thd_at_bands(cap_al, ren_al, orig, sweep_name, band_source_map, pedal_featur
     return plugin_pct, pedal_pct, sources
 
 
-def harmonics_at_anchors(cap_al, ren_al, orig, sweep_name, pedal_features):
+def harmonics_at_anchors(cap_farina, ren_farina):
     """Return {order: {plugin_db, pedal_db}} at each anchor freq."""
-    ref = A.seg_of(orig, sweep_name)   # this level's own pristine reference — see compute_pedal_features
-    ren_sweep = A.seg_of(ren_al, sweep_name)
-
-    fr_c, thd_c, Hn_c = pedal_features["farina"][sweep_name]
-    fr_r, thd_r, Hn_r = A.harmonic_thd_curve(ren_sweep, ref, max_order=7)
+    fr_c, _, Hn_c = cap_farina
+    fr_r, _, Hn_r = ren_farina
 
     har = {}
     for order in range(2, 8):
@@ -242,6 +260,29 @@ def harmonics_at_anchors(cap_al, ren_al, orig, sweep_name, pedal_features):
             plugin_db.append(val_r)
         har[f"H{order}"] = {"plugin_db": plugin_db, "pedal_db": pedal_db}
     return har
+
+
+def h2_curve_at_bands(bands, cap_farina, ren_farina):
+    """Return (plugin_db, pedal_db) — H2 level re the fundamental, dB, at every band.
+
+    The most diagnostic single view of the even-harmonic gap (FR_THD_AUDIT.md Finding 4). The
+    3-anchor harmonic heatmap cannot show it: the pedal's H2 has strong frequency STRUCTURE (a deep
+    trough around 800 Hz, rising either side) that the plugin's injected, near-flat H2 does not
+    reproduce at all — and that shape mismatch, not the 6-8.5 kHz "THD cliff", is the real signal up
+    there. None above H2_CEILING_HZ, where H2 itself leaves the sweep's order limit / Nyquist."""
+    def curve(farina):
+        fr, _, Hn = farina
+        out = []
+        for b in bands:
+            if b > H2_CEILING_HZ or 1 not in Hn or 2 not in Hn:
+                out.append(None)
+                continue
+            i = int(np.argmin(np.abs(fr - b)))
+            h1, h2 = float(Hn[1][i]), float(Hn[2][i])
+            out.append(float(20.0 * np.log10(h2 / h1)) if h1 > 0.0 and h2 > 0.0 else None)
+        return out
+
+    return curve(ren_farina), curve(cap_farina)
 
 
 def short_id(parsed):
@@ -289,6 +330,7 @@ def analyse_one(path, parsed, orig, binpath, os_factor, keep_dir, bands, band_so
             "fr": {},
             "thd": {},
             "harmonics": {},
+            "h2": {},
         }
 
         for sw in ALL_SWEEP_LEVELS:
@@ -296,20 +338,43 @@ def analyse_one(path, parsed, orig, binpath, os_factor, keep_dir, bands, band_so
             result["fr"][sw] = {"plugin_db": plugin_db, "pedal_db": pedal_db, "gain_db_applied": gain_db}
 
         for sw in DRIVEN_SWEEPS:
+            # One Farina decomposition of the render per sweep, shared by all three views below —
+            # THD, the H2-H7 anchors and the H2 curve are all read off the same {order: |H|} set.
+            cap_farina = pedal_features["farina"][sw]
+            ren_farina = A.harmonic_thd_curve(A.seg_of(ren_al, sw), A.seg_of(orig, sw), max_order=7)
+
             plugin_pct, pedal_pct, sources = thd_at_bands(
-                cap_al, ren_al, orig, sw, band_source_map, pedal_features)
+                ren_al, sw, band_source_map, pedal_features, cap_farina, ren_farina)
             result["thd"][sw] = {
                 "plugin_pct": plugin_pct, "pedal_pct": pedal_pct, "source": sources,
             }
-
-        for sw in DRIVEN_SWEEPS:
-            result["harmonics"][sw] = harmonics_at_anchors(cap_al, ren_al, orig, sw, pedal_features)
+            result["harmonics"][sw] = harmonics_at_anchors(cap_farina, ren_farina)
+            h2_plugin, h2_pedal = h2_curve_at_bands(bands, cap_farina, ren_farina)
+            result["h2"][sw] = {"plugin_db": h2_plugin, "pedal_db": h2_pedal}
 
         return result
 
     finally:
         if tmp and os.path.exists(out_path):
             os.unlink(out_path)
+
+
+def fr_shape_rms(fr, bands):
+    """Per-band delta with the row's median offset removed, rms'd over the TRUSTED band only.
+
+    Two corrections vs the raw all-band rms this used to be, both from FR_THD_AUDIT.md P0:
+    removing the median makes it a SHAPE score (a pure level offset is a volume difference, not a
+    voicing error — and it is what the dashboard heatmap has always plotted, so the tiles now agree
+    with the cells above them); and restricting to FR_TRUST_LO..FR_TRUST_HI drops the bands where
+    the CAPTURES spread by +18.8/-4.4 dB, which was inflating every mode's score with reference
+    noise. Below 40 Hz the sweep is thin (N-004); above 8 kHz the NAM captures roll off and alias."""
+    idx = [i for i, b in enumerate(bands) if FR_TRUST_LO <= b <= FR_TRUST_HI]
+    diffs = [fr["plugin_db"][i] - fr["pedal_db"][i] for i in idx
+             if fr["plugin_db"][i] is not None and fr["pedal_db"][i] is not None]
+    if not diffs:
+        return 0.0
+    shape = np.array(diffs) - float(np.median(diffs))
+    return float(np.sqrt(np.mean(shape ** 2)))
 
 
 def compute_summary(results, bands):
@@ -326,9 +391,7 @@ def compute_summary(results, bands):
         worst_rms = float("-inf")
         best_id = worst_id = ""
         for r in rev_caps:
-            fr = r["fr"]["sweep_clean"]
-            diff = [fr["plugin_db"][i] - fr["pedal_db"][i] for i in range(len(bands))]
-            rms = float(np.sqrt(np.mean(np.array(diff) ** 2)))
+            rms = fr_shape_rms(r["fr"]["sweep_clean"], bands)
             fr_rms_vals.append(rms)
             if rms < best_rms:
                 best_rms = rms
@@ -437,6 +500,10 @@ def main():
             "driven_sweeps": list(DRIVEN_SWEEPS),
             "all_sweep_levels": list(ALL_SWEEP_LEVELS),
             "thd_band_sources": [s for _, s in band_source_map],
+            "thd_farina_ceiling_hz": THD_FARINA_CEILING_HZ,
+            "h2_ceiling_hz": H2_CEILING_HZ,
+            "fr_trust_lo_hz": FR_TRUST_LO,
+            "fr_trust_hi_hz": FR_TRUST_HI,
         },
         "captures": ok,
         "summary": summary,

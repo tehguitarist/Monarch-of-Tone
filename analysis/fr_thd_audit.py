@@ -5,8 +5,8 @@ Built 2026-07-26 to settle four suspected shortcomings spotted by eye in the com
 (light 20-80 Hz, hot above 800 Hz, wandering FR peak, missing 6-8.5 kHz THD). Findings + the
 resulting work plan live in analysis/FR_THD_AUDIT.md — this script regenerates every table in it.
 
-Most views read analysis/reports/comprehensive_data.json only (fast, no rendering). The `h2` view
-re-renders a few settings through tools/PedalRender because H2-vs-frequency is not in the JSON.
+Every view reads analysis/reports/comprehensive_data.json only — fast, no rendering. (`h2` used to
+re-render live; P0 made H2-vs-frequency first-class data in the report, so it no longer does.)
 
 The guardrails this tool encodes (they are why the four observations do NOT all survive):
 
@@ -25,8 +25,10 @@ The guardrails this tool encodes (they are why the four observations do NOT all 
 
   G4  Know where the measurement dies. `alias` shows that the discrete-tone THD estimator is invalid
       at 6 and 8 kHz at FS=48k (harmonics fold onto the fundamental), and the swept Farina bands
-      above ~5 kHz are H2-only and read inconsistently between adjacent bands of one capture. FR
-      above ~8 kHz has a ±18 dB capture-side spread. Do not fit anything to those bands.
+      above ~6.3 kHz have lost H3 — the order THD is actually made of. FR above ~8 kHz has a ±18 dB
+      capture-side spread. Do not fit anything to those bands. As of P0 the report ENFORCES this:
+      comprehensive_report.py routes THD above 6.3 kHz to 'na' and scores FR only over 40 Hz-8 kHz,
+      so the dashboard no longer draws a THD cliff or an FR excursion that was never plugin error.
 
 Usage:
   fr_thd_audit.py bands [--by drive|tone|mode] [--sweep NAME]   1 kHz-normalized FR error grid
@@ -35,12 +37,12 @@ Usage:
   fr_thd_audit.py thd                                           THD ratio per band per mode
   fr_thd_audit.py harm                                          H2-H7 at the 100/200/400 Hz anchors
   fr_thd_audit.py alias                                         where discrete-tone harmonics land
-  fr_thd_audit.py h2                                            H2 vs frequency (renders; needs PedalRender)
-  fr_thd_audit.py all                                           every view above except h2
+  fr_thd_audit.py h2                                            H2 vs frequency
+  fr_thd_audit.py all                                           every view above
   fr_thd_audit.py --report                                      write analysis/FR_THD_AUDIT.md tables
 
-Requires analysis/reports/comprehensive_data.json (run comprehensive_report.py first). The `h2` view
-additionally needs the local-only captures in analysis/pedal_export2/ and a built tools/PedalRender.
+Requires analysis/reports/comprehensive_data.json (run comprehensive_report.py first — that step is
+what needs the local-only captures in analysis/pedal_export2/ and a built tools/PedalRender).
 """
 import argparse
 import os
@@ -292,44 +294,34 @@ def view_alias(out=sys.stdout, fs=48000.0):
           file=out)
 
 
-def view_h2(out=sys.stdout, sweep="sweep_drv_-6"):
-    """H2 vs frequency from the Farina sweep (valid to ~9.5 kHz). Not in the JSON — renders live."""
-    import subprocess
-    import tempfile
-    sys.path.insert(0, HERE)
-    import analyze as A
-    import captures as C
+H2_CASES = ("G5 T5 Clean", "G10 T5 Clean", "G5 T5 OD", "G5 T5 Dist")
+H2_FREQS = (100, 200, 400, 800, 1600, 3200, 6400)
 
-    if not os.path.exists(C.RENDER_BIN):
-        sys.exit(f"PedalRender not found at {C.RENDER_BIN} — "
-                 f"build it: cmake --build build --target PedalRender")
-    orig = A.load(A.ORIG)
-    cases = [("G5 T5 Clean", 0.5, 0.5, 0), ("G10 T5 Clean", 1.0, 0.5, 0),
-             ("G5 T5 OD", 0.5, 0.5, 1), ("G5 T5 Dist", 0.5, 0.5, 2)]
-    freqs = [100, 200, 400, 800, 1600, 3200, 6400, 9000]
+
+def view_h2(d, bands, caps, out=sys.stdout, sweep="sweep_drv_-6"):
+    """H2 vs frequency, read straight out of the JSON (comprehensive_report.py's `h2` block).
+
+    Was a live re-render before P0 made H2-vs-frequency first-class data; now it costs nothing, so
+    it joins `all`. Valid to ~9.5 kHz (the H2 order limit) — the columns stop at 6.4 kHz because
+    the fundamental is already rolling off above that and the RATIO inflates without meaning."""
+    idx = [int(np.argmin(np.abs(bands - f))) for f in H2_FREQS]
     print(f"\n=== H2 level re fundamental (dB) vs frequency — {sweep} "
           f"[Farina, valid to ~9.5 kHz] ===", file=out)
-    print(f"{'case':<12}{'':>4}" + "".join(f"{f:>9}" for f in freqs), file=out)
-    for label, dr, to, cl in cases:
-        hits = [p for p, _ in C.find_captures() if os.path.basename(p).startswith(label)]
-        if not hits:
+    print(f"{'case':<12}{'':>4}" + "".join(f"{f:>9}" for f in H2_FREQS), file=out)
+    by_id = {c["id"]: c for c in caps}
+    for label in H2_CASES:
+        c = by_id.get(label)
+        if c is None or sweep not in c.get("h2", {}):
             print(f"  (missing capture: {label})", file=out)
             continue
-        cap, _ = A.align(C.load_capture(hits[0]), orig)
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as t:
-            tmp = t.name
-        subprocess.run([C.RENDER_BIN, A.ORIG, tmp, f"{dr:.4f}", f"{to:.4f}", "0.5000", "0.0000",
-                        str(cl), "render", "3"], check=True, capture_output=True)
-        ren, _ = A.align(A.load(tmp), orig)
-        os.unlink(tmp)
-        ref = A.seg_of(orig, sweep)
-        for nm, sig in (("ped", cap), ("plug", ren)):
-            fr, _, Hn = A.harmonic_thd_curve(A.seg_of(sig, sweep), ref, max_order=3)
+        for nm, key in (("ped", "pedal_db"), ("plug", "plugin_db")):
+            vals = c["h2"][sweep][key]
             row = f"{label if nm == 'ped' else '':<12}{nm:>4}"
-            for f in freqs:
-                i = int(np.argmin(np.abs(fr - f)))
-                row += f"{20*np.log10(Hn[2][i] / (Hn[1][i] + 1e-20) + 1e-20):>9.1f}"
+            row += "".join(f"{vals[i]:>9.1f}" if vals[i] is not None else f"{'—':>9}" for i in idx)
             print(row, file=out)
+    print("  Shape, not absolute level, is the finding: the pedal's H2 has a deep trough near "
+          "800 Hz-2 kHz\n  and climbs either side; a flat injected H2 cannot reproduce that "
+          "(FR_THD_AUDIT.md Finding 4).", file=out)
 
 
 # ------------------------------------------------------------------------------------------- main
@@ -363,8 +355,8 @@ def main():
         view_harm(d, bands, caps, out)
     if a.view in ("alias", "all"):
         view_alias(out)
-    if a.view == "h2":
-        view_h2(out)
+    if a.view in ("h2", "all"):
+        view_h2(d, bands, caps, out)
 
     if a.report:
         print("\n(--report: paste the tables above into analysis/FR_THD_AUDIT.md's "

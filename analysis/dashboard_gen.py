@@ -25,9 +25,15 @@ DEFAULT_OUT = Path("analysis/reports/dashboard.html")
 PROJECT_NAME = "Monarch of Tone"
 
 # N-004: 20/25/32 Hz are the least-supported bins of the sweep. Trust band matches report_audit.py.
-TRUST_LO, TRUST_HI = 40.0, 18000.0
+# TRUST_HI is 8 kHz, NOT the sweep top: FR_THD_AUDIT.md Finding 2 measured the capture-to-capture
+# spread above ~8 kHz at +18.8/-4.4 dB (vs ~0.3 dB sd below 5 kHz) — that is the NAM captures
+# rolling off and aliasing, not plugin error, and scoring it made every mode look worse than it is.
+TRUST_LO, TRUST_HI = 40.0, 8000.0
+CAPTURE_UNRELIABLE_HZ = 8000.0  # above here the reference itself is untrustworthy — never fit to it
 EXTREME_LO, EXTREME_HI = 60.0, 12000.0
 CONFOUNDED_ANCHORS = (400, 800)  # twin-T / bridged-T notch the fundamental (Gap G)
+H2_SWEEP = "sweep_drv_-6"       # hottest sweep — where the even-harmonic gap is largest
+H2_Y_LO, H2_Y_HI = -70.0, -10.0
 
 # -- palette (references/palette.md) ---------------------------------------------------------
 CATEGORICAL = ["#2a78d6", "#008300", "#e87ba4", "#eda100", "#1baf7a", "#eb6834", "#4a3aa7", "#e34948"]
@@ -156,6 +162,13 @@ def build_fr_linecharts(captures, bands):
         if not rev_caps:
             continue
         svg_parts = [f'<svg viewBox="0 0 {W} {H}" class="linechart" role="img" aria-label="{rev} FR shape">']
+        # capture-unreliable zone: the reference, not the plugin, is untrustworthy above 8 kHz
+        x_unrel = xf(CAPTURE_UNRELIABLE_HZ)
+        svg_parts.append(
+            f'<rect x="{x_unrel:.1f}" y="{PAD_T}" width="{W-PAD_R-x_unrel:.1f}" height="{plot_h}" '
+            f'class="unreliable-zone"><title>captures unreliable above '
+            f'{CAPTURE_UNRELIABLE_HZ/1000:.0f} kHz</title></rect>'
+        )
         # gridlines at -6/0/+6 dB and freq decades
         for gy in (-6, 0, 6):
             y = yf(gy)
@@ -172,17 +185,25 @@ def build_fr_linecharts(captures, bands):
             color = CATEGORICAL[i % len(CATEGORICAL)]
             fr = c["fr"]["sweep_clean"]
             deltas = shape(fr["plugin_db"], fr["pedal_db"])
-            pts = []
+            # Split at 8 kHz: the trusted span is drawn solid, the capture-unreliable tail faded —
+            # visible for context (a wild excursion there is worth seeing) but never read as error.
+            trusted, tail = [], []
             for b, d in zip(bands, deltas):
                 if d is None or b < TRUST_LO:
                     continue
-                pts.append(f"{xf(b):.1f},{yf(d):.1f}")
-            if pts:
-                svg_parts.append(
-                    f'<polyline points="{" ".join(pts)}" fill="none" stroke="{color}" '
-                    f'stroke-width="2" stroke-linejoin="round" stroke-linecap="round">'
-                    f'<title>{svg_escape(c["id"])}</title></polyline>'
-                )
+                pt = f"{xf(b):.1f},{yf(d):.1f}"
+                if b <= CAPTURE_UNRELIABLE_HZ:
+                    trusted.append(pt)
+                else:
+                    if len(tail) == 0 and trusted:
+                        tail.append(trusted[-1])  # join the two segments
+                    tail.append(pt)
+            for pts, cls in ((trusted, "series"), (tail, "series faded")):
+                if pts:
+                    svg_parts.append(
+                        f'<polyline points="{" ".join(pts)}" class="{cls}" stroke="{color}">'
+                        f'<title>{svg_escape(c["id"])}</title></polyline>'
+                    )
             legend_items.append(
                 f'<span class="legend-item"><span class="swatch" style="background:{color}"></span>{svg_escape(c["id"])}</span>'
             )
@@ -191,6 +212,87 @@ def build_fr_linecharts(captures, bands):
             f'<div class="chart-card"><h4>{rev} — FR shape (plugin&minus;pedal, dB, median-removed)</h4>'
             + "".join(svg_parts)
             + f'<div class="legend">{"".join(legend_items)}</div></div>'
+        )
+    return '<div class="chart-grid">' + "".join(charts) + "</div>"
+
+
+def median_curve(curves):
+    """Per-band median across captures, skipping Nones. None where no capture has data."""
+    if not curves:
+        return []
+    out = []
+    for i in range(len(curves[0])):
+        vals = sorted(c[i] for c in curves if i < len(c) and c[i] is not None)
+        if not vals:
+            out.append(None)
+        else:
+            n = len(vals)
+            out.append(vals[n // 2] if n % 2 else (vals[n // 2 - 1] + vals[n // 2]) / 2)
+    return out
+
+
+def build_h2_charts(captures, bands):
+    """H2 level re the fundamental vs frequency, pedal against plugin, one chart per mode.
+
+    FR_THD_AUDIT.md Finding 4: the pedal's H2 has strong frequency structure the plugin's injected,
+    near-flat H2 does not reproduce — a shape mismatch the 3-anchor harmonic heatmap cannot show,
+    and the real signal underneath what used to read as a 6-8.5 kHz "THD cliff" (a measurement
+    artifact, now routed to n/a). Absolute curves, not a delta: the shape is the point."""
+    W, H = 520, 220
+    PAD_L, PAD_R, PAD_T, PAD_B = 44, 12, 12, 26
+    plot_w, plot_h = W - PAD_L - PAD_R, H - PAD_T - PAD_B
+    x_lo, x_hi = math.log10(40.0), math.log10(10000.0)
+
+    def xf(b):
+        return PAD_L + (math.log10(b) - x_lo) / (x_hi - x_lo) * plot_w
+
+    def yf(v):
+        v = max(H2_Y_LO, min(H2_Y_HI, v))
+        return PAD_T + (1 - (v - H2_Y_LO) / (H2_Y_HI - H2_Y_LO)) * plot_h
+
+    def polyline(vals, color, cls):
+        """Contiguous runs only — a gap (None) must break the line, not be interpolated across."""
+        parts, run = [], []
+        for b, v in zip(bands, vals):
+            if v is None or b < 40.0 or b > 10000.0:
+                if len(run) > 1:
+                    parts.append(" ".join(run))
+                run = []
+                continue
+            run.append(f"{xf(b):.1f},{yf(v):.1f}")
+        if len(run) > 1:
+            parts.append(" ".join(run))
+        return "".join(f'<polyline points="{p}" class="{cls}" stroke="{color}"/>' for p in parts)
+
+    charts = []
+    for rev in sorted(set(c["rev"] for c in captures)):
+        rev_caps = [c for c in captures if c["rev"] == rev and c.get("h2", {}).get(H2_SWEEP)]
+        if not rev_caps:
+            continue
+        svg = [f'<svg viewBox="0 0 {W} {H}" class="linechart" role="img" aria-label="{rev} H2 vs frequency">']
+        for gy in range(int(H2_Y_LO), int(H2_Y_HI) + 1, 20):
+            y = yf(gy)
+            svg.append(f'<line x1="{PAD_L}" y1="{y:.1f}" x2="{W-PAD_R}" y2="{y:.1f}" stroke="var(--grid)" stroke-width="1"/>')
+            svg.append(f'<text x="{PAD_L-6}" y="{y+3:.1f}" text-anchor="end" class="axislabel">{gy:d}</text>')
+        for fx in (100, 1000, 10000):
+            x = xf(fx)
+            svg.append(f'<line x1="{x:.1f}" y1="{PAD_T}" x2="{x:.1f}" y2="{H-PAD_B}" stroke="var(--grid)" stroke-width="1"/>')
+            svg.append(f'<text x="{x:.1f}" y="{H-PAD_B+16}" text-anchor="middle" class="axislabel">'
+                       f'{f"{fx//1000}k" if fx >= 1000 else fx}</text>')
+
+        ped_curves = [c["h2"][H2_SWEEP]["pedal_db"] for c in rev_caps]
+        plug_curves = [c["h2"][H2_SWEEP]["plugin_db"] for c in rev_caps]
+        for curves, color in ((ped_curves, "var(--muted)"), (plug_curves, STATUS_CRITICAL)):
+            for cur in curves:
+                svg.append(polyline(cur, color, "series thin faded"))
+        svg.append(polyline(median_curve(ped_curves), "var(--muted)", "series"))
+        svg.append(polyline(median_curve(plug_curves), STATUS_CRITICAL, "series"))
+        svg.append("</svg>")
+        charts.append(
+            f'<div class="chart-card"><h4>{rev} &mdash; H2 re fundamental (dB) vs frequency, '
+            f'{len(rev_caps)} captures</h4>' + "".join(svg)
+            + '<div class="legend"><span class="legend-item"><span class="swatch" style="background:var(--muted)"></span>pedal (median, thin = per capture)</span>'
+            f'<span class="legend-item"><span class="swatch" style="background:{STATUS_CRITICAL}"></span>plugin</span></div></div>'
         )
     return '<div class="chart-grid">' + "".join(charts) + "</div>"
 
@@ -368,6 +470,10 @@ HTML_TEMPLATE = """<!doctype html>
   .chart-card {{ background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 16px; flex: 1; min-width: 420px; }}
   svg.linechart {{ width: 100%; height: auto; }}
   .axislabel {{ font-size: 9px; fill: var(--muted); }}
+  polyline.series {{ fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }}
+  polyline.thin {{ stroke-width: 1; }}
+  polyline.faded {{ opacity: 0.22; }}
+  rect.unreliable-zone {{ fill: var(--grid); opacity: 0.55; }}
   .legend {{ display: flex; gap: 14px; flex-wrap: wrap; margin-top: 10px; font-size: 11px; color: var(--text-secondary); }}
   .legend-item {{ display: inline-flex; align-items: center; gap: 5px; }}
   .swatch {{ width: 10px; height: 10px; border-radius: 2px; display: inline-block; }}
@@ -398,21 +504,33 @@ source: analysis/reports/comprehensive_data.json (regenerate with <code>python3 
 {tiles}
 
 <h2>FR shape heatmap</h2>
-<h3>plugin&minus;pedal, dB, per-capture median offset removed (shape metric, L-005) &middot; hover a cell for the exact value &middot; hatched = no data &middot; faded = outside the trusted band (N-004: &lt;{trust_lo:.0f} Hz)</h3>
+<h3>plugin&minus;pedal, dB, per-capture median offset removed (shape metric, L-005) &middot; hover a cell for the exact value &middot; hatched = no data &middot;
+faded = outside the trusted {trust_lo:.0f}&ndash;{trust_hi:.0f} Hz band &mdash; below it the sweep is thin (N-004), above it the <em>captures</em> themselves
+spread by +18.8/&minus;4.4 dB (FR_THD_AUDIT.md Finding 2). Faded bands are excluded from the rms score and must not be fitted to.</h3>
 <div class="card">
 {fr_heatmap}
 <div class="colorbar"><span>&minus;8 dB (plugin too quiet)</span><div class="colorbar-grad"></div><span>+8 dB (plugin too loud)</span></div>
 </div>
 
 <h2>FR shape curves, per mode</h2>
-<h3>Same shape-delta metric as the heatmap, plotted vs frequency (log axis, 40 Hz&ndash;18 kHz) &mdash; one line per capture</h3>
+<h3>Same shape-delta metric as the heatmap, plotted vs frequency (log axis, 40 Hz&ndash;18 kHz) &mdash; one line per capture &middot;
+the shaded tail above {unreliable_khz:.0f} kHz is drawn faded: that is capture spread, not plugin error</h3>
 {linecharts}
+
+<h2>H2 vs frequency &mdash; the even-harmonic gap</h2>
+<h3>H2 level re the fundamental (dB) at the {h2_sweep} level, pedal vs plugin, valid to ~{h2_ceiling_khz:.1f} kHz.
+Absolute curves, not a delta &mdash; the <em>shape</em> is the finding: the pedal's H2 has strong frequency structure that a
+flat injected H2 cannot reproduce (FR_THD_AUDIT.md Finding 4, work item P2/P3)</h3>
+{h2_charts}
 
 <h2>THD vs drive level @ 101 Hz</h2>
 <h3>Pedal should rise with level (clip onset); a plugin dot that barely moves is a level-independent nonlinearity in the wrong place</h3>
 <div class="card">
 {thd_table}
 </div>
+<p class="note">THD bands above ~{thd_ceiling_khz:.1f} kHz are reported as <em>n/a</em>, not zero: the Farina path keeps only
+H2 up there (H3+ leave the sweep's order limit) and the discrete-tone fallback aliases onto the fundamental at 6 and 8 kHz
+&mdash; the captures read up to 291% THD, which is impossible. The THD cliff older dashboards drew there was the artifact.</p>
 
 <h2>Harmonic magnitudes (H2&ndash;H7), sweep_drv_-18</h2>
 <h3>plugin&minus;pedal, dB, at the 100/200/400 Hz anchors &mdash; a correct THD can still hide wrong-magnitude individual harmonics</h3>
@@ -438,6 +556,13 @@ def main():
     bands = d["meta"]["bands"]
     captures = d["captures"]
 
+    # comprehensive_report.py owns the trust band (it scores the summary tiles with it); adopt its
+    # values so the tiles and the heatmap can never disagree about which bands count.
+    global TRUST_LO, TRUST_HI, CAPTURE_UNRELIABLE_HZ
+    TRUST_LO = d["meta"].get("fr_trust_lo_hz", TRUST_LO)
+    TRUST_HI = d["meta"].get("fr_trust_hi_hz", TRUST_HI)
+    CAPTURE_UNRELIABLE_HZ = TRUST_HI
+
     html = HTML_TEMPLATE.format(
         project_name=PROJECT_NAME,
         status_critical=STATUS_CRITICAL,
@@ -449,9 +574,14 @@ def main():
         num_bands=d["meta"]["num_bands"],
         trust_lo=TRUST_LO,
         trust_hi=TRUST_HI,
+        unreliable_khz=CAPTURE_UNRELIABLE_HZ / 1000.0,
+        h2_sweep=H2_SWEEP,
+        h2_ceiling_khz=d["meta"].get("h2_ceiling_hz", 9500.0) / 1000.0,
+        thd_ceiling_khz=d["meta"].get("thd_farina_ceiling_hz", 6333.0) / 1000.0,
         tiles=build_summary_tiles(d["summary"], captures),
         fr_heatmap=build_fr_heatmap(captures, bands),
         linecharts=build_fr_linecharts(captures, bands),
+        h2_charts=build_h2_charts(captures, bands),
         thd_table=build_thd_table(captures),
         harmonic_heatmap=build_harmonic_heatmap(captures),
     )
