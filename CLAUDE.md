@@ -60,14 +60,22 @@ clang-format -i src/**/*.{cpp,h}
   fidelity (diode-stage ADAA, finer NR iteration, etc.) as a candidate for an optional "HQ" mode
   rather than the default path — **discuss with the user before implementing an HQ toggle**; this
   is a flag for a future decision, not a green light to add it now.
-- **v1.4 — FR / harmonic accuracy pass (TODO). → `analysis/FR_THD_AUDIT.md`** — full findings,
-  evidence and the ordered P0–P5 work plan live there; don't re-derive them here. Headline: a
-  **sub-64 Hz shortfall of 3–6 dB present in the raw circuit at every drive** (P1, biggest win —
-  also causes the LF THD gap), **asymmetric op-amp rail saturation** to supply Boost's missing
-  even harmonics (H2/H4/H6 are 26–46 dB short while H3/H5/H7 match within ~1 dB) (P2), the
-  even-harmonic series shape in OD/Dist (P3), and a **+1 dB 1.6–5 kHz tilt** (P4). Do P1 first and
-  re-run `comprehensive_report.py` before fitting P2/P3 — more low end into the clipper moves the
-  harmonic baseline. Audit tool: `analysis/fr_thd_audit.py`.
+- **v1.4 — FR / harmonic accuracy pass (IN PROGRESS). → `analysis/FR_THD_AUDIT.md`** — full
+  findings, evidence and the ordered P0–P5 work plan live there; don't re-derive them here.
+  - **P0 harness hygiene — ✅ done (2026-07-28).** THD above the H3 limit (~6.3 kHz) now reports
+    `na` (both estimators fail up there: Farina is H2-only, the discrete fallback aliases onto the
+    fundamental at 6/8 kHz), the FR trust band (40 Hz–8 kHz) is owned by `comprehensive_report.py`
+    and read by the dashboard from `meta`, the per-mode tiles use the same shape metric as the
+    heatmap, and **H2-vs-frequency** is a first-class chart. The old dashboard's dramatic 6–8.5 kHz
+    "THD cliff" was a measurement artifact and is gone.
+  - **P1 sub-64 Hz LF extension — ❌ CLOSED, no DSP change (2026-07-28).** Real but *not*
+    correctable; see the rejected-experiments entry below. Consequence: the LF THD gap is now an
+    accepted residual too, and **P2/P3 no longer need to wait for P1** — the harmonic baseline
+    won't move, so fit them against the current `comprehensive_data.json` directly.
+  - **Remaining:** **asymmetric op-amp rail saturation** to supply Boost's missing even harmonics
+    (H2/H4/H6 are 26–46 dB short while H3/H5/H7 match within ~1 dB) (P2), the even-harmonic series
+    shape in OD/Dist (P3), and a **+1 dB 1.6–5 kHz tilt** (P4). Audit tool:
+    `analysis/fr_thd_audit.py`.
 
 ---
 
@@ -103,6 +111,29 @@ reproduce.
 - **Active null optimization at G5** (drive×tone×input-level search per mode): the labelled/nominal
   settings are already optimal — tuning the heavily-driven segment deeper only trades against the
   lighter segments. Knob calibration confirmed correct.
+- **Sub-64 Hz LF-extension low-shelf** (`MonarchChannel::lfExt*`, 2026-07-28, v1.4 P1 — code kept,
+  `lfExtEnabled = false`): the deficit is **real** (pedal is +2.7 dB at 20 Hz, present in the raw
+  circuit at every drive/mode) and there is **no topology fix** — `schematic-checker` traced every
+  RC in both schematics including the bias/supply network and nothing lands near 45–55 Hz; the
+  named suspect, the literal 3-terminal DRIVE wiper-tap, uses R6=10k/C5=100n, i.e. the *same*
+  159 Hz corner already modelled as R9/C7. But the empirical shelf **fails**: two fits (+3.5 dB @
+  60 Hz minimising FR rms, and +5.0 dB @ 25 Hz confined to the drive-agreed band) both improved FR
+  error on 33/42 captures while making the **null worse on 27–28/42**, gutting the best matches
+  (G6 T5 Clean −22.0 → −17.7, G7 T5 Dist −17.9 → −13.5).
+  - **Why:** the pedal is louder at 20–40 Hz **and its phase LEADS** (+33° at 20 Hz). A
+    minimum-phase low-shelf adding +3 dB necessarily brings ≈−15° of *lag*, so the magnitude error
+    goes to zero while the phase error grows 33°→48° and the complex residual *grows*
+    (|1.36∠33°−1| = 0.76 → |0.96∠48°−1| = 0.81).
+  - **Proved by direct A/B:** the identical magnitude correction applied offline zero-phase *helps*
+    every case (G6 Dist −19.6→−20.6, G5 OD −21.1→−22.4) while minimum-phase hurts every case. So
+    the reading and the direction were right and only the **instrument** was wrong — but a
+    zero-phase shelf reaching 25 Hz is a multi-thousand-tap FIR (tens of ms latency) for ~0.6 dB.
+    Ruled out on cost. **Don't re-attempt with any IIR EQ.**
+  - **Metric lesson (new, and the mirror image of the presence-bump one):** FR rms weights every
+    third-octave band equally and is **blind to phase**; the time-domain null is complex. Note the
+    "no guitar energy below 80 Hz" intuition does **not** apply to this test signal — an
+    exponential sweep carries equal energy per octave, so 20–40 Hz is fully weighted in the null.
+    For anything that can carry phase: **FR generates the hypothesis, the null decides.**
 - **Capture-match tilt shelf** (`TiltShelf`, an artificial fixed high-shelf): retired
   (`kEnabled=false`) once the corrected Stage-1 Z_lower topology reproduced the EQ tilt
   circuit-accurately. Code kept for A/B only. (Superseded by the drive-dependent two-shelf
@@ -195,6 +226,11 @@ approximate-top mode (its 16 kHz is still deficient — use 2x+ for full fidelit
 linear WDF now runs at the OS rate too (relevant to the v1.1 perf pass).
 
 ### Accepted residuals (un-modeled second-order device physics, per user pref for circuit accuracy)
+- **Sub-64 Hz shortfall (~2.7 dB at 20 Hz, every drive/mode)** and the **LF THD gap it causes**
+  (40 Hz, G10 Clean, −6 dB sweep: pedal 35.6% vs plugin 4.7%). Not a topology error and not
+  correctable in real time — the pedal's LF excess carries a **phase lead**, so every minimum-phase
+  EQ that fixes the magnitude worsens the waveform null. See the rejected-experiments entry above
+  and `analysis/FR_THD_AUDIT.md` P1.
 - OD compresses ~3–4 dB lighter than the real pedal at hot input (Distortion compression good, Δ~2 dB).
 - A small genuine HF-harmonic difference >8 kHz (tone-stage rolloff); the captures' own 4–6 kHz
   energy is partly NAM aliasing (the plugin's 8× anti-aliased clip is the more-correct version).

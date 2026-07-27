@@ -126,6 +126,66 @@ public:
     static constexpr double hfTrimPivotHz = 4500.0;    // HF-trim high-shelf centre (Hz)
     static constexpr double hfTrimDb = -1.3;           // HF cut above the pivot (dB)
 
+    // ---- LF extension (fixed low-shelf, 2026-07-28 — FR_THD_AUDIT.md Finding 1 / P1) -----------
+    // The plugin is short of the real pedal below ~64 Hz in EVERY mode at EVERY drive, and the gap
+    // SURVIVES stripping every correction shelf above (fr_thd_audit.py `raw`): it is in the raw WDF
+    // circuit, not a mis-tuned shelf. Mode-independent (Boost −3.11 / Dist −3.13 / OD −3.64 dB at
+    // 20 Hz), so it is not a clipper artifact either.
+    //
+    // NOT a topology bug — the schematic-checker traced every pole/zero-capable RC in both
+    // schematics (signal path AND the bias/supply network, whose exclusion was re-verified by
+    // computing Z_VB ≈ 32 Ω @ 50 Hz) and NOTHING lands near 45-55 Hz: the only audio-path corners
+    // are the input HPF (7.2 Hz), Stage 2's C7/R9 (159 Hz), Stage 1's feedback ladder (~589 Hz) and
+    // the output HPF (0.16 Hz). The named suspect — the literal 3-terminal DRIVE wiper-tap dropped
+    // by the 2-terminal rheostat approximation — was traced to R6=10k/C5=100n, i.e. the SAME 159 Hz
+    // corner already modelled as R9/C7, so it contributes no sub-60 Hz content at all (it only
+    // redistributes gain, which is why it was rejected on separate grounds; circuit.md §7).
+    //
+    // So this is empirical, like the drive shelves. A SHELF, not a lower high-pass corner, is the
+    // right instrument and that is a shape argument, not a convenience: the deficit returns to 0 dB
+    // by 160 Hz, and 100-800 Hz already matches to ±0.3 dB at G5. Re-cornering Stage 2's HPF from
+    // 159 Hz to ~72 Hz (C7 100n→220n) would buy +6.7 dB at 20 Hz but drag +2.2 dB along at 160 Hz
+    // and +0.7 dB at 320 Hz — a pole alone never returns to unity. A pole/ZERO pair does.
+    //
+    // >>> RETIRED (lfExtEnabled = false). The deficit is REAL but is NOT correctable by any filter
+    // a real-time plugin can use. Kept, disabled, for A/B — do not re-enable without reading this.
+    //
+    // Two fits were built and measured against all 44 captures:
+    //   +3.5 dB @ 60 Hz (min FR rms):  FR error improved on 33/42 captures (median rms 2.31→1.98)
+    //                                  and the NULL got worse on 27/42, mean +0.95 dB.
+    //   +5.0 dB @ 25 Hz (confined to   Same story: null worse on 28/42, mean +1.08 dB. Confining
+    //   the drive-agreed 25-64 Hz):    the shelf did NOT help, which killed the first hypothesis
+    //                                  (spill into the energy-carrying 80-160 Hz band).
+    // Worst regressions were the mid-gain sweet spot, i.e. exactly the captures that matched best:
+    // G6 T5 Clean −22.0 → −17.7, G7 T5 Dist −17.9 → −13.5.
+    //
+    // WHY, measured directly (complex transfer function, pedal vs plugin, clean sweep, 1 kHz-norm):
+    //   Hz          20     25     32     40     50     64     80    101
+    //   |ped|-|plug|  +2.7   +2.8   +2.5   +1.9   +1.3   +0.5   -0.0   -0.5   dB   (G5 T5 Clean)
+    //   phase ped-plug +33°   +21°   +10°    +2°    -3°    -6°    -7°    -6°
+    // The pedal is louder at 20-40 Hz AND its phase LEADS. A minimum-phase low-shelf that adds
+    // +3 dB at 20 Hz necessarily contributes about −15° of LAG. So the magnitude error goes to zero
+    // while the phase error grows 33° → 48°, and the COMPLEX residual gets bigger: |1.36∠33°−1| =
+    // 0.76 before, |0.96∠48°−1| = 0.81 after. The null is measuring that, and it is right to.
+    //
+    // Proof it is the phase and not the magnitude — the identical magnitude correction applied to
+    // the same renders offline, minimum-phase vs zero-phase (null depth, dB, clean sweep):
+    //                  baseline   min-phase   zero-phase
+    //   G6 T5 Dist        −19.6      −15.6       −20.6
+    //   G7 T5 Dist        −17.6      −13.6       −18.1
+    //   G5 T5 OD          −21.1      −19.1       −22.4
+    // Zero-phase helps on every case (mean ~0.6 dB); minimum-phase hurts on every case. But a
+    // zero-phase shelf reaching 25 Hz is a multi-thousand-tap FIR — tens of ms of latency — which
+    // is an absurd price for 0.6 dB, and unusable live. Hence: retired, not fixed.
+    //
+    // (Had it shipped it would have gone PRE-clip, here in driveShelf, because the LF THD shortfall
+    // is a CONSEQUENCE of this FR shortfall — the plugin's low end never reaches the rails: 40 Hz,
+    // G10 Clean, −6 dB sweep, pedal 35.6% THD vs plugin 4.7%. That THD gap is likewise not
+    // separately fixable, since its cause is this un-correctable LF gap.)
+    static constexpr bool   lfExtEnabled = false;      // RETIRED — min-phase LF boost worsens the null
+    static constexpr double lfExtPivotHz = 25.0;       // LF-extension low-shelf centre (Hz)
+    static constexpr double lfExtDb = 5.0;             // LF lift below the pivot (dB)
+
     // ---- Bilinear-warp top-octave correction (rate-dependent high-shelf, 2026-06-29; recal 06-30) -
     // The linear WDF stages run at the oversampled rate (see PluginProcessor), but the bilinear
     // transform still warps the top octave DOWN at finite rates — the deficit vs the fully-resolved
@@ -194,11 +254,14 @@ public:
         const double wsDc = (wsB0 + wsB1) / (1.0 + wsA1);
         wsB0 /= wsDc;
         wsB1 /= wsDc;
+        // LF extension: fixed, drive- and mode-independent low-shelf (glo=lift, ghi=1). Rate-only,
+        // so it belongs here rather than in updateDriveShelf. See the lfExt* constants.
+        shelfCoeffs (std::pow (10.0, lfExtDb / 20.0), 1.0, lfExtPivotHz, leB0, leB1, leA1);
         // OD clip-gated low-shelf: fixed coeffs at the OS rate; a low-shelf sets ghi=1, glo=lift.
         shelfCoeffs (std::pow (10.0, odShelfMaxDb / 20.0), 1.0, odShelfPivotHz, olB0, olB1, olA1);
         // Fixed HF-trim high-shelf (drive-independent): eases the slightly-hot top end (glo=1, ghi=cut).
         shelfCoeffs (1.0, std::pow (10.0, hfTrimDb / 20.0), hfTrimPivotHz, htB0, htB1, htA1);
-        hsX1 = hsY1 = lsX1 = lsY1 = wsX1 = wsY1 = olX1 = olY1 = htX1 = htY1 = bcX1 = bcX2 = bcY1 = bcY2 = 0.0;
+        hsX1 = hsY1 = lsX1 = lsY1 = wsX1 = wsY1 = olX1 = olY1 = htX1 = htY1 = bcX1 = bcX2 = bcY1 = bcY2 = leX1 = leY1 = 0.0;
     }
 
     void prepareClip (double clipRate)
@@ -233,7 +296,7 @@ public:
         volume.reset();
         railXprev = 0.0;
         railFprev = 0.0;
-        hsX1 = hsY1 = lsX1 = lsY1 = wsX1 = wsY1 = olX1 = olY1 = htX1 = htY1 = bcX1 = bcX2 = bcY1 = bcY2 = 0.0;
+        hsX1 = hsY1 = lsX1 = lsY1 = wsX1 = wsY1 = olX1 = olY1 = htX1 = htY1 = bcX1 = bcX2 = bcY1 = bcY2 = leX1 = leY1 = 0.0;
     }
 
     // ---- Parameter setters (call per block; tapers applied inside each stage) ----
@@ -431,8 +494,15 @@ private:
         const double c = bcB0 * b + bcB1 * bcX1 + bcB2 * bcX2 - bcA1 * bcY1 - bcA2 * bcY2; // bass cut bell
         bcX2 = bcX1; bcX1 = b;
         bcY2 = bcY1; bcY1 = c;
-        const double w = wsB0 * c + wsB1 * wsX1 - wsA1 * wsY1; // bilinear-warp top-octave correction
-        wsX1 = c;
+        double e = c;
+        if constexpr (lfExtEnabled) // retired — a min-phase LF boost worsens the null (see lfExt*)
+        {
+            e = leB0 * c + leB1 * leX1 - leA1 * leY1;
+            leX1 = c;
+            leY1 = e;
+        }
+        const double w = wsB0 * e + wsB1 * wsX1 - wsA1 * wsY1; // bilinear-warp top-octave correction
+        wsX1 = e;
         wsY1 = w;
         const double y = htB0 * w + htB1 * htX1 - htA1 * htY1; // fixed HF trim (ease the top toward captures)
         htX1 = w;
@@ -494,6 +564,7 @@ private:
     double lsB0 { 1.0 }, lsB1 { 0.0 }, lsA1 { 0.0 }, lsX1 { 0.0 }, lsY1 { 0.0 };
     double wsB0 { 1.0 }, wsB1 { 0.0 }, wsA1 { 0.0 }, wsX1 { 0.0 }, wsY1 { 0.0 };
     double htB0 { 1.0 }, htB1 { 0.0 }, htA1 { 0.0 }, htX1 { 0.0 }, htY1 { 0.0 }; // fixed HF-trim high-shelf
+    double leB0 { 1.0 }, leB1 { 0.0 }, leA1 { 0.0 }, leX1 { 0.0 }, leY1 { 0.0 }; // fixed LF-extension low-shelf
     double bcB0 { 1.0 }, bcB1 { 0.0 }, bcB2 { 0.0 }, bcA1 { 0.0 }, bcA2 { 0.0 };  // drive-gated bass-cut bell
     double bcX1 { 0.0 }, bcX2 { 0.0 }, bcY1 { 0.0 }, bcY2 { 0.0 };
 

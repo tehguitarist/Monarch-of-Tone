@@ -17,7 +17,7 @@ short of the real pedal.
 
 | # | Observation | Verdict |
 |---|---|---|
-| 1 | Universally light 20–80 Hz | **Confirmed** — largest defect in the plugin; present in the raw circuit at every drive |
+| 1 | Universally light 20–80 Hz | **Confirmed** — largest defect in the plugin; present in the raw circuit at every drive. *(2026-07-28: confirmed real, but CLOSED as not correctable — the excess carries a phase lead, so every minimum-phase EQ that fixes the magnitude worsens the null. See P1.)* |
 | 2 | A touch hot from 800 Hz up; maybe knob variance | **Confirmed as real, rejected as knob variance** — it does not track the TONE knob at all |
 | 3 | The FR peak moves and the plugin doesn't match it | **Confirmed it moves, but it is a readout of #1/#2 + the known bloom** — no separate mechanism |
 | 4 | THD fine overall, clean harmonics off, no 6–8.5 kHz THD | **Split** — the 6–8.5 kHz gap is mostly a measurement artifact; the clean/even-harmonic problem is real and much bigger than it looked |
@@ -69,8 +69,17 @@ error — lowering the dominant LF pole would lift 100–200 Hz too and break a 
 correct. What's needed is a pole/zero pair with its knee around **45–55 Hz**, roughly **+3.5 dB**,
 **drive-independent**.
 
+> ⚠️ **Superseded 2026-07-28 — see P1 below, which is CLOSED.** The magnitude reading above is
+> correct and was reproduced, but the fix does not exist in a real-time-viable form: the pedal's
+> LF excess comes with a **phase lead** (+33° at 20 Hz), and every minimum-phase EQ that adds
+> magnitude adds *lag*, so it makes the time-domain null worse — measured at 1–4 dB worse on the
+> best-matching captures. Only a zero-phase (linear-phase FIR) correction helps, and only by
+> ~0.6 dB, for tens of ms of latency. The per-drive detail below is still the best record of the
+> deficit's shape; it just no longer implies an action.
+
 This deficit also **causes** the LF THD shortfall in Finding 4: the plugin's low end never reaches
-the rails. G10 T5 Clean at the −6 dB sweep, 40 Hz: pedal **35.6%** THD, plugin **4.7%**.
+the rails. G10 T5 Clean at the −6 dB sweep, 40 Hz: pedal **35.6%** THD, plugin **4.7%**. Since the
+LF gap is not correctable, that THD gap is now an **accepted residual** too, not a work item.
 
 ---
 
@@ -167,31 +176,130 @@ the even-harmonic finding, not a separate HF issue.**
 
 ## Work plan
 
-Ordered. **P1 changes what P2/P3 must be fitted against** (more low end into the clipper changes LF
-THD and the H2 gate), so do not run them in parallel — finish P1, re-run
-`comprehensive_report.py`, then fit the nonlinear work against the corrected baseline.
+~~Ordered. **P1 changes what P2/P3 must be fitted against**~~ — **no longer true.** P1 is closed
+with no DSP change, so the harmonic baseline does not move. **P2 and P3 can be fitted directly
+against the current `comprehensive_data.json`.**
 
-### P0 — harness hygiene (cheap; changes what the dashboard tells you)
+### P0 — harness hygiene — ✅ **DONE 2026-07-28**
 
-- Route THD bands above ~5 kHz to `na` in `build_band_source_map`, or annotate them: the Farina
-  path is H2-only up there and the discrete-tone fallback aliases onto the fundamental at 6/8 kHz.
-- Mark FR bands above ~8 kHz as capture-unreliable in `dashboard_gen.py`. The ±18 dB spread there
-  currently reads as plugin error.
-- Add **H2 vs frequency** as a first-class chart. It is the single most diagnostic view of the
-  even-harmonic problem and it is not in the report today (only 3 anchor frequencies are).
+- ~~Route THD bands above ~5 kHz to `na`~~ — done, at the **H3** limit (~6.3 kHz), not 5 kHz: THD is
+  an RSS dominated by H3 for a symmetric clipper, so a band that has lost H3 reports H2, not THD.
+  Routes 6451/8128 Hz to `na`. Plus `discrete_tone_is_valid()`, which independently rejects any
+  fallback tone whose k = 2..8 harmonic folds onto the fundamental or DC (condemns 6 kHz and 8 kHz).
+- ~~Mark FR bands above ~8 kHz as capture-unreliable~~ — done, and enforced at source: the trust
+  band lives in `comprehensive_report.py` (40 Hz–8 kHz), `dashboard_gen.py` reads it out of `meta`
+  so the two cannot drift. Also fixed `compute_summary`, which scored plain all-band rms with no
+  offset removal — the per-mode tiles disagreed with the heatmap above them *and* were inflated by
+  capture spread. Now the same median-removed shape metric, over the trusted band only.
+- ~~Add **H2 vs frequency** as a first-class chart~~ — done: `h2` block in the JSON, a per-mode
+  chart on the dashboard, and `fr_thd_audit.py h2` now reads the JSON instead of re-rendering (so
+  it joins `all`).
 
-### P1 — sub-64 Hz LF extension  *(biggest win; drive-independent; fixes LF THD in all modes for free)*
+### P1 — sub-64 Hz LF extension  — ❌ **CLOSED 2026-07-28: real, but not correctable**
 
-1. **Run `schematic-checker` before fitting anything.** Specific question: what produces a
-   pole/zero pair below ~60 Hz that the 2-terminal DRIVE approximation drops? The literal
-   3-terminal wiring's `pin3 → R6 → C5 → Stage2` path is the obvious suspect — it was rejected for
-   its *gain* behaviour (circuit.md §7) but its **LF contribution was never separately evaluated**.
-   Also re-verify C7/R9 against both schematics.
-2. If there is a topology fix, take it. If not, add a **separate, drive-independent low-shelf**
-   (~+3.5 dB, pivot ~50 Hz) to the `driveShelf` chain. It must **not** be folded into `bassCut` or
-   `bassBoost` — the 100–330 Hz fit is already good to ±0.3 dB at G5 and either would break it.
-3. Validate with Farina `linear_tf` (this is a pure linear-EQ question) **plus** the time-domain
-   null. Expect the G8–G10 nulls and the LF THD rows to improve as a side effect.
+**Do not re-attempt without a new mechanism.** The deficit in Finding 1 is real and reproducible.
+It is also un-fixable by any filter a real-time plugin can use, because it is a **phase** problem
+wearing a magnitude problem's clothes. Full record below; the code sits disabled in
+`MonarchChannel::lfExt*` (`lfExtEnabled = false`) for A/B.
+
+**Step 1 — topology (`schematic-checker`): no fix exists.** Every pole/zero-capable RC in both
+schematics was traced against actual values — signal path *and* the bias/supply network, whose
+exclusion was re-verified by computing the bias node's own impedance (Z_VB ≈ 32 Ω @ 50 Hz, 80 Ω @
+20 Hz — negligible against the 6.8 k–1 M it references, so treating it as an AC ground is
+specifically valid at 20–60 Hz, not just generally). **Nothing lands near 45–55 Hz.** The only
+audio-path corners are the input HPF (7.2 Hz), Stage 2's C7/R9 (159 Hz), Stage 1's feedback ladder
+(~589 Hz) and the output HPF (0.16 Hz). The named suspect — the literal 3-terminal DRIVE wiper-tap
+the 2-terminal rheostat approximation drops — traces to **R6 = 10 k, C5 = 100 n, i.e. the same
+159 Hz corner already modelled as R9/C7**. It contributes no sub-60 Hz content at all; it only
+redistributes gain, which is why it was already rejected on separate grounds (circuit.md §7).
+
+**Step 2 — the empirical shelf was built, fitted twice, and rejected by the null.**
+
+| fit | FR result | null result |
+|---|---|---|
+| +3.5 dB @ 60 Hz (min FR rms) | improved 33/42, median rms 2.31→1.98 | **worse on 27/42, mean +0.95 dB** |
+| +5.0 dB @ 25 Hz (confined to the drive-agreed band) | improved 33/42, median 2.31→2.00 | **worse on 28/42, mean +1.08 dB** |
+
+The regressions land on the *best-matching* captures: G6 T5 Clean −22.0 → −17.7, G7 T5 Dist −17.9 →
+−13.5, G5 T5 Dist −20.6 → −18.1. Confining the shelf to 25 Hz did not help, which disproved the
+first hypothesis (that it was spilling into the energy-carrying 80–160 Hz band).
+
+**Step 3 — the cause, measured.** Complex transfer function, pedal vs plugin, clean sweep,
+1 kHz-normalised (G5 T5 Clean; G6 T5 Dist gives the same shape):
+
+| Hz | 20 | 25 | 32 | 40 | 50 | 64 | 80 | 101 |
+|---|---|---|---|---|---|---|---|---|
+| \|ped\|−\|plug\| dB | +2.66 | +2.77 | +2.45 | +1.91 | +1.28 | +0.54 | −0.04 | −0.48 |
+| phase ped−plug | **+33°** | +21° | +10° | +2° | −3° | −6° | −7° | −6° |
+
+The pedal is **louder at 20–40 Hz *and* leads in phase**. A minimum-phase low-shelf adding +3 dB at
+20 Hz necessarily brings about **−15° of lag** with it. So the magnitude error goes to zero while
+the phase error grows 33° → 48°, and the complex residual gets *bigger*: |1.36∠33°−1| = 0.76
+before, |0.96∠48°−1| = 0.81 after. The null measures exactly that.
+
+**Step 4 — proof it is the phase, not the magnitude.** The identical magnitude correction applied
+offline to the same renders, minimum-phase vs zero-phase (null depth, dB, clean sweep):
+
+| capture | baseline | min-phase | zero-phase |
+|---|---|---|---|
+| G5 T5 Clean | −21.0 | −18.7 | −21.3 |
+| G5 T5 OD | −21.1 | −19.1 | **−22.4** |
+| G6 T5 Dist | −19.6 | −15.6 | **−20.6** |
+| G6 T5 Clean | −21.8 | −18.4 | −21.8 |
+| G7 T5 Dist | −17.6 | −13.6 | −18.1 |
+| G2 T5 Clean | −15.2 | −16.1 | −15.9 |
+
+Zero-phase helps everywhere; minimum-phase hurts almost everywhere. **The magnitude reading was
+right and the fix direction was right — the instrument was wrong.** A zero-phase shelf reaching
+25 Hz is a multi-thousand-tap FIR (tens of ms of latency) for a mean gain of ~0.6 dB. Not worth it,
+and unusable live. Ruled out on cost, not on principle.
+
+**Step 5 — "what about changing a component value instead?" (asked and answered, don't re-ask).**
+No: it is strictly *worse*, for two reasons.
+
+Re-cornering the Stage-2 coupling cap C7 changes the plugin's transfer by exactly
+`(s+w_old)/(s+w_new)` — which **is** a low shelf, but one whose gain and pivot are locked together
+(`gain = f_old/f_new`, `pivot = √(f_old·f_new)`). You cannot reach 20–40 Hz without dragging the
+low mids along:
+
+| C7 | corner | ≡ shelf gain | pivot | @20 Hz | @80 Hz | @160 Hz |
+|---|---|---|---|---|---|---|
+| 100n *(today)* | 159 Hz | — | — | 0.00 | 0.00 | 0.00 |
+| 150n | 106 Hz | +3.52 dB | 130 Hz | +3.44 | +2.55 | +1.40 |
+| 220n | 72 Hz | +6.85 dB | 107 Hz | +6.60 | +4.36 | +2.18 |
+| 330n | 48 Hz | +10.37 dB | 88 Hz | +9.75 | +5.61 | +2.61 |
+
+(the free fitted shelf put only **+0.13 dB** at 160 Hz). Measured null depth, clean sweep, applied
+exactly offline:
+
+| capture | base | C7 150n | C7 220n | C7 330n | input cap 22n→47n |
+|---|---|---|---|---|---|
+| G5 T5 Clean | −21.0 | −15.2 | −11.3 | −8.8 | −20.4 |
+| G5 T5 OD | −21.1 | −16.0 | −11.4 | −8.5 | −20.6 |
+| G6 T5 Dist | −19.6 | −14.3 | −9.5 | −6.5 | −18.2 |
+| G7 T5 Dist | −17.6 | −12.7 | −8.5 | −5.8 | −16.2 |
+
+And the general argument, which covers every value of every part: **all of these networks are
+minimum-phase, so magnitude determines phase.** Any network delivering +2.7 dB at 20 Hz delivers
+≈−15° of lag with it; the pedal *leads* by +33°. Magnitude-up *and* lead-up together requires a
+right-half-plane zero, which passive RC + op-amp stages do not produce. Adding a part rather than
+changing one (e.g. a resistor across C7) just buys back independent gain/pivot — i.e. it rebuilds
+the free shelf, which is the **best case of the whole family and already fails**. Schematic
+fidelity was never the constraint here.
+
+**Consequences for the rest of the plan.** The LF THD shortfall (Finding 4's 40 Hz row: pedal 35.6%
+vs plugin 4.7%) was diagnosed as a *consequence* of this LF gap, so it is not separately fixable
+either — it should be reclassified as an accepted residual alongside it. **P2/P3 therefore no
+longer need to wait for P1** — the harmonic baseline is not going to move, so fit them against the
+current `comprehensive_data.json` directly.
+
+**Method note worth keeping.** Two metrics disagreed and the null was right. FR rms weights every
+third-octave band equally and is blind to phase; the time-domain null is complex and weights by the
+sweep's actual energy (an exponential sweep carries equal energy per octave, so 20–40 Hz is *fully*
+weighted — the "there's no guitar energy down there" intuition does not apply to this test signal).
+For any correction that could carry phase, **the null is the arbiter and FR rms is the hypothesis
+generator** — the same lesson the reverted 335 Hz presence bump taught, arrived at from the
+opposite direction.
 
 ### P2 — asymmetric op-amp rail saturation  *(circuit-accurate, not empirical)*
 
