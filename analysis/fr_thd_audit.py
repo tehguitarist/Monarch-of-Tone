@@ -36,6 +36,7 @@ Usage:
   fr_thd_audit.py peaks [--sweep NAME]                          overall-FR peak freq, plugin vs pedal
   fr_thd_audit.py thd                                           THD ratio per band per mode
   fr_thd_audit.py harm                                          H2-H7 at the 100/200/400 Hz anchors
+  fr_thd_audit.py evens [--base OLD.json]                       even-series rms/bias per mode (P3/P3.1)
   fr_thd_audit.py alias                                         where discrete-tone harmonics land
   fr_thd_audit.py h2                                            H2 vs frequency
   fr_thd_audit.py all                                           every view above
@@ -45,6 +46,7 @@ Requires analysis/reports/comprehensive_data.json (run comprehensive_report.py f
 what needs the local-only captures in analysis/pedal_export2/ and a built tools/PedalRender).
 """
 import argparse
+import json
 import os
 import re
 import sys
@@ -62,7 +64,6 @@ MODES = ("Boost", "Overdrive", "Distortion")
 
 # ------------------------------------------------------------------------------------ data access
 def load():
-    import json
     if not os.path.exists(DATA):
         sys.exit(f"{DATA} not found — run: python3 analysis/comprehensive_report.py")
     d = json.load(open(DATA))
@@ -275,6 +276,57 @@ def view_harm(d, bands, caps, out=sys.stdout):
             print(file=out)
 
 
+EVEN_FLOOR_DBC = -70.0  # ignore cells where the pedal itself has essentially no harmonic there
+
+
+def view_evens(d, bands, caps, out=sys.stdout, base=None):
+    """P3/P3.1's headline metric: per-mode rms and bias of (plugin − pedal) for the EVEN orders,
+    over every driven sweep x anchor, on cells where the pedal reads above EVEN_FLOOR_DBC.
+
+    rms says how close the even series is; BIAS says whether it is systematically short or hot,
+    and the two must be read together — P3 removed H2's bias, and P3.1's knee re-fit had to be
+    prevented from spending that to buy H4/H6 (the coefficients set level, the knee sets the ratio
+    between orders; fit the knee first, then re-zero the bias with the coefficients).
+
+    Pass a second comprehensive_data.json via --base to print the before/after delta.
+    """
+    A = d["meta"]["thd_anchors"]
+
+    def stats(dd):
+        cc = dd["captures"] if base is not None else caps
+        r = {}
+        for m in MODES:
+            sel = [c for c in cc if c["rev"] == m]
+            for o in (2, 4, 6):
+                cells = [(c["harmonics"][sw][f"H{o}"]["plugin_db"][ai],
+                          c["harmonics"][sw][f"H{o}"]["pedal_db"][ai])
+                         for c in sel for sw in dd["meta"]["driven_sweeps"] for ai in range(len(A))
+                         if c["harmonics"][sw][f"H{o}"]["pedal_db"][ai] > EVEN_FLOOR_DBC]
+                e = np.array([p - q for p, q in cells])
+                # "silent" = the plugin has NO even-order mechanism engaged in that cell at all
+                # (an exactly symmetric clipper reads ~-160 dBc, not a small number). Those cells
+                # are a different kind of error from a mis-levelled one and would otherwise
+                # dominate an rms — Boost's low-drive driven sweeps are full of them, because the
+                # rails are its only even-harmonic source and they are not reached down there.
+                silent = int(sum(1 for p, _ in cells if p < -100.0))
+                r[(m, o)] = (float(np.sqrt((e ** 2).mean())), float(e.mean()), len(e), silent)
+        return r
+
+    now = stats(d)
+    was = stats(base) if base is not None else None
+    print(f"\n=== Even-harmonic series vs the captures (driven sweeps, pedal > {EVEN_FLOOR_DBC:.0f} "
+          f"dBc) ===", file=out)
+    head = f"{'mode':>11}{'order':>7}{'rms':>8}{'bias':>8}{'n':>6}{'silent':>8}"
+    print(head + ("" if was is None else f"{'was rms':>10}{'was bias':>10}"), file=out)
+    for m in MODES:
+        for o in (2, 4, 6):
+            rms, bias, n, silent = now[(m, o)]
+            row = f"{m:>11}{'H'+str(o):>7}{rms:>8.1f}{bias:>+8.1f}{n:>6}{silent:>8}"
+            if was is not None:
+                row += f"{was[(m, o)][0]:>10.1f}{was[(m, o)][1]:>+10.1f}"
+            print(row, file=out)
+
+
 def view_alias(out=sys.stdout, fs=48000.0):
     """Guardrail G4 — the discrete-tone THD estimator sums k=2..8; show where each lands."""
     import gen_test_signal as G
@@ -329,9 +381,13 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("view", nargs="?", default="all",
-                    choices=["bands", "core", "raw", "peaks", "thd", "harm", "alias", "h2", "all"])
+                    choices=["bands", "core", "raw", "peaks", "thd", "harm", "evens", "alias", "h2",
+                             "all"])
     ap.add_argument("--by", default="drive", choices=["drive", "tone", "mode"])
     ap.add_argument("--sweep", default="sweep_clean")
+    ap.add_argument("--base", default=None,
+                    help="evens view: a second comprehensive_data.json to diff against "
+                         "(prints was-rms / was-bias next to the current numbers)")
     ap.add_argument("--report", action="store_true",
                     help="append the regenerated tables to analysis/FR_THD_AUDIT.md's data section")
     a = ap.parse_args()
@@ -353,6 +409,9 @@ def main():
         view_thd(d, bands, caps, out)
     if a.view in ("harm", "all"):
         view_harm(d, bands, caps, out)
+    if a.view in ("evens", "all"):
+        view_evens(d, bands, caps, out,
+                   base=json.load(open(a.base)) if a.base else None)
     if a.view in ("alias", "all"):
         view_alias(out)
     if a.view in ("h2", "all"):

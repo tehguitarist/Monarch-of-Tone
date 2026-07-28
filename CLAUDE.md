@@ -82,9 +82,46 @@ clang-format -i src/**/*.{cpp,h}
     worth **0.5–0.7 dB of OD/Dist null on its own**); and **Distortion is rail-clamped**, so a fixed
     asymmetry made it 26 dB too even — it is scaled off under SW-2's ~25× heavier load. Whole set:
     null mean **0.12 dB deeper**, Boost **0.29 dB**, OD/Dist neutral, FR unchanged.
-  - **Remaining:** the even-harmonic series shape in OD/Dist (P3 — both still carry their empirical
-    injections and are ~16–18 dB hot at H2), and a **+1 dB 1.6–5 kHz tilt** (P4). Audit tools:
-    `analysis/fr_thd_audit.py`, `analysis/p2_rail_asym_fit.py` (fast clip-nonlinearity fit loop).
+  - **P3 even-harmonic H2 shape in OD/Dist — ✅ done (2026-07-28).** Both injection paths ran
+    full-range and **the same fact broke both**: Stage 1's high-shelf makes `nodeG` small below a
+    few hundred Hz. Ablation reversed the diagnosis — the plan blamed the low path, but the
+    **mid/high** path was the larger share (+15.5 dB hot on its own at 100 Hz), because its
+    `tanh(asymDriveScale·nodeG)` wash-out never leaves the linear region down there and so grows as
+    `nodeG²` instead of collapsing. Two fixes: **`asymMidFc` = 400 Hz high-pass** on the mid source
+    (the counterpart the low band's 150 Hz low-pass always implied — the paths now split the
+    spectrum), and the low band gets **its own depth envelope** (`lowEnv`, `asymLowWash` = 25,
+    `asymLowThresh` = 0.15 V) because its source is clamped and `clipEnv`'s 0.37 V threshold is
+    never met at LF (a wash keyed to it moved H2 by 0.7 dB — nothing). The envelope's **threshold**
+    is what makes the shape right rather than merely smaller. `asymLowOD/Dist` then raised 1.4×.
+    All 44 captures, driven sweeps: **H2 rms error OD 10.3 → 6.9 dB, Dist 10.2 → 7.9, systematic
+    bias eliminated** (+2.8 → 0.0, +3.0 → +0.2). Odd orders bit-identical, Boost byte-identical,
+    **null unchanged on every capture**.
+  - **P3.1 H4/H6 in OD/Dist — ✅ done (2026-07-28), and it corrected a wrong P3 claim.** P3 called
+    this structurally unfixable ("a squared source only makes H2"); its own ablation data disproved
+    that, and re-fitting the **tanh knee** fixed it inside the same mechanism. Two knees were
+    needed, for different reasons: `asymDriveScale` **1.70 → 3.50** (never re-swept since before
+    P2; the knee alone sets the H2:H4:H6 ratio), and a **new** `asymLowDriveScale` = 4.90 on the
+    low path — whose source is a low-pass of the clip output, i.e. nearly a **sine**, so its square
+    had **no H4/H6 by construction** and never responded to `asymDriveScale` at all. Order matters:
+    **knee first, then re-zero the bias with the coefficients** — a joint search drifted H2
+    +3.7/+5.1 dB hot buying H4/H6, and a gain moves the whole series while the knee does not. All
+    44 captures, driven sweeps: H4 bias **−11.1/−11.2 → −1.5/−2.1**, H6 **−22.0/−18.2 → −7.4/−5.8**,
+    H2 bias still **0.0**. Odd orders 0.00 dB changed, Boost byte-identical, null unchanged (worst
+    +0.04 dB), and **IMD is now a measured guard** (SMPTE 60 Hz+7 kHz — the pair straddling the
+    injection split — 0.00 dB) rather than the by-ear check the plan proposed. H6 stays ~6 dB
+    short: accepted, since closing it costs H2 rms faster than it gains H6. Prerequisite settled
+    first — `analysis/p31_harm_floor.py` shows the pedal's H4/H6 targets clear the capture chain's
+    harmonic floor by 39 dB median / 6.9 dB worst, so none of the gap was measurement noise.
+  - **P3.2 Boost's evens vanish on the quiet driven sweeps — ❌ new, open.** Found by P3.1's
+    whole-set metric, which P2 could not see (it measured the −6 dB sweep only): **30 of 143** Boost
+    H2 cells have the plugin at ≈−160 dBc — no even-harmonic mechanism engaged at all — while the
+    pedal reads −18…−59 dBc. Structural: after P2, Boost's evens come *entirely* from the
+    asymmetric rails, so below the knee the plugin is an exactly symmetric clipper. Needs its own
+    mechanism and fit; P2's hot-drive result is not in question. See `FR_THD_AUDIT.md` P3.2.
+  - **Remaining:** a **+1 dB 1.6–5 kHz tilt** (P4), then P5 (verification only), plus P3.2. Audit
+    tools: `analysis/fr_thd_audit.py` (`evens` view = the even-series rms/bias table, `--base` for
+    before/after), `analysis/p2_rail_asym_fit.py` (fast clip-nonlinearity fit loop, now with an IMD
+    guard — also the P3/P3.1 harness), `analysis/p31_harm_floor.py` (harmonic noise floor).
 
 ---
 
@@ -296,7 +333,13 @@ linear WDF now runs at the OS rate too (relevant to the v1.1 perf pass).
   and H2–H7 per band per sweep level) + `dashboard_gen.py` (→ `reports/dashboard.html`).
   `fr_thd_audit.py` reads that JSON and produces the tables in **`FR_THD_AUDIT.md`** (the v1.4
   findings + plan) — its `raw` view strips `driveShelf()` to separate a mis-tuned correction shelf
-  from a real circuit gap, and its `alias` view shows which bands are not measurable at all.
+  from a real circuit gap, its `alias` view shows which bands are not measurable at all, and its
+  `evens` view is the whole-set even-harmonic rms/bias table P3/P3.1 are judged on (`--base
+  OLD.json` prints before/after; the `silent` column counts cells where the plugin has *no* even
+  mechanism engaged, which is what the Boost rows are actually reporting — see P3.2).
+- `p31_harm_floor.py` measures the **capture chain's harmonic noise floor** by gating the Farina IR
+  at fractional orders (between the harmonic impulses). Run it before fitting any quiet harmonic —
+  it is what proved the H4/H6 targets were real signal (39 dB median margin) and not noise.
 - **Bands that are NOT trustworthy:** FR above ~8 kHz (±18 dB capture-side spread) and THD above
   ~5 kHz (Farina is H2-only there; the discrete-tone fallback aliases onto the fundamental at 6 and
   8 kHz — the captures read up to 291% THD). Don't fit anything to them. See FR_THD_AUDIT.md §4.

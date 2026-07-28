@@ -95,8 +95,17 @@ def analyse(path, parsed, orig, binpath, os_factor, save_dir):
             resid, _ = NT.best_null(ref, test)
             null[sw] = float(NT.null_db(ref, resid))
 
+        # IMD, pedal vs plugin. A single swept sine cannot see intermodulation at all, which is
+        # the standing risk of fitting harmonic SHAPE with a harder-kneed shaper (FR_THD_AUDIT.md
+        # P3.1 route 2's caution). The test signal already carries both twin-tone segments, so the
+        # guard is capture-referenced rather than by ear: SMPTE 60 Hz + 7 kHz straddles exactly the
+        # low/mid injection split, CCIF 19+20 kHz catches anything aliasing.
+        imd = {nm: {"pedal": float(A.imd(cap_al, nm, lo, hi)),
+                    "plugin": float(A.imd(ren_al, nm, lo, hi))}
+               for nm, lo, hi in (("imd_smpte", 60, 7000), ("imd_ccif", 19000, 20000))}
+
         return {"id": parsed["label"], "rev": parsed["rev"], "sha256": sha,
-                "harmonics": harm, "null": null}
+                "harmonics": harm, "null": null, "imd": imd}
     finally:
         if tmp and os.path.exists(out_path):
             os.unlink(out_path)
@@ -131,6 +140,20 @@ def print_null(results, out=sys.stdout):
     print(f"{'MEAN':<14}"
           + "".join(f"{np.mean([r['null'][s] for r in results]):>14.2f}" for s in NULL_SWEEPS),
           file=out)
+
+
+def print_imd(results, out=sys.stdout):
+    print("\n=== IMD products re carriers (dB) — plugin / pedal / delta ===", file=out)
+    names = ("imd_smpte", "imd_ccif")
+    print(f"{'capture':<14}" + "".join(f"{n.replace('imd_', ''):>26}" for n in names), file=out)
+    for r in results:
+        if "imd" not in r:
+            continue
+        row = f"{r['id']:<14}"
+        for n in names:
+            p, q = r["imd"][n]["plugin"], r["imd"][n]["pedal"]
+            row += f"  {p:>8.1f}/{q:>8.1f} {p - q:>+6.1f}"
+        print(row, file=out)
 
 
 def print_compare(results, base, out=sys.stdout):
@@ -177,6 +200,15 @@ def print_compare(results, base, out=sys.stdout):
                 row += f"H{o} {np.median(d):>+6.2f}  "
             print(row, file=out)
 
+    print("\n=== vs baseline — |IMD error| change (dB; negative = closer to the pedal) ===",
+          file=out)
+    for nm in ("imd_smpte", "imd_ccif"):
+        d = [abs(r["imd"][nm]["plugin"] - r["imd"][nm]["pedal"])
+             - abs(by_id[r["id"]]["imd"][nm]["plugin"] - by_id[r["id"]]["imd"][nm]["pedal"])
+             for r in results if r["id"] in by_id and "imd" in r and "imd" in by_id[r["id"]]]
+        print(f"  {nm:<10} " + ("no baseline" if not d else
+                                f"median {np.median(d):>+6.2f}   worst {max(d):>+6.2f}"), file=out)
+
     print("\n=== byte-identical guard (renders unchanged vs baseline) ===", file=out)
     for r in results:
         b = by_id.get(r["id"])
@@ -195,11 +227,20 @@ def main():
                     help="restrict to these modes (Boost/Overdrive/Distortion)")
     ap.add_argument("--captures", nargs="*", default=list(DEFAULT_SUBSET),
                     help="capture labels, or 'all'")
+    ap.add_argument("--anchors", nargs="*", type=int, default=None,
+                    help="anchor frequencies for the harmonic table (default: "
+                         "comprehensive_report.THD_ANCHORS). P3.1 fits the mid/high injection "
+                         "path, which owns the band ABOVE asymMidFc — add 800 to see it.")
     ap.add_argument("--save-renders", default=None)
     ap.add_argument("--json", default=None, help="write results here")
     ap.add_argument("--compare", default=None, help="diff against a saved --json run")
     ap.add_argument("--jobs", type=int, default=None)
     a = ap.parse_args()
+
+    # harmonics_at_anchors() reads this module-level tuple at call time, so overriding it here
+    # re-anchors both the table and the saved JSON (a --compare baseline must use the same set).
+    if a.anchors:
+        R.THD_ANCHORS = tuple(a.anchors)
 
     if not os.path.exists(a.bin):
         sys.exit(f"PedalRender not found at {a.bin} — cmake --build build --target PedalRender")
@@ -227,6 +268,7 @@ def main():
 
     print_harm(results)
     print_null(results)
+    print_imd(results)
     if a.compare:
         print_compare(results, json.load(open(a.compare)))
     if a.json:

@@ -137,11 +137,17 @@ modes, at all three anchors. The WDF circuit is doing its job.
 | **OD/Dist @ −18/−12** | H4 **−5 to −20**, H6 **−11 to −26**; H2 within ±3 |
 | **OD/Dist @ −6, 100–200 Hz** | H2 **+10 to +18 (too hot)** — pedal's H2 *falls* with level, plugin's *rises* |
 
+*(Row 1 fixed 2026-07-28 by P2's asymmetric rails; row 3 fixed the same day by P3's band split +
+low-band wash-out — H2's bias is now 0.0/+0.2 dB. Row 2, the H4/H6 shortfall, is still open and
+went ~3 dB further short as a P3 side effect — the mechanism can reach it (see P3.1), it just
+hasn't been retuned for it yet.)*
+
 Boost in the plugin is effectively a **symmetric** clipper; in the pedal it is strongly
 **asymmetric**. That is the "clean harmonics look off" observation, and it is a 26–46 dB gap, not a
 subtle one. *(Fixed 2026-07-28 by P2's asymmetric rails — Boost's whole even series now lands
-within ~2 dB. The OD/Distortion rows below are untouched and remain P3's.)* The pedal's H2 also has strong frequency structure that the plugin's flat injected H2
-does not reproduce at all (`fr_thd_audit.py h2`, −6 dB sweep):
+within ~2 dB; the OD/Distortion rows were then fixed by P3.)* The pedal's H2 also has strong frequency structure that the plugin's flat injected H2
+did not reproduce at all (`fr_thd_audit.py h2`, −6 dB sweep — the numbers below are the
+**pre-P3 baseline**; the plugin rows have since changed, the pedal rows have not):
 
 ```
                   100    200    400    800   1600   3200   6400
@@ -372,18 +378,189 @@ still PASS.
 > flipped that coin, which is how it was found. It now measures the same thing at 3 mVpk, where
 > neither channel clips and Red reads a real 1.11× of Yellow.
 
-### P3 — even-harmonic series shape in OD/Distortion  *(P2 is done; this is now unblocked)*
+### P3 — even-harmonic series shape in OD/Distortion — ✅ **H2 DONE 2026-07-28, H4/H6 → P3.1**
 
-P2's rails supply Boost's evens but deliberately do **not** reach OD (never engages) or Distortion
-(gated off — see above), so both modes still carry their empirical injections and their original
-errors: OD H2 **+17.5 dB** hot at 100 Hz, Distortion H2 **+16.1 dB** hot, and both H6 short at
-400 Hz (−18.1 / −17.7). Re-fit `asymOD`/`asymDist`/`asymLowOD`/`asymLowDist` so the low-band path
-**washes out at high clip depth** the way the mid/high `tanh` path already does — the level trend
-is currently backwards (pedal H2 falls −45.8 → −52.1 from the −12 to the −6 sweep; plugin rises
-−43.9 → −34.5).
+H2 is fixed and its level trend now runs the right way. H4/H6 regressed slightly as a side effect
+(see "Cost" below) and were initially written up here as structurally unfixable by this
+mechanism — **that was wrong**, corrected the same day; see P3.1.
 
-**Validate with the harmonic anchors + the time-domain null, NOT `linear_tf`** — it mis-reads
-clip-gated corrections (the odLowShelf lesson, dsp.md).
+The plan named the right symptom — "make the low-band path wash out at high clip depth the way the
+mid/high `tanh` path already does" — but attributed it to one path when **both** were wrong, for
+the same underlying reason: Stage 1's high-shelf makes `nodeG` small below a few hundred Hz.
+
+**Ablation first, and it changed the diagnosis.** Rendering with each path disabled in turn
+(`asymLowOD`/`asymLowDist` = 0, then `asymOD`/`asymDist` = 0) split the −6 dB sweep's +18.8 dB
+OD H2 error at 100 Hz cleanly in two — and the **mid/high path was the larger share**, still
++15.5 dB hot on its own:
+
+| −6 sweep, H2 plugin−pedal (dB) | 100 Hz | 200 Hz | 400 Hz |
+|---|---|---|---|
+| both paths (baseline) | +18.8 | +19.7 | +1.8 |
+| mid/high path alone | +15.5 | +14.1 | +3.0 |
+| low path alone | +8.0 | +4.3 | −25.1 |
+
+That is not what the plan assumed. The mid path's wash-out **depends on `tanh(asymDriveScale·nodeG)`
+squaring up**, and with `nodeG` shelved down it never leaves its linear region — so instead of
+collapsing, the injection grew as `nodeG²`. Its wash-out was working correctly at 400 Hz (+3.0) and
+failing everywhere below. The low path, meanwhile, was the *only* supplier of the 400 Hz even
+orders' opposite: it contributes essentially nothing there (−25.1).
+
+**Two fixes, one per path.**
+
+1. **`asymMidFc` = 400 Hz high-pass on the mid path's source.** The counterpart the low band's
+   150 Hz low-pass always implied but never had — the two paths now split the spectrum instead of
+   overlapping it. Fitted over {200, 300, 400, 800}; 400 won on H2 at every anchor and level.
+2. **`asymLowWash` = 25 / `asymLowThresh` = 0.15 V — the low band's own depth envelope.** The low
+   path cannot wash out on its own because its source `x` is **clamped**, so its low-passed square
+   stops growing while the pedal's H2 keeps falling. It also **cannot borrow `clipEnv`**: that
+   envelope's 0.37 V threshold is never reached at low frequency — precisely the shelving this
+   path exists to cover. Measured: a wash keyed to `clipEnv` moved H2 by 0.7 dB at the extreme,
+   i.e. nothing. So the low band carries `lowEnv`, keyed to a low-passed `nodeG` with a threshold
+   scaled to the drive that actually arrives down there.
+
+**The threshold is what makes the shape right rather than merely smaller.** Below it the wash is
+inert, so the clean and −18 sweeps (already matching within ~3 dB) are untouched and only the two
+hot sweeps come down. `asymLowOD`/`asymLowDist` are then raised 1.4× (−0.015 → −0.021, −0.042 →
+−0.059), which the wash pays for at the hot end and which recovers the quiet end.
+
+**Result, all 44 captures, driven sweeps** (`comprehensive_report.py`, cells with pedal > −70 dBc):
+
+| | H2 rms err | H2 mean bias | H3/H5/H7 | H4/H6 mean |
+|---|---|---|---|---|
+| Overdrive | 10.3 → **6.9** | +2.8 → **0.0** | 4.03 → 4.03 | −12.7 → −16.3 |
+| Distortion | 10.2 → **7.9** | +3.0 → **+0.2** | 2.73 → 2.73 | −11.3 → −14.6 |
+| Boost | unchanged | unchanged | unchanged | unchanged |
+
+At the −6 anchor specifically (100/200/400 Hz): OD +18.8/+19.7/+1.8 → **+0.7/+3.4/+0.1**, Dist
++16.5/+9.4/+7.3 → **−0.7/+1.3/+3.0**. The level trend now falls with drive as the pedal's does.
+
+**Cost, and it is real.** H4/H6 go ~3.3 dB further short (they were already 11–13 dB short). Part
+of the LF H2 overshoot had been standing in for them. This was accepted because H2 sits 10–20 dB
+above H4/H6 in the pedal and carried a systematic bias, which is now gone — but the regression is
+a real open item, not a closed one: see P3.1.
+
+**Guards.** Odd orders are **bit-identical** in both modes (4.03 / 2.73 unchanged) — the change is
+purely even-order. **Boost renders are byte-identical** (`asymBoost` = `asymLowBoost` = 0). The
+time-domain null is **unchanged on all 44 captures** to the report's precision: range −22.7…−6.8,
+median −16.35, mean −16.084, FR rms median 2.325, all identical before and after. All 14 per-stage
+gates, `ctest` (6/6), `ControlSweep` and `auval` PASS.
+
+> The null being *exactly* neutral is the expected outcome, not a null result: these harmonics sit
+> at −45 to −60 dBc, far below a −16 dB null's noise floor. The null's job here was to prove no
+> harm; only the harmonic anchors can resolve the change. (Validated with the anchors + the null,
+> **not** `linear_tf` — it mis-reads clip-gated corrections; the odLowShelf lesson, dsp.md.)
+
+### P3.1 — H4/H6 in OD/Distortion — ✅ **DONE 2026-07-28, route 1 (both paths' tanh knee)**
+
+P3's write-up originally claimed H4/H6 were structurally out of reach of the injection mechanism
+("a squared source generates H2; the higher even orders only come from a genuinely asymmetric
+clipper"). **That was false, and P3's own ablation data contradicted it:** the mid-path-alone row
+above shows H4 at **+6.9 / +6.8 dB** (100/200 Hz) before the fix — an *overshoot*, not an absence.
+`soft² = tanh(s·nodeG)²` is not squaring a sine: tanh already contains 3f/5f content, so its square
+contains f×3f → H4 and 3f×3f, f×5f → H6.
+
+Route 1 (re-fit the tanh knee) was the answer, but it took **two** knees, because the two injection
+paths were failing for different reasons — and only one of them was the one P3.1 predicted.
+
+**Step 0 — the prerequisite check, and it cleared.** Are the pedal's H4/H6 targets above the NAM
+capture chain's floor? Measured with `analysis/p31_harm_floor.py`, which reads the floor out of the
+*same* instrument that reads the harmonics: Farina's deconvolved IR puts the N-th harmonic at a
+known pre-delay, so gating at **fractional** orders (2.5, 3.5 … 6.5) — between the harmonic
+impulses, same window rule, same code path — gives a per-band floor in the same units.
+
+| | n cells | median margin | min margin | below 6 dB |
+|---|---|---|---|---|
+| H2 | 96 | +56.1 dB | +16.9 | 0 |
+| H4 | 96 | +47.9 dB | +12.0 | 0 |
+| H6 | 96 | +39.0 dB | **+6.9** | 0 |
+
+The floor sits at −80…−110 dBc against H6 targets of −38…−75 dBc. Even the quietest target clears
+it by ~7 dB. **Nothing here is floor-limited** — the whole H4/H6 gap was real plugin error.
+
+**Step 1 — the knee sets the ratio between orders.** For `tanh(a·sin)²`, the H4:H2 and H6:H2 ratios
+are a pure function of how hard the source is driven:
+
+| a | 0.5 | 1.0 | 1.7 | 2.5 | 4.0 | 8.0 |
+|---|---|---|---|---|---|---|
+| H4 − H2 (dB) | −28.0 | −17.0 | −13.0 | −6.0 | −2.7 | −0.7 |
+| H6 − H2 (dB) | −57.4 | −35.4 | −24.2 | −10.0 | −6.3 | −1.8 |
+
+The pedal wants H4 ≈ H2 − 9 dB and H6 ≈ H2 − 12 dB; the plugin was sitting at −21 and −37, i.e. far
+too soft a knee. `asymDriveScale` (1.70, carried over unswept from before P2) → **3.50**.
+
+**Step 2 — but that only moved the mid path's own band, and the reason is the second finding.**
+Sweeping `asymDriveScale` alone left the 100/200 Hz anchors *completely unmoved* on the −12 sweep.
+Those anchors belong to the low path, and **that path could not produce H4/H6 at all, by
+construction**: its source is a 150 Hz low-pass of the clip output, and the low-pass strips the
+clipped waveform's own harmonics, so `xLp` is very nearly a **sine** — and a squared sine is pure
+H2 with no H4 whatever. So the low path got the same treatment: `tanh(asymLowDriveScale·xLp/clamp)²`,
+normalised by the mode's clamp voltage (OD ±1.64 V, Distortion ±0.584 V) so **one** knee constant
+sets the same operating point in both modes and the per-mode coefficients keep carrying level only.
+Fitted to **4.90**.
+
+**Step 3 — fit the knee first, then re-zero the bias with the coefficients.** A coordinate descent
+over all eight constants (H2 weighted ×2) reached a good total score by letting H2 drift **+3.7 /
++5.1 dB hot** — i.e. it spent P3's headline result to buy H4/H6. Cutting all four gains afterwards
+(OD ×0.65, Dist ×0.55) put H2's bias back to zero and cost only ~1 dB of the higher orders. **A
+gain moves the whole even series together; the knee does not.** That asymmetry is the whole method
+here, and it is why the two must be fitted in that order.
+
+**Result, all 44 captures, driven sweeps, cells where the pedal reads above −70 dBc**
+(`fr_thd_audit.py evens --base <old>.json`):
+
+| mode | order | rms was → now | bias was → now |
+|---|---|---|---|
+| Overdrive | H2 | 6.9 → 7.4 | −0.0 → **−0.0** |
+| Overdrive | H4 | 13.0 → **6.4** | −11.1 → **−1.5** |
+| Overdrive | H6 | 23.4 → **11.4** | −22.0 → **−7.4** |
+| Distortion | H2 | 7.9 → 8.5 | +0.2 → **−0.0** |
+| Distortion | H4 | 13.4 → **6.3** | −11.2 → **−2.1** |
+| Distortion | H6 | 20.2 → **10.2** | −18.2 → **−5.8** |
+| Boost | all | unchanged | unchanged (byte-identical renders) |
+
+H2's rms is 0.5–0.6 dB worse and its **bias is still exactly zero** — the fit subset used during the
+search put the bias at 0.00 there but +0.7/+1.4 over all 44, so the four gains were trimmed a final
+~0.7/1.4 dB (OD ×0.92, Dist ×0.85) against the whole set. That trade is the right way round: the
+bias is the systematic error, the rms includes per-capture spread the injection cannot address.
+
+**Guards.** Odd orders **0.00 dB** change on every mode, sweep and anchor (the injection is
+even-order only). **Boost renders byte-identical.** The time-domain null is unchanged — worst cell
++0.06 dB, mean +0.01/0.00/0.00 across the three sweeps. **IMD: SMPTE 60 Hz + 7 kHz identical to
+0.00 dB** median *and* worst, which is the guard that matters — that twin-tone pair straddles
+exactly the low/mid injection split. (CCIF 19+20 kHz moves up to 1.8 dB on one capture, but the
+pedal's own CCIF readings there are not usable: several read products *above* the carriers, i.e.
+capture-chain aliasing, per §4's trust bands.) All 14 per-stage gates, `ctest` 6/6, `ControlSweep`
+and `auval` PASS.
+
+**IMD is now measured, not assumed.** P3.1's plan flagged intermodulation as the risk a single
+swept sine cannot see, and proposed a by-ear dyad check. The test signal already carries both
+twin-tone segments, so `p2_rail_asym_fit.py` now reports IMD against the captures as a fourth guard
+alongside harmonics / null / render hash — capture-referenced rather than subjective.
+
+**Remaining residual (accepted, not a defect to chase with this mechanism):** H6 still runs ~5–7 dB
+short on average. Pushing the knees further closes it but costs H2 rms faster than it gains H6 —
+the single-knee shape cannot match the pedal's H2:H4:H6 *and* its level trend simultaneously. The
+next real step there is route 3 (asymmetric diode pair, unequal `Is`, custom NR root), which would
+let the empirical injections retire in OD/Dist the way `asymBoost` retired in P2. Route 2
+(Chebyshev terms) is now *less* attractive than when it was written: per-order control would fix
+H6 in isolation, but the knee re-fit shows the orders are coupled through one physical knee in the
+real device too.
+
+### P3.2 — Boost's evens vanish on the quiet driven sweeps — ❌ **NEW, open (found by P3.1's metric)**
+
+The whole-set `evens` view exposes something the P2 write-up could not see, because P2 measured at
+the −6 dB sweep only: on Boost, **30 of 143 H2 cells have the plugin at ≈−160 dBc** — not "a bit
+short", but *no even-harmonic mechanism engaged at all* — while the pedal reads −18 to −59 dBc
+there. Those cells are the low-drive/quiet driven sweeps, and the cause is structural: after P2,
+Boost's evens come **entirely** from the asymmetric rails, so when the swing does not reach the
+knee the plugin is a mathematically exact symmetric clipper. The real pedal clearly has some
+even-order mechanism that survives below rail clipping.
+
+This is what inflates the Boost rows of the `evens` table (rms 47.7 dB, bias −22.5) — read the
+`silent` column, not the rms, for those rows. Not attempted here: the fix is a *different*
+mechanism (a small always-on asymmetry, or the retired `asymBoost` injection brought back for the
+below-knee region only), and it needs its own fit and null guard. P2's result at hot drive is not
+in question.
 
 ### P4 — the 1.6–5 kHz tilt  *(~1 dB; do it last)*
 
@@ -407,14 +584,17 @@ python3 analysis/fr_thd_audit.py raw                # Finding 1 — driveShelf r
 python3 analysis/fr_thd_audit.py bands --by tone    # Finding 2 — the knob-variance test
 python3 analysis/fr_thd_audit.py peaks              # Finding 3
 python3 analysis/fr_thd_audit.py harm               # Finding 4 — H2–H7 anchors
+python3 analysis/fr_thd_audit.py evens --base OLD.json  # P3/P3.1 — even-series rms+bias, before/after
 python3 analysis/fr_thd_audit.py alias              # Finding 4 — why 6/8 kHz THD is invalid
+python3 analysis/p31_harm_floor.py                  # P3.1 step 0 — capture-chain harmonic floor
 python3 analysis/fr_thd_audit.py h2                 # Finding 4 — H2 vs frequency (renders; needs PedalRender)
 
 python3 analysis/p2_rail_asym_fit.py --json run.json            # P2's fit/guard loop (~12 s)
 python3 analysis/p2_rail_asym_fit.py --compare run.json         # ...and the A/B against a saved run
 ```
 
-`p2_rail_asym_fit.py` is the fast loop P2 was fitted with: it renders a small capture subset and
+`p2_rail_asym_fit.py` is the fast loop P2 **and P3** were fitted with (~16 s for a 16-capture
+subset, against ~10 min for the full `comprehensive_report.py`): it renders a small capture subset and
 prints only the three things a clip-nonlinearity change is judged on — the H2–H7 anchors (same
 extraction as `fr_thd_audit.py harm`, so the numbers are comparable), the per-segment time-domain
 null, and a render SHA-256 for byte-identical guards. Use it to iterate; use

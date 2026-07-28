@@ -131,14 +131,16 @@ public:
     // therefore RETIRED to 0: with the asymmetric rails in, restoring it to its old 0.35 moves the
     // Boost harmonics by ≤0.3 dB and the null by 0.01 dB, i.e. it no longer does anything. Kept as
     // a named zero rather than deleted so the A/B stays one edit away.
-    static constexpr double asymOD = -0.43;    // OD even-harmonic mix coeff
-    static constexpr double asymDist = -0.14;  // Distortion mix coeff
+    static constexpr double asymOD = -0.267;    // OD even-harmonic mix coeff
+    static constexpr double asymDist = -0.0706;  // Distortion mix coeff
     static constexpr double asymBoost = 0.0;   // RETIRED — superseded by railAsymV (was 0.35)
     static constexpr double asymThresh = 0.37; // clipEnv ignores drive below this (clean stays clean)
-    static constexpr double asymDriveScale = 1.70; // sets where the H2 source saturates → the drive
+    static constexpr double asymDriveScale = 3.50; // sets where the H2 source saturates → the drive
                                                    // at which H2 peaks (it washes out above, matching
                                                    // the captures' non-monotonic H2-vs-gain: peak
-                                                   // ~noon, lower at max drive)
+                                                   // ~noon, lower at max drive). It ALSO sets the
+                                                   // H2:H4:H6 ratio in this path's band — re-fitted
+                                                   // 1.70 → 3.50 in P3.1 (see asymLowDriveScale)
     static constexpr double asymTauSeconds = 0.005;     // clip-depth envelope (gate) time constant
     static constexpr double asymMeanTauSeconds = 0.050; // DC-removal time constant — must be SLOW so
                                                         // it tracks only DC and preserves low-frequency
@@ -154,10 +156,92 @@ public:
     // "blocking distortion" the schematic can't (decision 2026-06-21).
     // Per-mode low-band coeff (the clip output x has a different amplitude per mode — OD ~1.6 V,
     // Dist ~0.58 V — so the same coeff gives different H2). Tuned to the captures' low-note H2.
-    static constexpr double asymLowOD = -0.015;   // OD low-band H2 coeff
-    static constexpr double asymLowDist = -0.042; // Distortion low-band H2 coeff
+    static constexpr double asymLowOD = -0.0178;   // OD low-band H2 coeff
+    static constexpr double asymLowDist = -0.0153; // Distortion low-band H2 coeff
     static constexpr double asymLowBoost = 0.0;   // Boost low-band (none — boost low notes ~clean)
     static constexpr double asymLowFc = 150.0;    // low-band low-pass corner (Hz) — taper to ~440 Hz
+
+    // ---- Band split + low-band wash-out (v1.4 P3, 2026-07-28) ---------------------------------
+    // Both injection paths above were running FULL-RANGE, and at low frequency that was the
+    // dominant even-harmonic error in OD/Distortion: on the −6 dB sweep H2 ran +18.8 dB (OD) /
+    // +16.5 dB (Dist) hot at 100 Hz, and its level TREND was backwards — the pedal's H2 FALLS as
+    // it is driven harder, the plugin's rose. One cause per path, both rooted in the same fact
+    // (Stage 1's high-shelf makes nodeG small below a few hundred Hz):
+    //
+    //  1. The mid/high path spilled into the low band and did not wash out there. Its wash-out
+    //     depends on tanh(asymDriveScale·nodeG) squaring up, but with nodeG small the tanh stays
+    //     in its LINEAR region, so the injection grows as nodeG² instead of collapsing. Measured
+    //     by ablation (low path off): the mid path alone was still +15.5 dB hot at 100 Hz. Fixed
+    //     by high-passing its source — the counterpart the low band's low-pass always implied but
+    //     never had, so the two paths now split the spectrum instead of overlapping it. 400 Hz
+    //     beat 200/300/800 on H2 at every anchor and level.
+    //
+    //  2. The low path cannot wash out on its own, because its source x is CLAMPED: the
+    //     low-passed square stops growing with drive, so the injection sits flat while the pedal's
+    //     H2 falls ~10 dB from the −18 to the −6 sweep. Nor can it borrow clipEnv, whose 0.37 V
+    //     threshold is never reached at low frequency — that IS the shelving this path exists to
+    //     cover, and a wash keyed to clipEnv moved H2 by 0.7 dB at the extreme, i.e. nothing. So
+    //     the low band gets its OWN depth envelope, lowEnv: a low-passed nodeG with a threshold
+    //     scaled to the drive that actually arrives down there, washing out as 1/(1+(wash·env)²).
+    //
+    // The THRESHOLD is what makes the shape right rather than merely smaller — below it the wash
+    // is inert, so the clean and −18 sweeps (already matching within ~3 dB) are untouched and only
+    // the two hot sweeps are pulled down. asymLowOD/asymLowDist are then raised 1.4x, which the
+    // wash pays for at the hot end and which recovers the quiet end.
+    // FITTED over asymMidFc ∈ {200,300,400,800} × asymLowThresh ∈ {0.03..0.25} × asymLowWash ∈
+    // {8..60} × coeff ∈ {1.0,1.4,1.8,2.5}x (analysis/p2_rail_asym_fit.py, OD/Dist G2–G10). Over
+    // all 44 captures, driven sweeps: H2 rms error OD 10.3 → 6.9 dB, Dist 10.2 → 7.9, and the
+    // systematic bias is GONE (OD +2.8 → 0.0, Dist +3.0 → +0.2). Odd orders are bit-identical, as
+    // is Boost (asymBoost = asymLowBoost = 0 — its evens come from the asymmetric rails), and the
+    // time-domain null is unchanged on every one of the 44 captures.
+    // H4/H6 were left 11–16 dB short here and written off as out of this mechanism's reach ("a
+    // squared source only makes H2"). That was WRONG and P3.1 (below) fixed them inside the same
+    // mechanism; the coefficients and thresholds on this line were re-fitted there.
+    static constexpr double asymMidFc = 400.0;     // mid/high-band high-pass corner (Hz)
+    static constexpr double asymLowThresh = 0.225; // low-band depth threshold (V of LP(nodeG))
+    static constexpr double asymLowWash = 7.4;     // low-band wash-out strength vs lowEnv
+
+    // ---- Even-series SHAPE: the H2:H4:H6 ratio (v1.4 P3.1, 2026-07-28) -----------------------
+    // P3 fixed H2's level and trend but left H4/H6 11–16 dB short, and wrote that off as outside
+    // this mechanism's reach ("a squared source only makes H2"). That was wrong. tanh(s·u)² is not
+    // squaring a sine: tanh already carries 3f/5f, so its square carries f×3f → H4 and 3f×3f,
+    // f×5f → H6. The whole even series is available; what sets the RATIO between the orders is the
+    // tanh KNEE, i.e. how far into saturation the source is driven:
+    //
+    //     a = s·(source amplitude)   0.5 → H4−H2 −28 dB   1.7 → −13 dB   2.5 → −6 dB   5 → −2 dB
+    //
+    // The pedal wants H4 ≈ H2 − 9 dB and H6 ≈ H2 − 12 dB, i.e. a ≈ 2–5. Each path needed a
+    // different fix, because they sat at very different points on that curve:
+    //
+    //  • MID/HIGH path: asymDriveScale had never been re-swept since before P2 (1.70 → 3.50). It
+    //    owns the band above asymMidFc and it responds strongly there (at the 400/800 Hz anchors
+    //    H6 went from 25/14 dB short to within ~6 dB on its own).
+    //  • LOW path: its source is a low-pass of the CLAMPED clip output, so at low frequency xLp is
+    //    very nearly a SINE (the low-pass strips the clipped waveform's own harmonics), and a
+    //    squared sine is pure H2 with no H4 at all — this path had NO higher even orders by
+    //    construction, which is why the LF anchors did not move when asymDriveScale was swept
+    //    alone. It now runs through the same tanh knee. The knee is normalised by the mode's clamp
+    //    voltage (OD ≈ ±1.64 V at the feedback diodes, Distortion ≈ ±0.584 V at the shunt) so ONE
+    //    scale constant sets the same operating point in both modes; the per-mode asymLow*
+    //    coefficients then only carry level, which is what they were always for.
+    //
+    // THE KNEE SETS THE RATIO, THE COEFFICIENT SETS THE LEVEL — and they must be fitted in that
+    // order. A coordinate descent that scored all three orders together (H2 weighted x2) drifted
+    // H2 +3.7/+5.1 dB hot while chasing H4/H6, i.e. it spent P3's headline result. Cutting all
+    // four gains afterwards put H2's bias back to zero and cost only ~0.6 dB of the higher orders,
+    // because a gain moves the whole even series together while the knee does not.
+    // Result over ALL 44 captures, driven sweeps, cells with pedal > −70 dBc (OD / Distortion,
+    // `fr_thd_audit.py evens`) — rms, and the bias that matters:
+    //     H2  bias  −0.0/+0.2 → −0.0/−0.0   (rms  6.9/ 7.9 →  7.4/ 8.5)
+    //     H4  bias −11.1/−11.2 → −1.5/−2.1  (rms 13.0/13.4 →  6.4/ 6.3)
+    //     H6  bias −22.0/−18.2 → −7.4/−5.8  (rms 23.4/20.2 → 11.4/10.2)
+    // Odd orders are untouched (the injection is even-order only), Boost is byte-identical, and
+    // both the time-domain null (worst cell +0.04 dB) and the SMPTE twin-tone IMD (0.00 dB, and it
+    // straddles this split) are unchanged — see FR_THD_AUDIT.md P3.1. H6 is still ~6 dB short:
+    // pushing the knees further closes it but costs H2 rms faster than it gains H6.
+    static constexpr double asymLowDriveScale = 4.90; // low-band tanh knee, in clamp units
+    static constexpr double asymClampOD = 1.64;       // SW-1 soft-clip clamp (V) — MA856 ×2 series
+    static constexpr double asymClampDist = 0.584;    // SW-2 hard-clip clamp (V) — 1S1588 pair
 
     // ---- Drive-dependent capture-match voicing correction (two shelves, 2026-06-29) ----------
     // A/B vs the NAM captures, measured as a best-fit-gain-aligned EQ error across 40 Hz–16 kHz
@@ -347,11 +431,16 @@ public:
         asymCoeff = std::exp (-1.0 / (asymTauSeconds * clipRate));      // fast: clip-depth gate
         meanCoeff = std::exp (-1.0 / (asymMeanTauSeconds * clipRate));  // slow: DC removal only
         lpLowCoeff = std::exp (-2.0 * M_PI * asymLowFc / clipRate);     // low-band low-pass corner
+        hpMidCoeff = std::exp (-2.0 * M_PI * asymMidFc / clipRate);     // mid-band high-pass corner
         railDcCoeff = std::exp (-1.0 / (railDcTauSeconds * clipRate));  // asymmetric-rail DC removal
         clipEnv = 0.0;
         meanSq = 0.0;
         xLp = 0.0;
         meanLow = 0.0;
+        gLp = 0.0;
+        lowEnv = 0.0;
+        gHpX1 = 0.0;
+        gHpY1 = 0.0;
         railXprev = 0.0; // F(0)=0 for any rails
         railFprev = 0.0;
         railMean = 0.0;
@@ -640,8 +729,17 @@ private:
         // clean 2f component at moderate drive but SQUARES UP at high drive (losing its own even
         // harmonics) — reproducing the captures' wash-out (H2 peaks ~noon, falls at max drive).
         // A clip-depth gate keeps clean playing symmetric; ⟨soft²⟩ is subtracted to stay DC-free.
+        //
+        // That wash-out only works where nodeG is BIG. Stage 1's high-shelf keeps it small below a
+        // few hundred Hz, so down there the tanh never squares up and this path grew as nodeG²
+        // instead — the low band's H2 overshoot (see asymMidFc). High-pass the source so the two
+        // paths split the spectrum; the low band's low-pass below is the other half of the split.
+        const double gHp = hpMidCoeff * (gHpY1 + nodeG - gHpX1);
+        gHpX1 = nodeG;
+        gHpY1 = gHp;
+
         const double gate = std::tanh (4.0 * clipEnv);
-        const double soft = std::tanh (asymDriveScale * nodeG);
+        const double soft = std::tanh (asymDriveScale * gHp);
         const double k = (sw1On ? asymOD : (sw2On ? asymDist : asymBoost)) * gate;
 
         meanSq = meanCoeff * meanSq + (1.0 - meanCoeff) * soft * soft;
@@ -650,10 +748,24 @@ private:
         // Low-frequency band: source the H2 from a low-pass of the clip output x (clamped only when
         // clipping → self-gating, clean stays clean). Catches low notes that clip but whose nodeG is
         // shelved down. At mid/high, xLp → small (x is above the corner) → no double injection.
+        // The low-pass strips the clipped waveform's own harmonics, so xLp is nearly a SINE and
+        // its square is pure H2 — no H4/H6 at all. Run it through the same tanh knee the mid path
+        // uses (normalised by the mode's clamp so one scale serves both modes) to give this band
+        // the pedal's even-series SHAPE as well as its level (see asymLowDriveScale).
         xLp = lpLowCoeff * xLp + (1.0 - lpLowCoeff) * x;
-        meanLow = meanCoeff * meanLow + (1.0 - meanCoeff) * xLp * xLp;
-        const double kLow = sw1On ? asymLowOD : (sw2On ? asymLowDist : asymLowBoost);
-        out += kLow * (xLp * xLp - meanLow);
+        const double clampRef = sw1On ? asymClampOD : (sw2On ? asymClampDist : railV);
+        const double softLow = std::tanh (asymLowDriveScale * xLp / clampRef);
+        meanLow = meanCoeff * meanLow + (1.0 - meanCoeff) * softLow * softLow;
+
+        // ...and wash it out with drive. This path cannot do that on its own (x is CLAMPED, so its
+        // low-passed square stops growing) and cannot use clipEnv (whose threshold is never met
+        // down here), so it carries its OWN depth envelope — see asymLowWash / asymLowThresh.
+        gLp = lpLowCoeff * gLp + (1.0 - lpLowCoeff) * nodeG;
+        lowEnv = meanCoeff * lowEnv + (1.0 - meanCoeff) * std::max (0.0, std::abs (gLp) - asymLowThresh);
+        const double w = asymLowWash * lowEnv;
+        const double wash = 1.0 / (1.0 + w * w);
+        const double kLow = (sw1On ? asymLowOD : (sw2On ? asymLowDist : asymLowBoost)) * wash;
+        out += kLow * (softLow * softLow - meanLow);
         return out;
     }
 
@@ -701,6 +813,10 @@ private:
     double xLp { 0.0 };       // low-passed clip output (low-band H2 source)
     double meanLow { 0.0 };   // slow ⟨xLp²⟩ (DC removal for the low band)
     double lpLowCoeff { 0.0 };// low-band low-pass coeff (set in prepareClip)
+    double gLp { 0.0 };       // low-passed nodeG (source for the low-band depth envelope)
+    double lowEnv { 0.0 };    // low-band clipping-depth envelope (drives the low-band wash-out)
+    double gHpX1 { 0.0 }, gHpY1 { 0.0 }; // mid-band high-pass state (on nodeG)
+    double hpMidCoeff { 1.0 };// mid-band high-pass coeff (set in prepareClip)
 };
 
 } // namespace monarch

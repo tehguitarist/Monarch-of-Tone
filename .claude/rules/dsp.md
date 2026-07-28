@@ -197,19 +197,74 @@ exactly. Applied per block to both channels/strips.
 > **Boost no longer uses this** (v1.4 P2): its evens come from the asymmetric rails above, and
 > `asymBoost` is retired to 0. The claim below that the circuit "structurally rejects" an internal
 > asymmetry was only ever true of the diode modes — in Boost the rails ARE the nonlinearity, so
-> there is nothing to reject. OD/Dist still inject, and re-fitting them is P3.
+> there is nothing to reject. OD/Dist still inject; they were re-fitted in v1.4 P3.
 
 The KOT's *diode* clippers are **symmetric** → no even harmonics from the topology, and they
 structurally reject the circuit-accurate bias-shift route (an offset shifts clamp levels → equal
 duty → DC, blocked downstream). So H2 is injected **empirically** at the clip output,
-clip-depth-gated (clean stays symmetric) and DC-free (slow running-mean removal):
+clip-depth-gated (clean stays symmetric) and DC-free (slow running-mean removal). The two paths
+**split the spectrum** — this is load-bearing, see below:
 - **Mid/high band:** sourced from a bounded `tanh(asymDriveScale·nodeG)` of the pre-clip drive
-  (squares up then washes out at high drive, matching the captures' non-monotonic H2-vs-gain).
+  (squares up then washes out at high drive, matching the captures' non-monotonic H2-vs-gain),
+  **high-passed at `asymMidFc` = 400 Hz**.
 - **Low band:** a second path sourced from a 150 Hz low-pass of the clip output (large only when
   clipping → self-gating), because Stage-1's high-shelf makes nodeG tiny <440 Hz so the mid/high
-  gate misses low notes that still clip.
+  gate misses low notes that still clip. Washed out by its **own** depth envelope (`lowEnv`,
+  `asymLowWash`/`asymLowThresh`).
 - Per-mode coefficients (`asymOD/Dist/Boost`, `asymLowOD/Dist/Boost`). Empirical model of the
   coupling-cap blocking-distortion device physics, not a circuit element.
+
+### Band split + low-band wash-out (v1.4 P3, 2026-07-28) — the two rules that came out of it
+
+Both paths were running full-range, and **the same fact broke both**: Stage 1's high-shelf makes
+`nodeG` small below a few hundred Hz. On the −6 dB sweep OD/Dist H2 ran +16 to +19 dB hot at
+100 Hz with its level trend backwards (the pedal's H2 *falls* as it is driven harder).
+
+1. **A `tanh` wash-out only washes out where its input is big.** The mid/high path's `tanh` never
+   left its linear region at low frequency, so instead of collapsing the injection grew as
+   `nodeG²`. Ablation put **the larger share of the error on this path** (+15.5 dB on its own),
+   not the low one. Fixed by high-passing its source — the counterpart the low band's low-pass
+   always implied. Corollary: the two paths must not overlap, or the one that cannot wash out in a
+   band will dominate it.
+2. **A clamped source cannot self-gate its own wash-out, and `clipEnv` cannot rescue it.** The low
+   path's source `x` is clamped, so its low-passed square stops growing while the pedal's H2 keeps
+   falling. `clipEnv`'s 0.37 V threshold is never reached at low frequency — that IS the shelving
+   this path exists to cover — so a wash keyed to it moves H2 by 0.7 dB, i.e. nothing. The low
+   band therefore carries its **own** envelope keyed to a low-passed `nodeG`, and the envelope's
+   **threshold** is what makes the shape right rather than merely smaller (below it the wash is
+   inert, so the quiet levels that already matched stay untouched).
+
+Result over all 44 captures, driven sweeps: H2 rms error OD 10.3 → 6.9 dB, Dist 10.2 → 7.9, and
+the systematic bias eliminated (+2.8 → 0.0, +3.0 → +0.2). Odd orders bit-identical, Boost renders
+byte-identical, the time-domain null unchanged on every capture.
+
+### Even-series SHAPE — the H2:H4:H6 ratio (v1.4 P3.1, 2026-07-28)
+
+P3 left H4/H6 11–16 dB short and called it out of the mechanism's reach ("a squared source only
+makes H2"). **Wrong** — `tanh(s·u)²` is not squaring a sine: tanh already carries 3f/5f, so its
+square carries H4/H6 too. What was wrong was the **knee**, and each path was wrong differently:
+
+- **`asymDriveScale` 1.70 → 3.50** (mid/high path). The knee alone sets the ratio between orders:
+  for `tanh(a·sin)²`, H4−H2 runs −28 dB at a = 0.5, −13 at 1.7, −6 at 2.5, −2.7 at 4. The pedal
+  wants H4 ≈ H2−9 and H6 ≈ H2−12. This constant had never been re-swept since before P2.
+- **`asymLowDriveScale` = 4.90** (low path, NEW). Its source is a 150 Hz low-pass of the clip
+  output, and the low-pass strips the clipped waveform's own harmonics — so `xLp` is nearly a
+  **sine**, and a squared sine is pure H2 with **no H4 at all**. That is why sweeping
+  `asymDriveScale` alone never moved the 100/200 Hz anchors. It now runs through the same tanh
+  knee, normalised by the mode's clamp (`asymClampOD` 1.64 V / `asymClampDist` 0.584 V) so one
+  constant sets the same operating point in both modes and the per-mode coefficients keep carrying
+  level only.
+
+**Fit the knee first, then re-zero the bias with the coefficients** — a joint search that scores all
+orders together will happily drift H2 several dB hot to buy H4/H6 (it did: +3.7/+5.1). A gain moves
+the whole even series together; the knee does not. All 44 captures, driven sweeps, OD/Dist: H4 bias
+−11.1/−11.2 → **−1.5/−2.1**, H6 −22.0/−18.2 → **−7.4/−5.8**, H2 bias still **0.0**. Odd orders
+0.00 dB changed, Boost byte-identical, null unchanged (worst +0.04 dB), SMPTE IMD unchanged.
+H6 remains ~6 dB short — accepted; closing it costs H2 rms faster than it gains H6, and the honest
+next step is the asymmetric diode pair (route 3 in `analysis/FR_THD_AUDIT.md` P3.1).
+
+**Still true: do not raise the H2 injection to chase H4/H6** — that re-creates the LF overshoot P3
+removed. Raise the knee, then re-level.
 
 ## OD clip-depth-gated low-mid restoration (`MonarchChannel::odLowShelf`)
 
