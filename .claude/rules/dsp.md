@@ -144,11 +144,46 @@ nonlinear wave digital filters".)
 
 ## Op-amp Rail Saturation
 
-After each op-amp stage's linear solve, soft-saturate the output toward ±railV (9V → ±3.3V; soft
-tanh knee starting at railV − 0.3, linear below it). Required so **Boost** clips like the hardware;
-**tone-safe** because OD/Dist clamp at the diodes (±1.64 / ±0.584 V) far below the rails, so it
-never engages there. Load-bearing in Boost (always) and Distortion (linear Stage2 ×−22 → ~13.9 V
-clamped before the hard-clip shunt).
+After each op-amp stage's linear solve, soft-saturate the output toward the rail (9V → 3.3V mean;
+soft tanh knee starting at rail − 0.3, linear below it). Required so **Boost** clips like the
+hardware. Load-bearing in Boost (always) and Distortion (linear Stage2 ×−22 → ~13.9 V clamped
+before the hard-clip shunt); in **OD** the feedback soft-clip holds pin7 at ±1.64 V, far below the
+knee, so it never engages — that is the tone-safety guarantee, and it is verified byte-for-byte.
+
+### Asymmetric ceilings (v1.4 P2, 2026-07-28) — where Boost's even harmonics come from
+The two ceilings are **not equal**: `railVPos = railV + railAsymV`, `railVNeg = railV − railAsymV`,
+`railAsymV = 0.60 V`, each with its own knee. This is the entire mechanism behind Boost's even
+series — H2/H4/H6 went from 21/29/39 dB short to within ~2 dB of the captures, with the internal
+H2:H4:H6 ratios falling out of the clipping duty cycle automatically. The old empirical
+`asymBoost` injection is retired to 0 (it now moves nothing). Three rules that came out of fitting it:
+
+- **The sign is invisible to the harmonics.** ±railAsymV give identical magnitude spectra. It was
+  fixed by the **null**: + improves the driven Boost nulls, − degrades them equally. Positive
+  ceiling is the higher one.
+- **An asymmetric clipper rectifies — strip the DC at source.** `railDcBlock` subtracts a 50 ms
+  running mean (3.2 Hz, an octave below the 20 Hz sweep floor, so no real harmonic is touched)
+  right after the rail-sat. Without it the DC step decays through C11/R14's **0.16 Hz** corner for
+  ~1 s and smears into whatever follows — measured 8.7% DC on a loud tone vs the pedal's 0.08%.
+  Keep it even if the asymmetry is ever removed: at `railAsymV = 0` it alone deepens the OD/Dist
+  nulls 0.5–0.7 dB.
+- **The asymmetry is load-gated, not global.** Distortion IS rail-clamped, so it inherits the
+  asymmetry — and ungated that makes its even series ~26 dB hot, while the real pedal's Distortion
+  is nearly symmetric (H2 −51.5 dBc vs Boost's −21.2). The physical difference is the load the clip
+  switch selects: Boost/OD leave pin7 driving the 25k tone stack (~0.13 mA), Distortion's diode
+  shunt makes it drive ~3.3 mA. Op-amp saturation voltages are quoted per load because both
+  ceilings collapse toward the supply under load. So `railAsymLoadedScale` (fitted to **0**) scales
+  the asymmetry when `sw2On`. `updateRails()` recomputes both ceilings and is called from BOTH
+  `setSupplyVoltage` (moves the mean) and `setClippingMode` (changes the load) — never set the
+  ceilings anywhere else.
+
+The ADAA antiderivative handles the asymmetry correctly: with unequal ceilings `railSaturate` is no
+longer odd, so `railAntideriv` is no longer even, but each side integrates from 0 with its own
+parameters (for v<0 the negated integrand and reversed limits cancel), so the same |v| expression
+holds per side, F stays continuous with F(0)=0, and the difference quotient stays exact across a
+sample pair that straddles zero.
+
+**Supply-voltage mod moves only the MEAN.** The asymmetry comes from fixed drops (the bias offset,
+the output stage's Voh/Vol difference) that do not scale with the supply.
 
 ## Supply Voltage (9 / 12 / 18 V mod)
 
@@ -157,10 +192,16 @@ to `railV = 3.3 + (v−9)·0.5` (knee = railV − 0.3): +0.5 V usable swing per 
 op-amp ceiling scales** — diode thresholds are junction-fixed. 9V = the validated ±3.3 V baseline
 exactly. Applied per block to both channels/strips.
 
-## Even-Harmonic Injection (`MonarchChannel::injectEvenHarmonic`)
+## Even-Harmonic Injection (`MonarchChannel::injectEvenHarmonic`) — OD/Distortion only
 
-The KOT clips **symmetrically** → no even harmonics from the topology, and it structurally rejects
-the circuit-accurate bias-shift route. So H2 is injected **empirically** at the clip output,
+> **Boost no longer uses this** (v1.4 P2): its evens come from the asymmetric rails above, and
+> `asymBoost` is retired to 0. The claim below that the circuit "structurally rejects" an internal
+> asymmetry was only ever true of the diode modes — in Boost the rails ARE the nonlinearity, so
+> there is nothing to reject. OD/Dist still inject, and re-fitting them is P3.
+
+The KOT's *diode* clippers are **symmetric** → no even harmonics from the topology, and they
+structurally reject the circuit-accurate bias-shift route (an offset shifts clamp levels → equal
+duty → DC, blocked downstream). So H2 is injected **empirically** at the clip output,
 clip-depth-gated (clean stays symmetric) and DC-free (slow running-mean removal):
 - **Mid/high band:** sourced from a bounded `tanh(asymDriveScale·nodeG)` of the pre-clip drive
   (squares up then washes out at high drive, matching the captures' non-monotonic H2-vs-gain).

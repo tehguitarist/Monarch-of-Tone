@@ -80,15 +80,24 @@ Single **9V** supply (verified both schematics + Theseus measured pins: V+ ≈9.
 ≈4.5V). **No charge pump / voltage doubler anywhere.** BIAS = VCC/2 = 4.5V = DSP signal ground
 (0V in the bipolar model). All supply/bias components excluded from the WDF model.
 
-**Op-amp output ceiling ≈ ±3.3V around bias** (JRC4580 saturates ~1.3–1.5V from each rail; soft,
-gradual knee — not a hard comparator). This matters because:
+**Op-amp output ceiling ≈ 3.3V around bias, and ASYMMETRIC** (JRC4580 saturates ~1.3–1.5V from
+each rail; soft, gradual knee — not a hard comparator). The two ceilings differ by `railAsymV` =
+0.60V (→ +3.9 / −2.7V), which is what produces Boost's even harmonics — see dsp.md "Asymmetric
+ceilings". Two circuit reasons: bias is not mid-supply (Theseus measured 4.5V against VCC/2 =
+4.575V) and a bipolar class-AB output stage's Voh and Vol headroom differ. The size is **fitted**
+to the captures, not read off a datasheet. It is scaled off in Distortion, where SW-2's diode shunt
+loads pin7 ~25× harder (op-amp saturation voltages are quoted per load). This matters because:
 - **Boost mode (SW-1/SW-2 both OFF) has no diodes — the rails are the ONLY nonlinearity.** Without
   modelling them, Boost would be an unphysical infinite-clean boost. So a soft rail saturation at
   ±3.3V is required (see dsp.md "Op-amp Rail Saturation"; ADAA'd).
-- **OD / Distortion** clamp at the diodes (≈±1.64V / ≈±0.584V), far below ±3.3V, so the rail
-  saturation **never engages → no tone change** in diode modes. That's the guarantee it's tone-safe.
-- The **supply-voltage mod** (9/12/18V) scales only this ceiling (+0.5V swing per +1V supply);
-  diode thresholds are junction-fixed and do not move (the real "18V mod" → more clean headroom).
+- **OD** clamps at the feedback diodes (≈±1.64V), far below the knee, so the rail saturation
+  **never engages → no tone change**. That's the guarantee it's tone-safe, and it is verified
+  byte-for-byte. **Distortion is NOT in that category** — a common misreading. Its diode shunt sits
+  *after* pin7, so Stage 2's linear ×−22 reaches ~13.9V and IS rail-clamped before the shunt; it
+  therefore inherits whatever the rails do, which is why the asymmetry has to be gated off there.
+- The **supply-voltage mod** (9/12/18V) scales only the ceiling's MEAN (+0.5V swing per +1V
+  supply); the asymmetry is fixed drops and does not scale, and diode thresholds are junction-fixed
+  and do not move (the real "18V mod" → more clean headroom).
 
 ---
 

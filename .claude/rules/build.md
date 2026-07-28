@@ -69,7 +69,7 @@ don't proceed on FAIL). All gates currently **PASS** (auval PASS). Each has a de
 | SW-2 hard | `SW2HardClip_Sine` | symmetric hard clamp ≈±0.55 V |
 | Tone | `ToneStage_FreqResponse` | treble-cut control, presence lifts hi-cut, DC divider exact |
 | Volume | `VolumePot_Taper` | audio taper 0/−10/−20/−30/−40 dB exact |
-| Full chain | `FullChain_DualChannel` | Boost>OD>Dist hierarchy, Boost rail-bounded, Red→Yellow series stable, no NaN |
+| Full chain | `FullChain_DualChannel` | Boost>OD>Dist hierarchy, Boost rail-bounded, Red→Yellow series stable, no NaN, Red hotter than Yellow **measured small-signal** (at a hot input both channels are pinned on the same rail, so peak output carries no gain information — see the test's comment) |
 | Oversampling | (auval + DSP regression) | clip-span only; voicing OS-independent |
 | Final sweep | `tools/ControlSweep` | full range × all clip combos × 4 OS factors + bypass + render: 0 non-finite, bounded, stable |
 | Trim Lock | `TrimLock` | editor-level: ±18 dB range on both trims, `trim_lock` defaults on, delta-linked mirroring (incl. no-snap-on-enable + rail clamp) matches the acceptance table |

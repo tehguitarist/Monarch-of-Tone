@@ -19,12 +19,14 @@ namespace monarch
  * Signal path (circuit.md Section 13):
  *   in → Stage1 (IC_A, non-inv; incl. input network; fixed Hi-Gain on Red) → V(NodeG)
  *      → Stage2 (IC_B, inv ×−22)   — SW-1 OFF: stock Stage2; SW-1 ON: SW1SoftClip (soft clip)
- *      → op-amp rail saturation (±3.3 V soft knee). Models the JRC4580 output ceiling. It is
- *        load-bearing wherever the op-amp swing would exceed the rails: ALWAYS in Boost (no
- *        diodes) and in Distortion (the linear Stage2 ×−22 path reaches ~13.9 V before the
- *        hard-clip shunt), and at extreme drive in OD/Both. Tone-safe at normal levels: the
- *        feedback soft-clip (OD/Both) holds pin7 well below ±3 V, so the knee passes it
- *        unchanged there; it only ever clamps a swing the real op-amp would also clamp.
+ *      → op-amp rail saturation (ASYMMETRIC soft knee, +3.9 / −2.7 V; see railAsymV) → DC block.
+ *        Models the JRC4580 output ceiling. It is load-bearing wherever the op-amp swing would
+ *        exceed the rails: ALWAYS in Boost (no diodes) and in Distortion (the linear Stage2 ×−22
+ *        path reaches ~13.9 V before the hard-clip shunt), and at extreme drive in OD/Both.
+ *        Tone-safe at normal levels: the feedback soft-clip (OD/Both) holds pin7 well below the
+ *        knee, so it passes unchanged there; it only ever clamps a swing the real op-amp would
+ *        also clamp. The ± ceilings differ, which is what generates Boost's even harmonics; the
+ *        asymmetry is scaled off in Distortion, where SW-2's shunt loads pin7 ~25x harder.
  *      → R12/node_HC            — SW-2 OFF: pass-through (R12 loading minor, circuit.md §10);
  *                                 SW-2 ON: SW2HardClip (R12 + 1S1588 shunt, hard clip)
  *      → ToneStage (passive TONE/Presence) → VolumePot (audio taper + C11/R14) → out
@@ -40,6 +42,75 @@ public:
     static constexpr double railV9V = 3.3;
     static constexpr double railKneeMargin = 0.3; // knee sits this far below the ceiling
 
+    // ---- Rail ASYMMETRY (v1.4 P2, 2026-07-28) ------------------------------------------------
+    // The op-amp's two output ceilings are NOT equal, for two independent circuit reasons:
+    //   • BIAS is not mid-supply. Theseus measured 4.5 V against VCC/2 = 4.575 V (V+ = 9.15 V), so
+    //     the positive headroom is ~0.075 V larger than the negative before the op-amp is even
+    //     considered.
+    //   • A bipolar class-AB output stage does not saturate symmetrically — the pull-up loses more
+    //     to V+ (Vbe of the driver + Vce_sat) than the pull-down loses to V−, so Voh headroom is
+    //     the smaller one. Net direction and size are FITTED below to the captures' Boost even
+    //     harmonics, because no datasheet number covers this part under this load.
+    // Modelled as a fixed VOLTAGE offset, not a fraction: both contributions are fixed drops from
+    // the supply rails, so the asymmetry does not scale when setSupplyVoltage() moves the ceiling
+    // (only the mean does). railVpos = railV + railAsymV, railVneg = railV − railAsymV.
+    //
+    // WHY THIS AND NOT MORE INJECTION (FR_THD_AUDIT.md P2): the pedal's Boost is strongly
+    // asymmetric where the plugin's was effectively symmetric — H2/H4/H6 were 25/34/45 dB short
+    // while H3/H5/H7 already matched within ~1 dB. Two unequal ceilings generate the WHOLE even
+    // series at once, with the internal H2:H4:H6 ratios set by the clipping duty cycle, which is
+    // exactly what one short empirical H2 term can never do.
+    // FITTED 2026-07-28 to the Boost even harmonics over railAsymV ∈ [0, 0.75] (11 renders of the
+    // capture subset, analysis/p2_rail_asym_fit.py). The SIGN was decided by the null, not by the
+    // magnitudes: ±0.30 give identical harmonic magnitudes and identical clean-sweep nulls, but
+    // +0.30 improves the driven Boost nulls while −0.30 degrades them by as much (+1.20 dB at the
+    // −12 sweep) — so the positive ceiling is the higher one. The MAGNITUDE sits on the null's
+    // plateau (0.45–0.60 all within 0.05 dB of the best driven-Boost null), at the top of it where
+    // the harmonic match is best: H2/H4 land within 1.6 dB of the pedal, from 25/34 dB short.
+    // Pushing on to 0.75 finishes H2/H4 exactly but gives back 0.1 dB of null, doubles the small
+    // OD/Dist cost, and implies the op-amp swings to 0.6 V of V+ — not credible for a JRC4580.
+    // At 0.60 the implied ceilings are 8.40 V and 1.80 V against V+ = 9.15 V, bias 4.5 V: 0.75 V
+    // of headroom lost at the top, 1.80 V at the bottom, which is ordinary bipolar behaviour.
+    static constexpr double railAsymV = 0.60; // ceiling offset (V); + = positive rail is the higher one
+
+    // ---- ...but only while the output stage is LIGHTLY LOADED -------------------------------
+    // A fixed asymmetry cannot satisfy both modes, and the captures say so unambiguously: the
+    // pedal's Boost is strongly asymmetric (H2 −21 dBc) while its Distortion is almost perfectly
+    // symmetric (H2 −51.5 dBc). Distortion's path IS rail-clamped (linear Stage 2 ×−22 reaches
+    // ~13.9 V), so it inherits whatever asymmetry the rails have — measured, railAsymV = 0.60
+    // lands Distortion's whole even series ~26 dB hot, and zeroing the empirical asymDist barely
+    // dents it (+25.6 → +24.6), i.e. the rails are the source.
+    //
+    // The physical discriminator is the LOAD on the op-amp output, which the clip switch sets:
+    //   • Boost / OD: node_HC sees only the 25k tone stack → ~0.13 mA out of pin 7.
+    //   • Distortion: SW-2's 1S1588 pair clamps node_HC to ±0.584 V, so pin 7 drives
+    //     (3.9 − 0.584)/R12 ≈ 3.3 mA — about 25x the current.
+    // An op-amp's output saturation voltages are specified per load for exactly this reason: both
+    // ceilings collapse toward the supply rails under load, and the asymmetry between them goes
+    // with it. So the asymmetry is scaled down when SW-2 is loading the output. This is a MODE key
+    // standing in for a load-dependent ceiling — the rail-sat is applied feed-forward at pin 7 and
+    // has no access to the actual output current — but the mode is what sets the load, so the key
+    // is exact even though the mechanism is modelled coarsely.
+    // Fitted to 0 — the loaded output stage keeps NO measurable asymmetry. At 1.0 (ungated) the
+    // Distortion even series runs ~26 dB hot; at 0 it returns to its pre-P2 state exactly, and
+    // Distortion's remaining even-harmonic error (+14.7 dB at H2, from the empirical asymDist) is
+    // untouched pre-existing work, i.e. P3's, not something P2 introduced. Note the injections
+    // must STAY: zeroing asymDist/asymLowDist as well overshoots the other way, leaving Distortion
+    // ~60 dB short of the pedal's H2, so they are still carrying that mode's evens.
+    static constexpr double railAsymLoadedScale = 0.0;
+
+    // An asymmetric clipper RECTIFIES: sustained clipping leaves a DC step at pin7. The circuit's
+    // only DC block is C11/R14 at the very output, and its corner is 0.16 Hz — a ~1 s tail. That
+    // is faithful to the pedal in isolation but wrong against every measurement of it: the NAM
+    // capture chain is AC-coupled far above 0.16 Hz, so the captures carry no such tail (measured
+    // on the loud 1 kHz calibration tone: plugin 8.7% DC vs pedal 0.08%, still 2.5% a second later
+    // in the clean sweep that follows it). It is also simply bad behaviour for a plugin output.
+    // So the rectified DC is removed at source with a slow one-pole mean, exactly as
+    // injectEvenHarmonic already does for its own even-order term. 50 ms = a 3.2 Hz corner: far
+    // below the 20 Hz sweep floor, so it removes the step WITHOUT touching any real harmonic (the
+    // lowest H2 in play is 40 Hz).
+    static constexpr double railDcTauSeconds = 0.050;
+
     // ---- Even-harmonic match (capture A/B, 2026-06-20) -------------------------------------
     // The KOT clips symmetrically BY DESIGN, so the ideal WDF model makes only odd harmonics.
     // The real-pedal captures show a consistent 2nd harmonic (H2) the model lacks — a junction-
@@ -53,12 +124,16 @@ public:
     //   • Boost: H2 ~level-independent once the rails clip → coeff saturates (tanh of clipEnv).
     // Injected as +k·(x² − ⟨x²⟩): x² is the even (H2) part; subtracting the running mean keeps it
     // DC-free. Sign of k sets the asymmetry direction (negative = OD/Dist, positive = Boost).
+    //
+    // NOTE (v1.4 P2): the reasoning above was right about OD/Dist and WRONG about Boost. In Boost
+    // there are no diodes to reject an internal offset — the rails ARE the nonlinearity — so the
+    // asymmetry can be, and now is, modelled at its physical source (railAsymV). asymBoost is
+    // therefore RETIRED to 0: with the asymmetric rails in, restoring it to its old 0.35 moves the
+    // Boost harmonics by ≤0.3 dB and the null by 0.01 dB, i.e. it no longer does anything. Kept as
+    // a named zero rather than deleted so the A/B stays one edit away.
     static constexpr double asymOD = -0.43;    // OD even-harmonic mix coeff
     static constexpr double asymDist = -0.14;  // Distortion mix coeff
-    static constexpr double asymBoost = 0.35;  // Boost mix coeff (modest; Boost's true trend is the
-                                               // opposite — H2 falls with level via the op-amp DC
-                                               // offset — which this topology resists, so we settle
-                                               // for a moderate, level-independent warmth)
+    static constexpr double asymBoost = 0.0;   // RETIRED — superseded by railAsymV (was 0.35)
     static constexpr double asymThresh = 0.37; // clipEnv ignores drive below this (clean stays clean)
     static constexpr double asymDriveScale = 1.70; // sets where the H2 source saturates → the drive
                                                    // at which H2 peaks (it washes out above, matching
@@ -272,12 +347,14 @@ public:
         asymCoeff = std::exp (-1.0 / (asymTauSeconds * clipRate));      // fast: clip-depth gate
         meanCoeff = std::exp (-1.0 / (asymMeanTauSeconds * clipRate));  // slow: DC removal only
         lpLowCoeff = std::exp (-2.0 * M_PI * asymLowFc / clipRate);     // low-band low-pass corner
+        railDcCoeff = std::exp (-1.0 / (railDcTauSeconds * clipRate));  // asymmetric-rail DC removal
         clipEnv = 0.0;
         meanSq = 0.0;
         xLp = 0.0;
         meanLow = 0.0;
         railXprev = 0.0; // F(0)=0 for any rails
         railFprev = 0.0;
+        railMean = 0.0;
     }
 
     void prepare (double sampleRate, int /*samplesPerBlock*/ = 0)
@@ -296,6 +373,7 @@ public:
         volume.reset();
         railXprev = 0.0;
         railFprev = 0.0;
+        railMean = 0.0;
         hsX1 = hsY1 = lsX1 = lsY1 = wsX1 = wsY1 = olX1 = olY1 = htX1 = htY1 = bcX1 = bcX2 = bcY1 = bcY2 = leX1 = leY1 = 0.0;
     }
 
@@ -319,8 +397,7 @@ public:
     void setSupplyVoltage (double vSupply) noexcept
     {
         railV = railV9V + (vSupply - 9.0) * 0.5; // +0.5 V swing per +1 V supply (rail moves ΔV/2)
-        railKnee = railV - railKneeMargin;
-        railFprev = railAntideriv (railXprev); // keep the ADAA antiderivative consistent with new rails
+        updateRails();
     }
 
     /** Clipping mode 0..2 (Boost/Overdrive/Distortion → SW-1/SW-2 on/off). 3-way per channel
@@ -330,6 +407,7 @@ public:
     {
         sw1On = (mode == 1);
         sw2On = (mode == 2);
+        updateRails(); // SW-2 loads the op-amp output → scales the rail asymmetry (see railAsymLoadedScale)
     }
 
     /** Diode-solve quality (Best eqn-39 vs Good eqn-18). NOT a user control: the FeatureProfile
@@ -355,6 +433,7 @@ public:
     {
         double pin7 = sw1On ? sw1.processSample (nodeG) : stage2.processSample (nodeG);
         pin7 = railSaturateADAA (pin7); // op-amp output ceiling, antialiased (Boost always; Dist via Stage2)
+        pin7 = railDcBlock (pin7);      // strip rectified DC before it smears (see railDcTauSeconds)
         const double hc = sw2On ? sw2.processSample (pin7) : pin7;
         return odLowShelf (injectEvenHarmonic (hc, nodeG));
     }
@@ -385,17 +464,21 @@ public:
     bool isHiGain() const { return hiGainStage1; }
 
 private:
-    // Soft op-amp rail saturation: linear below ±railKnee, gentle tanh knee approaching ±railV.
+    // Soft op-amp rail saturation: linear below the knee, gentle tanh knee approaching the ceiling.
     // Below the knee the signal passes UNCHANGED, so it never colours the feedback soft-clip's
     // sub-3 V output at normal drive. It clamps only swings the real op-amp would also clamp:
     // Boost (no diodes) and Distortion's linear-Stage2 ×−22 path always, OD/Both at extreme drive.
+    // The two sides use DIFFERENT ceilings (railAsymV) — that asymmetry is what makes the even
+    // harmonic series. Below min(kneePos, kneeNeg) the map is still exactly the identity, so the
+    // tone-safety argument for OD is unchanged.
     inline double railSaturate (double v) const noexcept
     {
         const double a = std::abs (v);
-        if (a <= railKnee)
+        const double knee = (v >= 0.0) ? railKneePos : railKneeNeg;
+        const double rail = (v >= 0.0) ? railVPos : railVNeg;
+        if (a <= knee)
             return v;
-        const double over = (a - railKnee) / (railV - railKnee);
-        const double clamped = railKnee + (railV - railKnee) * std::tanh (over);
+        const double clamped = knee + (rail - knee) * std::tanh ((a - knee) / (rail - knee));
         return std::copysign (clamped, v);
     }
 
@@ -406,17 +489,26 @@ private:
         return az + std::log1p (std::exp (-2.0 * az)) - 0.6931471805599453; // − ln 2
     }
 
-    // Antiderivative F of railSaturate (F' = railSaturate, F(0)=0). railSaturate is odd, so F is
-    // even → F(v) = F(|v|). Below the knee f(v)=v → F=v²/2; above, f(v)=knee + w·tanh(u/w) with
-    // u=|v|−knee, w=railV−knee → F = knee²/2 + knee·u + w²·logCosh(u/w). Used for first-order ADAA.
+    // Antiderivative F of railSaturate (F' = railSaturate, F(0)=0). Below the knee f(v)=v →
+    // F=v²/2; above, f = knee + w·tanh(u/w) with u=|v|−knee, w=rail−knee → F = knee²/2 + knee·u +
+    // w²·logCosh(u/w). Used for first-order ADAA.
+    //
+    // With unequal ceilings railSaturate is no longer odd, so F is no longer even — but it is
+    // still the true antiderivative on each side, because each side's ∫ from 0 uses that side's
+    // parameters: for v < 0, F(v) = ∫₀ᵛ f = +G_neg(|v|) (two sign flips — the negated integrand
+    // and the reversed limits). So the SAME |v| expression holds, just with the per-side knee and
+    // ceiling, and F stays continuous with F(0)=0. That keeps the ADAA difference quotient exact
+    // even for a sample pair that straddles zero.
     inline double railAntideriv (double v) const noexcept
     {
         const double a = std::abs (v);
-        if (a <= railKnee)
+        const double knee = (v >= 0.0) ? railKneePos : railKneeNeg;
+        const double rail = (v >= 0.0) ? railVPos : railVNeg;
+        if (a <= knee)
             return 0.5 * a * a;
-        const double w = railV - railKnee;
-        const double u = a - railKnee;
-        return 0.5 * railKnee * railKnee + railKnee * u + w * w * logCosh (u / w);
+        const double w = rail - knee;
+        const double u = a - knee;
+        return 0.5 * knee * knee + knee * u + w * w * logCosh (u / w);
     }
 
     // First-order antiderivative antialiasing of the rail saturation (DAFx-2020). Replaces the
@@ -436,6 +528,30 @@ private:
         railXprev = x;
         railFprev = Fx;
         return y;
+    }
+
+    // Recompute the two ceilings and their knees from the current mean rail and the current load.
+    // Called whenever either input changes: setSupplyVoltage (moves the mean) or setClippingMode
+    // (SW-2 loads the output → railAsymLoadedScale). Only the MEAN moves with the supply — the
+    // asymmetry comes from fixed drops (the bias offset and the output stage's Voh/Vol
+    // difference), which do not scale with it.
+    void updateRails() noexcept
+    {
+        const double asym = railAsymV * (sw2On ? railAsymLoadedScale : 1.0);
+        railVPos = railV + asym;
+        railVNeg = railV - asym;
+        railKneePos = railVPos - railKneeMargin;
+        railKneeNeg = railVNeg - railKneeMargin;
+        railFprev = railAntideriv (railXprev); // keep the ADAA antiderivative consistent with new rails
+    }
+
+    // Remove the DC an asymmetric rail-sat rectifies out of the signal (see railDcTauSeconds).
+    // A one-pole running mean subtracted from the sample — i.e. a 3.2 Hz high-pass, well below
+    // anything the circuit passes, so it takes the step and leaves the harmonics.
+    inline double railDcBlock (double v) noexcept
+    {
+        railMean = railDcCoeff * railMean + (1.0 - railDcCoeff) * v;
+        return v - railMean;
     }
 
     // First-order shelf coeffs (bilinear, prewarped — mirrors TiltShelf). `glo`/`ghi` are the
@@ -552,10 +668,17 @@ private:
     bool sw2On { false };
     bool hiGainStage1 { false };
 
-    double railV { railV9V };                       // op-amp ceiling (V); 9 V default = ±3.3 V
-    double railKnee { railV9V - railKneeMargin };   // soft-knee onset (V); set by setSupplyVoltage
+    double railV { railV9V };                       // MEAN op-amp ceiling (V); 9 V default = 3.3 V
+    // Per-side ceiling / knee — the two differ by ±railAsymV (see the constant). setSupplyVoltage
+    // moves the mean and leaves the offset alone.
+    double railVPos { railV9V + railAsymV };
+    double railVNeg { railV9V - railAsymV };
+    double railKneePos { railV9V + railAsymV - railKneeMargin };
+    double railKneeNeg { railV9V - railAsymV - railKneeMargin };
     double railXprev { 0.0 };                       // ADAA state: previous rail-sat input
     double railFprev { 0.0 };                       // ADAA state: F(railXprev) (F(0)=0)
+    double railMean { 0.0 };                        // running mean removed by railDcBlock
+    double railDcCoeff { 0.0 };                     // railDcBlock one-pole coeff (set in prepareClip)
 
     // Capture-match correction: treble high-shelf (hs*) + bass low-shelf (ls*) + bilinear-warp
     // top-octave high-shelf (ws*). shBaseRate is the effective (oversampled) rate.

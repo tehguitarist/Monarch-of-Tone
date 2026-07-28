@@ -71,12 +71,24 @@ int main()
         const double r = peakOut (red, m, freq, vpk, drive);
         if (std::isnan (y) || std::isnan (r))
             nanSeen = true;
-        // Red drives Stage 1 harder; with diodes its post-clip output can be similar, but its
-        // pre-tone drive level is higher → compare the Boost (unclamped) mode for the gain check.
-        if (m == 0 && ! (r > y))
-            redHotter = false;
         yPeak[(size_t) m] = y;
         std::printf ("  %-11s  %10.4f  %10.4f\n", modeName[m], y, r);
+    }
+
+    // Red (Hi-Gain) must drive harder than Yellow. This has to be measured on a SMALL signal: at
+    // the hot level above, Boost is pinned against the op-amp rails on BOTH channels (that is what
+    // the boostRails assertion below checks), so their peaks agree to ~0.02% and the comparison
+    // carries no gain information at all — it was decided by whichever channel's clipped peak
+    // rounded higher. Adding the asymmetric rails (v1.4 P2) flipped that coin, which is how the
+    // bad proxy was found. At 3 mVpk neither channel clips, so this reads the actual Stage-1 gain.
+    {
+        const double vSmall = 0.003;
+        const double ySmall = peakOut (yellow, 0, freq, vSmall, drive);
+        const double rSmall = peakOut (red, 0, freq, vSmall, drive);
+        redHotter = rSmall > ySmall;
+        std::printf ("\n  small-signal Boost gain check (vin=%.3f Vpk, unclipped): "
+                     "Yellow %.5f  Red %.5f  (Red/Yellow = %.2fx)\n",
+                     vSmall, ySmall, rSmall, rSmall / ySmall);
     }
 
     // Clipping ordering (Yellow): Boost (rails) highest; Distortion clamps lowest.

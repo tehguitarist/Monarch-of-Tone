@@ -139,7 +139,8 @@ modes, at all three anchors. The WDF circuit is doing its job.
 
 Boost in the plugin is effectively a **symmetric** clipper; in the pedal it is strongly
 **asymmetric**. That is the "clean harmonics look off" observation, and it is a 26–46 dB gap, not a
-subtle one. The pedal's H2 also has strong frequency structure that the plugin's flat injected H2
+subtle one. *(Fixed 2026-07-28 by P2's asymmetric rails — Boost's whole even series now lands
+within ~2 dB. The OD/Distortion rows below are untouched and remain P3's.)* The pedal's H2 also has strong frequency structure that the plugin's flat injected H2
 does not reproduce at all (`fr_thd_audit.py h2`, −6 dB sweep):
 
 ```
@@ -301,24 +302,82 @@ For any correction that could carry phase, **the null is the arbiter and FR rms 
 generator** — the same lesson the reverted 335 Hz presence bump taught, arrived at from the
 opposite direction.
 
-### P2 — asymmetric op-amp rail saturation  *(circuit-accurate, not empirical)*
+### P2 — asymmetric op-amp rail saturation — ✅ **DONE 2026-07-28**
 
-Real JRC4580 output saturation is asymmetric (Voh and Vol differ), and the Theseus measured pins
-put bias at 4.5 V against VCC/2 = 4.575 V. Give `railSaturateADAA` **separate positive/negative
-ceilings**.
+The plan was right and it worked: `railSaturate` / `railAntideriv` now take **separate
+positive/negative ceilings** (`railAsymV = 0.60 V` around the unchanged 3.3 V mean), and that one
+change generates the entire even series with the correct internal ratios. Boost, at the −6 dB
+sweep, 100/200/400 Hz — plugin − pedal, dB:
 
-This generates the whole even series H2+H4+H6 with the correct internal ratios automatically —
-which is exactly what the data demands, since H3/H5/H7 already match and only the evens are
-missing. Fit the asymmetry to the Boost H2/H3 ratio (pedal: H2 −21.2, H3 −15.9 at the −6 dB sweep,
-100 Hz). Then check whether the empirical `asymBoost` (0.35) can be **deleted entirely**.
+| | H2 | H4 | H6 | H3 | H5 | H7 |
+|---|---|---|---|---|---|---|
+| before | −21.3 / −19.3 / −10.2 | −28.8 / −32.3 / −20.8 | −39.3 / −45.7 / −33.4 | +2.1 | +8.6 | −0.6 |
+| after | **−1.0 / −2.0 / −2.2** | **+0.4 / −2.0 / −0.4** | **−4.8 / −0.8 / +0.2** | +0.8 | +2.9 | −1.1 |
 
-**Guard:** confirm OD/Distortion stay byte-identical. They clamp at the diodes (±1.64 / ±0.584 V)
-far below the rails — that is the existing tone-safety argument and it must survive.
+The odd orders were already right and stayed right. `asymBoost` is **retired to 0** as hoped —
+with the rails in, restoring its old 0.35 moves the harmonics ≤0.3 dB and the null 0.01 dB.
 
-### P3 — even-harmonic series shape in OD/Distortion  *(depends on P2's outcome)*
+Three things the plan did not anticipate, each of which changed the answer:
 
-If P2's asymmetric rails plus an asymmetric diode-clamp offset produce the H4/H6 series naturally,
-prefer that over more injection. Otherwise re-fit `asymLowOD` / `asymLowDist` so the low-band path
+**1. The sign is not determined by the harmonics — the null decided it.** ±0.30 V give *identical*
+harmonic magnitudes (magnitude spectra can't see which way a waveform leans) and identical
+clean-sweep nulls. They differ only on the driven nulls: +0.30 improves them, −0.30 degrades them
+by the same amount (+1.20 dB at the −12 sweep). So the **positive** ceiling is the higher one.
+
+**2. An asymmetric clipper rectifies, and the 0.16 Hz output cap smears the DC for a second.**
+This was the whole apparent cost of the change and it was an artifact. The first fits looked bad —
+the clean-sweep null lost up to 5.7 dB at mid drive — and the reason was *not* the clean sweep
+distorting (with symmetric rails the plugin's clean sweep is exactly linear, all harmonics at
+−150 dB). It is that `sweep_clean` directly follows the 1 s 1 kHz calibration tone, which in Boost
+is hard against the rails; the DC step that leaves decays through C11/R14's 0.16 Hz corner with a
+~1 s tail, straight into the sweep. Measured on that tone: **plugin 8.7 % DC vs pedal 0.08 %**,
+still 2.5 % a second later. The captures carry no such tail because the NAM capture chain is
+AC-coupled far above 0.16 Hz. Fix: strip the rectified DC at source with a 50 ms one-pole mean
+(3.2 Hz — an octave below the 20 Hz sweep floor, so it cannot touch a real harmonic), exactly as
+`injectEvenHarmonic` already does for its own even term. This is **independently worth having**:
+at `railAsymV = 0` it alone improves the OD/Distortion nulls by **0.5–0.7 dB**, so the clip path
+had been carrying DC all along.
+
+**3. The guard was wrong about Distortion, and a fixed asymmetry cannot satisfy both modes.**
+The plan assumed OD and Distortion both "clamp at the diodes far below the rails". That is true of
+**OD** — its output is byte-for-byte identical, exactly as argued. It is **false of Distortion**,
+whose linear Stage 2 ×−22 reaches ~13.9 V and *is* rail-clamped (dsp.md already said so). The
+captures then contradict any fixed offset outright: the pedal's Boost is strongly asymmetric
+(H2 −21.2 dBc) while its Distortion is nearly perfectly symmetric (H2 −51.5 dBc). Ungated,
+`railAsymV = 0.60` lands Distortion's whole even series ~26 dB hot, and zeroing `asymDist` barely
+dents it (+25.6 → +24.6) — the rails are the source, not the injection.
+
+- **The discriminator is the load, which the clip switch sets.** Boost/OD leave pin 7 driving only
+  the 25 k tone stack (~0.13 mA); Distortion's 1S1588 pair clamps node_HC to ±0.584 V so pin 7
+  drives ~3.3 mA — about 25×. Op-amp saturation voltages are specified per load precisely because
+  both ceilings collapse toward the supply rails under load, taking the asymmetry with them.
+- So the asymmetry is scaled by `railAsymLoadedScale` when SW-2 is loading the output, **fitted
+  to 0**. Distortion returns to its pre-P2 state exactly. Its remaining even-harmonic error
+  (+16.1 dB at H2) is pre-existing and belongs to P3.
+- The injections must **stay** in Distortion: zeroing `asymDist`/`asymLowDist` as well overshoots
+  the other way, leaving it ~60 dB short of the pedal's H2.
+
+**Whole-set effect** (`run_validation.py`, all 44 captures, same harness before and after): null
+range **−22.3…−6.4 → −22.7…−6.8**, both ends deeper; mean **−0.12 dB deeper**, better on 21,
+worse on 19, unchanged on 4; by mode Clean/Boost **−0.29 dB**, OD +0.01, Dist −0.06. The gains
+concentrate at high drive (G7 T5 Dist −1.3, G7 T5 Clean −1.1, G8 T5 Clean −1.0) and the small
+regressions at low drive (≤ +0.7, G2–G4). FR rms is unchanged (median 2.31 → 2.33). The median
+null reads 0.2 dB shallower (−16.6 → −16.4) purely because it sits among the low-drive captures;
+the mean is the honest summary and it improved. All per-stage gates, `ControlSweep` and `auval`
+still PASS.
+
+> **Gate fixed along the way.** `FullChain_DualChannel`'s "Red hotter than Yellow" check compared
+> peak output in **Boost at a hot input** — where both channels are pinned against the same rail,
+> so their peaks agreed to ~0.02 % and the check was decided by rounding. The asymmetric rails
+> flipped that coin, which is how it was found. It now measures the same thing at 3 mVpk, where
+> neither channel clips and Red reads a real 1.11× of Yellow.
+
+### P3 — even-harmonic series shape in OD/Distortion  *(P2 is done; this is now unblocked)*
+
+P2's rails supply Boost's evens but deliberately do **not** reach OD (never engages) or Distortion
+(gated off — see above), so both modes still carry their empirical injections and their original
+errors: OD H2 **+17.5 dB** hot at 100 Hz, Distortion H2 **+16.1 dB** hot, and both H6 short at
+400 Hz (−18.1 / −17.7). Re-fit `asymOD`/`asymDist`/`asymLowOD`/`asymLowDist` so the low-band path
 **washes out at high clip depth** the way the mid/high `tanh` path already does — the level trend
 is currently backwards (pedal H2 falls −45.8 → −52.1 from the −12 to the −6 sweep; plugin rises
 −43.9 → −34.5).
@@ -350,7 +409,18 @@ python3 analysis/fr_thd_audit.py peaks              # Finding 3
 python3 analysis/fr_thd_audit.py harm               # Finding 4 — H2–H7 anchors
 python3 analysis/fr_thd_audit.py alias              # Finding 4 — why 6/8 kHz THD is invalid
 python3 analysis/fr_thd_audit.py h2                 # Finding 4 — H2 vs frequency (renders; needs PedalRender)
+
+python3 analysis/p2_rail_asym_fit.py --json run.json            # P2's fit/guard loop (~12 s)
+python3 analysis/p2_rail_asym_fit.py --compare run.json         # ...and the A/B against a saved run
 ```
+
+`p2_rail_asym_fit.py` is the fast loop P2 was fitted with: it renders a small capture subset and
+prints only the three things a clip-nonlinearity change is judged on — the H2–H7 anchors (same
+extraction as `fr_thd_audit.py harm`, so the numbers are comparable), the per-segment time-domain
+null, and a render SHA-256 for byte-identical guards. Use it to iterate; use
+`comprehensive_report.py` + `run_validation.py` to conclude. **It reads the clean sweep's harmonics
+too** — that column is what showed the clean sweep was exactly linear and sent the investigation
+to the DC tail instead of the clipper.
 
 Captures are local-only/gitignored, so all of the above need `analysis/pedal_export2/` present.
 The `raw` view parses the shelf constants live out of `src/dsp/MonarchChannel.h`, so it stays

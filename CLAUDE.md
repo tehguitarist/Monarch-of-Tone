@@ -72,10 +72,19 @@ clang-format -i src/**/*.{cpp,h}
     correctable; see the rejected-experiments entry below. Consequence: the LF THD gap is now an
     accepted residual too, and **P2/P3 no longer need to wait for P1** — the harmonic baseline
     won't move, so fit them against the current `comprehensive_data.json` directly.
-  - **Remaining:** **asymmetric op-amp rail saturation** to supply Boost's missing even harmonics
-    (H2/H4/H6 are 26–46 dB short while H3/H5/H7 match within ~1 dB) (P2), the even-harmonic series
-    shape in OD/Dist (P3), and a **+1 dB 1.6–5 kHz tilt** (P4). Audit tool:
-    `analysis/fr_thd_audit.py`.
+  - **P2 asymmetric op-amp rail saturation — ✅ done (2026-07-28).** `railSaturate` now has
+    **separate ± ceilings** (`railAsymV = 0.60 V` around the unchanged 3.3 V mean), which generates
+    Boost's whole missing even series with the right internal ratios: H2/H4/H6 went from **−21/−29/
+    −39 dB short to within ~2 dB**, odd orders unchanged. The empirical `asymBoost` is retired to 0
+    (redundant now). Three things the plan got wrong, all recorded in the audit: the **sign** is
+    invisible to harmonic magnitudes and was decided by the null; an asymmetric clipper **rectifies**,
+    and the 0.16 Hz output cap smeared a 1 s DC tail into the next segment (now stripped at source —
+    worth **0.5–0.7 dB of OD/Dist null on its own**); and **Distortion is rail-clamped**, so a fixed
+    asymmetry made it 26 dB too even — it is scaled off under SW-2's ~25× heavier load. Whole set:
+    null mean **0.12 dB deeper**, Boost **0.29 dB**, OD/Dist neutral, FR unchanged.
+  - **Remaining:** the even-harmonic series shape in OD/Dist (P3 — both still carry their empirical
+    injections and are ~16–18 dB hot at H2), and a **+1 dB 1.6–5 kHz tilt** (P4). Audit tools:
+    `analysis/fr_thd_audit.py`, `analysis/p2_rail_asym_fit.py` (fast clip-nonlinearity fit loop).
 
 ---
 
@@ -89,9 +98,12 @@ preset browser. Supply-voltage mod (9/12/18V) and rail-saturation ADAA are in. L
 engineering: CI/CD (`.github/workflows/`), cross-platform VST3, and per-platform installers
 (`installer/`) — see README.
 
-**Calibration result (Step 11, real-pedal A/B; refreshed v1.3 2026-07-05):** the plugin nulls against
-44 NAM captures (drive G2–G10, tone T2–T8, Clean/OD/Dist) at **−6.4 to −22.3 dB, median −16.6**, down
-to ~−22 dB through mid gain (G4–G6). Best per-mode null at the labelled mid-gain settings (G5 T5):
+**Calibration result (Step 11, real-pedal A/B; refreshed v1.4 P2 2026-07-28):** the plugin nulls against
+44 NAM captures (drive G2–G10, tone T2–T8, Clean/OD/Dist) at **−6.8 to −22.7 dB, median −16.4**, down
+to ~−22 dB through mid gain (G4–G6). (Was −6.4 to −22.3, median −16.6 at v1.3. P2 deepened both ends
+and improved the **mean** by 0.12 dB — Boost 0.29 — with the gains at high drive and small ≤0.7 dB
+regressions at G2–G4; the median reads 0.2 dB shallower only because it sits among those low-drive
+captures.) Best per-mode null at the labelled mid-gain settings (G5 T5):
 Clean/Boost −21.2, OD −21.4, Dist −20.6 dB (OD/Dist up ~3 dB from the v1.2 baseline after the
 odLowShelf + bass-tilt work). Excellent to mid gain; shallower only at very high drive (G8–G10) — an
 accepted device-physics / capture-aliasing residual, not a topology error (every Stage-1 value +
@@ -259,7 +271,7 @@ linear WDF now runs at the OS rate too (relevant to the v1.1 perf pass).
 | Channel routing | **Red → Yellow** in series (real pedal flow); independently bypassable |
 | Default mode | Overdrive (SW-1 ON, SW-2 OFF) per channel; Presence fully CCW |
 | Gain peak | +12.85 dB @ ~4.1 kHz (Yellow, drive 0.5). Accurate at base rate — linear stages need no oversampling/prewarp |
-| Op-amp rails | ±3.3 V soft knee @ 9V (Boost-only clip; tone-safe — diodes clip first in OD/Dist). Scaled by supply-voltage mod |
+| Op-amp rails | **Asymmetric**: +3.9 / −2.7 V soft knee @ 9V (3.3 V mean ± `railAsymV` 0.60). Generates Boost's even harmonics. Tone-safe in OD (diodes clip first, byte-identical); scaled OFF in Distortion, whose rail-clamped path drives ~25× the load. Rectified DC stripped at source (50 ms). Mean scaled by supply-voltage mod |
 | Calibration | `circuitVoltsPerFS = 0.87` (real circuit volts internally, not normalized) |
 | Oversampling | live 1/2/4/8x default **2x**; render default **4x** (auto via `isNonRealtime()`); wraps the **whole channel** (linear stages too, to kill near-Nyquist bilinear warp); bypassed channels skip it |
 
