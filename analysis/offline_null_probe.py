@@ -80,17 +80,38 @@ def shelf_H(ba, f):
 
 
 def load_pairs(render_dir, orig):
-    items = []
+    """Pair every render in `render_dir` with its capture.
+
+    TWO naming conventions land in the same directory and they are NOT the same vintage:
+    `comprehensive_report.py --keep-renders` writes `<label> tommy_test_signal_48k_plugin.wav`,
+    while `run_validation.py --render-dir` writes `<label>.wav` with underscores. Matching only
+    one silently reads whichever set is older — this probe scored a whole candidate family against
+    a stale baseline exactly once (2026-07-29) before that was caught. Both forms are accepted,
+    the newest file wins per label, and the vintage spread is printed so a stale mix is visible.
+    """
+    found = {}
     for fn in sorted(os.listdir(render_dir)):
         if not fn.endswith(".wav"):
             continue
-        lab = os.path.splitext(fn)[0]
+        lab = os.path.splitext(fn)[0].replace(" tommy_test_signal_48k_plugin", "").replace(" ", "_")
         cp = os.path.join(CAP_DIR, f"{lab.replace('_', ' ')} tommy_test_signal_48k.wav")
         if not os.path.exists(cp):
             sys.stderr.write(f"  ! no capture for {lab}\n")
             continue
-        cap, _ = A.align(A.load(cp), orig)
-        ren, _ = A.align(A.load(os.path.join(render_dir, fn)), orig)
+        path = os.path.join(render_dir, fn)
+        if lab not in found or os.path.getmtime(path) > os.path.getmtime(found[lab]):
+            found[lab] = path
+    if not found:
+        return []
+    mt = [os.path.getmtime(p) for p in found.values()]
+    if max(mt) - min(mt) > 120:
+        sys.stderr.write(f"  ! renders in {render_dir} span {(max(mt) - min(mt)) / 60:.0f} min — "
+                         f"MIXED VINTAGE, re-run comprehensive_report.py --keep-renders\n")
+    items = []
+    for lab, path in sorted(found.items()):
+        cap, _ = A.align(A.load(os.path.join(
+            CAP_DIR, f"{lab.replace('_', ' ')} tommy_test_signal_48k.wav")), orig)
+        ren, _ = A.align(A.load(path), orig)
         items.append(dict(label=lab, drive=float(lab.split("_")[0][1:]) / 10.0,
                           mode=lab.split("_")[2], cap=cap, ren=ren))
     return items
@@ -141,7 +162,7 @@ def view_transfer(items, orig, out=sys.stdout):
                         for z in v), file=out)
 
 
-def view_shelf(items, orig, band, out=sys.stdout):
+def view_shelf(items, orig, band, pivot=None, out=sys.stdout):
     f, Ds = measure_D(items, orig)
 
     def resid(bd, S=None):
@@ -154,8 +175,8 @@ def view_shelf(items, orig, band, out=sys.stdout):
           f"n={len(items)} ===", file=out)
     print(f"  baseline (no shelf): {resid(band):.4f}", file=out)
     cands = []
-    for fc in np.arange(30, 301, 5.0):
-        for db in np.arange(0, 4.01, 0.05):
+    for fc in ([pivot] if pivot else np.arange(30, 301, 5.0)):
+        for db in np.arange(-3.0, 4.01, 0.05):   # negative allowed: above ~G7 the plugin is the BASSY one
             cands.append((resid(band, shelf_H(low_shelf(fc, db), f)), fc, db))
     cands.sort()
     r, fc, db = cands[0]
@@ -165,6 +186,23 @@ def view_shelf(items, orig, band, out=sys.stdout):
     for chk in [(20, 32), (32, 64), (64, 128), (128, 256)]:
         print(f"    sub-band {chk[0]:>3}-{chk[1]:<3} Hz: {resid(chk):.4f} -> {resid(chk, S):.4f}",
               file=out)
+    # ...and the same fit at a FIXED pivot, per drive. This is the view that decides whether the
+    # LF correction is a fixed filter at all: P7's rule is that overlapping drive-keyed
+    # corrections must be read as one set, and bassBoost* already occupies this band.
+    print(f"\n  best dB per DRIVE at the group-optimal pivot ({fc:.0f} Hz):", file=out)
+    for d in sorted({it["drive"] for it in items}):
+        sel = [i for i, it in enumerate(items) if abs(it["drive"] - d) < 1e-9]
+
+        def rd(S=None, sel=sel):
+            m = (f >= band[0]) & (f <= band[1])
+            w = 1.0 / f[m]
+            DD = Ds[sel][:, m] / (S[m] if S is not None else 1.0)
+            return float(np.sqrt(np.sum(np.abs(DD - 1) ** 2 * w, axis=1).mean() / np.sum(w)))
+
+        best = min(((rd(shelf_H(low_shelf(fc, x), f)), x)
+                    for x in np.arange(-4.0, 4.01, 0.05)))
+        print(f"    G{d * 10:<4.0f} n={len(sel):<2d}  {best[1]:>+6.2f} dB   "
+              f"resid {rd():.4f} -> {best[0]:.4f}", file=out)
 
 
 def view_null(items, cands, out=sys.stdout):
@@ -186,7 +224,8 @@ def view_null(items, cands, out=sys.stdout):
     for name, ba in cands:
         dl = {}
         for it in items:
-            y = lfilter(ba[0], ba[1], it["ren"])
+            bai = ba(it) if callable(ba) else ba          # drive-keyed candidates get the item
+            y = lfilter(bai[0], bai[1], it["ren"])
             for s in SWEEPS:
                 r, _ = N.best_null(it["cap"][sl[s]], y[sl[s]])
                 dl[(it["label"], s)] = N.null_db(it["cap"][sl[s]], r) - base[(it["label"], s)]
@@ -210,15 +249,67 @@ def parse_shelf(spec, kind):
     return (f"{kind} {fc:.0f}Hz {db:+.2f}dB", ba)
 
 
+# ---------------------------------------------------------------- drive-keyed LF candidates (P8)
+def shipped_bass_boost_db(drive01, K):
+    """MonarchChannel's live bassBoost* law — a HUMP in drive, peaking at bassPeakDrive (P8)."""
+    fall = (K["bassBoostSlopeDb"] * max(0.0, K["bassPeakDrive"] - drive01)
+            + K["bassBoostFallDb"] * max(0.0, drive01 - K["bassPeakDrive"]))
+    return max(0.0, K["bassBoostMaxDb"] - fall)
+
+
+def hump_db(drive01, maxdb, peak, slo_lo, slo_hi):
+    """Triangular hump in DRIVE: rises to `maxdb` at `peak`, falls away either side, floored at 0."""
+    fall = slo_lo * max(0.0, peak - drive01) + slo_hi * max(0.0, drive01 - peak)
+    return max(0.0, maxdb - fall)
+
+
+def inv(ba):
+    return (ba[1], ba[0])
+
+
+def cascade(x, y):
+    return (np.convolve(x[0], y[0]), np.convolve(x[1], y[1]))
+
+
+def parse_bass_law(spec, K):
+    """`PIVOT:MAX:PEAKDRIVE:SLOPELO:SLOPEHI` — a REPLACEMENT for the shipped bassBoost low-shelf.
+
+    Scored as the delta the audio path would actually see: the candidate shelf cascaded with the
+    INVERSE of the shipped one, per capture, keyed on that capture's DRIVE. So a candidate that
+    reproduces the shipped law scores exactly 0.000 and is the harness's own sanity check.
+    """
+    pivot, mx, peak, slo, shi = (float(v) for v in spec.split(":"))
+    shipped_pivot = K["bassPivotHz"]
+
+    def ba(it):
+        d = it["drive"]
+        return cascade(low_shelf(pivot, hump_db(d, mx, peak, slo, shi)),
+                       inv(low_shelf(shipped_pivot, shipped_bass_boost_db(d, K))))
+
+    return (f"bass {pivot:.0f} {mx:.1f}@{peak:.2f} {slo:.1f}/{shi:.1f}", ba)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("view", choices=["transfer", "shelf", "null"])
     ap.add_argument("--renders", default=DEFAULT_RENDERS)
     ap.add_argument("--band", nargs=2, type=float, default=[30.0, 120.0])
+    ap.add_argument("--pivot", type=float, default=None,
+                    help="shelf: pin the pivot instead of searching it (for a like-for-like "
+                         "per-drive table across capture subsets)")
     ap.add_argument("--low-shelf", action="append", default=[], metavar="FC:DB")
     ap.add_argument("--high-shelf", action="append", default=[], metavar="FC:DB")
+    ap.add_argument("--bass-law", action="append", default=[],
+                    metavar="PIVOT:MAX:PEAKDRIVE:SLOPELO:SLOPEHI",
+                    help="null: score a REPLACEMENT bassBoost law (a hump in drive) as the delta "
+                         "against the shipped ramp. Repeating the shipped law scores 0.000.")
     ap.add_argument("--limit", type=int, default=0, help="only the first N captures (transfer/shelf)")
+    ap.add_argument("--drive", nargs=2, type=float, default=None, metavar=("LO", "HI"),
+                    help="restrict to captures with LO <= drive <= HI, as knob 0-1. The clean "
+                         "sweep carries 4.6-15%% THD above ~G6 (P7), so an FR/transfer reading "
+                         "there is a distortion difference wearing an EQ costume: fit on 0.2 0.6.")
+    ap.add_argument("--mode", default=None, help="restrict to one mode (Clean/OD/Dist)")
     a = ap.parse_args()
 
     if not os.path.isdir(a.renders):
@@ -226,18 +317,26 @@ def main():
                  f"  python3 analysis/comprehensive_report.py --keep-renders {a.renders}")
     orig = A.load(A.ORIG)
     items = load_pairs(a.renders, orig)
+    if a.drive:
+        items = [i for i in items if a.drive[0] - 1e-9 <= i["drive"] <= a.drive[1] + 1e-9]
+    if a.mode:
+        items = [i for i in items if i["mode"] == a.mode]
     if a.limit:
         items = items[:a.limit]
+    if not items:
+        sys.exit("no captures left after filtering")
 
     if a.view == "transfer":
         view_transfer(items, orig)
     elif a.view == "shelf":
-        view_shelf(items, orig, a.band)
+        view_shelf(items, orig, a.band, a.pivot)
     else:
+        K = F.channel_consts()
         cands = ([parse_shelf(s, "low") for s in a.low_shelf]
-                 + [parse_shelf(s, "high") for s in a.high_shelf])
+                 + [parse_shelf(s, "high") for s in a.high_shelf]
+                 + [parse_bass_law(s, K) for s in a.bass_law])
         if not cands:
-            sys.exit("null: pass at least one --low-shelf FC:DB or --high-shelf FC:DB")
+            sys.exit("null: pass at least one --low-shelf / --high-shelf / --bass-law")
         view_null(items, cands)
 
 

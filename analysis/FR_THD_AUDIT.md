@@ -218,14 +218,21 @@ against the current `comprehensive_data.json`.**
   chart on the dashboard, and `fr_thd_audit.py h2` now reads the JSON instead of re-rendering (so
   it joins `all`).
 
-### P1 — sub-64 Hz LF extension  — ⚠️ **SUPERSEDED by P8 (2026-07-28, same day): partially correctable**
+### P1 — sub-64 Hz LF extension  — ⚠️ **SUPERSEDED by P8 (CLOSED 2026-07-29): partially correctable**
 
 > **Read P8 before acting on anything below.** P1's measurements are all correct and its two
 > shelves really were rejected by the null. Its *conclusion* — "un-fixable by any filter a real-time
 > plugin can use" — over-generalised from those two points. The phase lead that blocks a
-> minimum-phase fix exists **only below ~32 Hz**; from 40–80 Hz the pedal *lags*, and a shallower,
-> higher shelf (100 Hz, +1.0 dB — about half P1's depth) **deepens the null by 0.44 dB mean**.
-> The "do not re-attempt with any IIR EQ" instruction below is withdrawn.
+> minimum-phase fix exists **only below ~32 Hz**; from 40–80 Hz the pedal *lags*, which is what a
+> minimum-phase low-shelf supplies. The "do not re-attempt with any IIR EQ" instruction below is
+> withdrawn.
+>
+> **P8 shipped the fix, and it is not a new shelf.** P1 framed this as "add an LF-extension filter",
+> and so did P8's own plan — but the band already had a drive-keyed instrument in it (`bassBoost*`),
+> and the correction is drive-keyed too, so the two had to be fit as one set (P7's rule). P8 refit
+> `bassBoost*` from a monotone ramp into a hump in drive and added nothing: **median null −21.5 →
+> −22.6 dB, 38 of 44 captures deeper.** `lfExt*` stays retired and is now redundant, not merely
+> rejected.
 
 The deficit in Finding 1 is real and reproducible. Full record below; the code sits disabled in
 `MonarchChannel::lfExt*` (`lfExtEnabled = false`) for A/B.
@@ -284,8 +291,10 @@ and unusable live. Ruled out on cost, not on principle.
 
 > **Corrected by P8:** "minimum-phase hurts" is true of *these two shelves* — both fit to zero the
 > FR magnitude, and both about twice the complex-optimal depth. A minimum-phase shelf at roughly
-> half the depth and an octave higher (100 Hz, +1.0 dB) **helps**: −0.44 dB mean null over all 44
-> captures × 4 levels. The depth axis was never searched with a phase-aware metric.
+> half the depth and an octave higher helps. The depth axis was never searched with a phase-aware
+> metric — and neither was the DRIVE axis, which is where the real answer turned out to be: the
+> correction is a hump in drive, and P8 delivered it by refitting `bassBoost*` rather than adding a
+> shelf. See P8.
 
 **Step 5 — "what about changing a component value instead?" (asked and answered, don't re-ask).**
 No: it is strictly *worse*, for two reasons.
@@ -1078,7 +1087,18 @@ to **75 Hz**, i.e. straight into P8's band, on a fit window where the instrument
 (its real job is G7+, which is exactly where the clean sweep stops being measurable). That is the
 entanglement P8 already warned about, arriving from the other direction. Left untouched.
 
-### P8 — reopen P1: the sub-64 Hz LF deficit is PARTIALLY correctable after all
+### P8 — the LF band is ONE drive-keyed instrument, and it was fit to one end of the axis — ✅ **DONE (2026-07-29)**
+
+> **Result up front (all 44 captures, `run_validation.py`):** best-segment null **−25.1…−6.6,
+> median −21.5 → −25.6…−8.7, median −22.6 dB**. Mean and median both **1.05 dB deeper**; **38 of 44
+> deeper** (best −3.4 dB, G8 T5 Clean), **6 shallower by at most +0.2 dB**, none worse than that.
+> The **worst capture in the set improved 2.1 dB** (G10 T2 Dist −6.6 → −8.7) — the first time
+> anything has moved the G10 floor. All nine per-stage gates PASS; SMPTE IMD median +0.05 dB
+> (worst +0.83), CCIF −0.00; FR rms err mean 2.12 → 2.06 dB.
+>
+> **And the fix is not what this section planned.** The plan was to ADD a min-phase low-shelf at
+> ~100 Hz. What shipped is a **refit of the low-shelf that was already there** — `bassBoost*`, from
+> a monotone ramp into a **hump in drive**. See "What it actually was" below.
 
 P1 closed this as "real but not correctable — the pedal's LF excess carries a phase lead, so every
 minimum-phase EQ that fixes the magnitude worsens the null." **That conclusion generalised from two
@@ -1125,6 +1145,72 @@ lift (a tilt error reads as "needs more bass" after normalisation), so **P8 must
 re-measured on the corrected baseline. The sub-32 Hz remainder stays non-minimum-phase — though the
 lead needed is ~20° at 20 Hz ≈ **2.8 ms**, not the tens of ms P1 assumed, so even that is not
 obviously out of reach if it is ever worth the latency.
+
+#### What it actually was — the caveat was the whole finding
+
+Re-measured on the post-P7 baseline (`comprehensive_report.py --keep-renders`, then
+`offline_null_probe.py`), that "caveat" is not a caveat. It is the answer. The fixed +1.0 dB shelf
+scores on the arbiter like this — all 44 captures × 4 sweep levels, mean Δ null by drive:
+
+| candidate | mean | G2 | G3 | G4 | G5 | G6 | G7 | G8 | G10 |
+|-----------|------|----|----|----|----|----|----|----|-----|
+| fixed 100 Hz +1.0 dB | −0.30 | −0.96 | −1.59 | −1.63 | −0.93 | **+0.59** | **+1.54** | **+1.34** | **+0.58** |
+
+Helps at G2–G5, hurts at G6–G10, in **every** mode. That is the probe's own stated tell — *a
+knob-indexed result means a fixed filter is the wrong instrument* — and P7's rule says what to do
+about it: **there is already a drive-keyed instrument in this band, so read them as one set.**
+`bassBoost*` (105 Hz low-shelf, onset G2.5, 7.5 dB/unit, cap 4.2 dB) has occupied 20–120 Hz since
+2026-06-29. P7 saw this coming from the other direction and deliberately did not touch it
+(§"`bassBoost*` deliberately left alone — it belongs to P8").
+
+Fitting the shelf depth **per drive** at a pinned 85 Hz pivot, scored on the complex residual
+(`offline_null_probe.py shelf --pivot 85`), gives the correction the pedal wants *on top of*
+whatever `bassBoost` already supplies:
+
+| | G2 | G3 | G4 | G5 | G6 | G7 | G8 | G10 |
+|---|----|----|----|----|----|----|----|-----|
+| extra dB wanted at 85 Hz | +1.30 | +1.65 | +1.85 | +2.00 | +1.35 | +0.05 | **−0.95** | **−2.10** |
+| shipped `bassBoost` (105 Hz) | 0.00 | 0.37 | 1.13 | 1.88 | 2.62 | 3.37 | 4.12 | 4.20 |
+
+**The old law was fit to one end of the drive axis.** It exists to counter the high-drive bass
+bloom, it was measured at high drive, and it was read as monotone because nothing had ever measured
+the low end. Measured across the whole axis the pedal wants LF gain at **every** drive — already
++1.2 dB at G2, where the ramp gives exactly zero — rising to a peak near G5 and then **falling
+back**. The ramp is ~1.2 dB short below G5 and ~2.4 dB **over** at G10, and the fall is a shape a
+ramp cannot express at all.
+
+So P8 ships **no new instrument**. `bassBoost*` becomes a hump: peak `bassBoostMaxDb` at
+`bassPeakDrive`, falling `bassBoostSlopeDb` per unit drive below and `bassBoostFallDb` above,
+floored at 0. Fitted on the arbiter (three rounds, ~20 candidate laws) to **85 Hz, 3.0 dB @ drive
+0.50, 6.0 down / 2.5 up** — the floor is reached exactly at drive 0, so it never binds in range.
+
+| | G2 | G3 | G4 | G5 | G6 | G7 | G8 | G10 |
+|---|----|----|----|----|----|----|----|-----|
+| was (ramp) | 0.00 | 0.37 | 1.13 | 1.88 | 2.62 | 3.37 | 4.12 | 4.20 |
+| now (hump) | 1.20 | 1.80 | 2.40 | 3.00 | 2.75 | 2.50 | 2.25 | 1.75 |
+
+The offline optimum is **broad** — every law within 85±10 Hz, 2.8–3.5 dB, peak 0.48–0.55 scored
+within 0.07 dB of the best — so the constants were not ground finer offline than the
+pre-clip/post-clip placement caveat can carry.
+
+**Where it shows in FR** (clean sweep, plugin − pedal, by drive): the *drive-dependence* of the
+20 Hz error more than halves, −3.23…+2.95 dB → **−2.12…+0.59**, and 40 Hz −1.57…+1.28 →
+−0.59…−0.84. What is left at 20 Hz is a near-constant ~2 dB shortfall — **the sub-32 Hz
+non-minimum-phase remainder P8 predicted would stay**, since an 85 Hz first-order shelf deep enough
+to reach 20 Hz overshoots 80 Hz (which is already +0.9 dB at G2).
+
+**FR at 80–320 Hz reads worse at G8–G10 while the null there gets better** (G8 T5 Clean −19.8 →
+−23.2). Believe the null: per P7's rule the clean sweep carries 7.6–15 % THD at those drives and is
+not a linear FR measurement, and the null is scored on all four sweep levels.
+
+**Harness note — a stale-baseline trap that nearly landed.** `comprehensive_report.py
+--keep-renders` writes `<label> tommy_test_signal_48k_plugin.wav`; `run_validation.py --render-dir`
+writes `<label>.wav`. Both land in `/tmp/monarch_renders`, and `offline_null_probe.load_pairs`
+matched only the second — so a fresh render run left the *older* set in place and the probe read it
+without complaint. Caught by noticing the two namings, and the fit was re-run against a
+known-good post-P7 set: identical to 4 decimals, so nothing here rests on it. `load_pairs` now
+accepts both forms, takes the newest per label, and **warns when the renders in a directory span
+more than two minutes**.
 
 ### P9 — Overdrive's mode-specific tilt and its THD roll-off  *(open, unworked)*
 
@@ -1197,7 +1283,12 @@ python3 analysis/p7_eq_refit.py score --base pre-p7 # ...per-capture residual, b
 python3 analysis/comprehensive_report.py --keep-renders /tmp/monarch_renders
 python3 analysis/offline_null_probe.py transfer     # complex pedal/plugin D(f): magnitude AND PHASE
 python3 analysis/offline_null_probe.py shelf --band 30 120          # fit on the COMPLEX residual
+python3 analysis/offline_null_probe.py shelf --pivot 85 --drive 0.2 0.6  # ...best dB PER DRIVE
 python3 analysis/offline_null_probe.py null --low-shelf 100:1.0     # score it on the arbiter
+python3 analysis/offline_null_probe.py null --bass-law 85:3.0:0.50:6.0:2.5   # P8 — score a
+#   REPLACEMENT bassBoost law (PIVOT:MAX:PEAKDRIVE:SLOPELO:SLOPEHI) as the delta against the
+#   shipped one, parsed live from MonarchChannel.h. Repeating the shipped law must score 0.000 —
+#   that is the harness's own sanity check, run it first.
 python3 analysis/fr_thd_audit.py h2                 # Finding 4 — H2 vs frequency (renders; needs PedalRender)
 
 python3 analysis/p2_rail_asym_fit.py --json run.json            # P2's fit/guard loop (~12 s)

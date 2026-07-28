@@ -334,11 +334,22 @@ public:
     // runs ~+3 dB too bassy (a bump PEAKING ~180 Hz) at low drive (G2) and ~−1.8 dB too thin at high
     // drive (G10). The two ends need different SHAPES (a bell at low drive, a shelf at high drive), so
     // they are two separate drive-dependent corrections:
-    //   • bass BOOST low-shelf, fades IN with drive — counters the high-drive bass-bloom (original).
-    static constexpr double bassPivotHz = 105.0;       // bass boost low-shelf centre (Hz)
-    static constexpr double bassOnsetDrive = 0.25;     // boost engages above this drive
-    static constexpr double bassBoostSlopeDb = 7.5;    // dB of LF boost per unit drive past onset
-    static constexpr double bassBoostMaxDb = 4.2;      // cap on the high-drive LF boost
+    //   • bass BOOST low-shelf — a HUMP in drive, not the original monotone ramp. Refit by v1.4 P8
+    //     (2026-07-29), which merged P1's separate sub-64 Hz LF-extension shelf INTO this one rather
+    //     than adding a second instrument to the same band on the same key — P7's rule. The ramp
+    //     (105 Hz, onset G2.5, 7.5 dB/unit, cap 4.2) was fit to ONE end of the drive axis, the
+    //     high-drive bass-bloom, and read as monotone because nothing had measured the low end.
+    //     Measured across the whole axis, the pedal wants LF gain at EVERY drive — +1.2 dB already
+    //     at G2 — peaking near G5 and then FALLING BACK, so the old law was ~1.2 dB short below G5
+    //     and ~2.4 dB over at G10. The fall is what the ramp could not express at all.
+    //     Law: bassBoostMaxDb at bassPeakDrive, falling by bassBoostSlopeDb per unit drive below it
+    //     and bassBoostFallDb per unit above, floored at 0 (reached exactly at drive 0, so the floor
+    //     never binds inside the knob's range). See FR_THD_AUDIT.md P8.
+    static constexpr double bassPivotHz = 85.0;        // bass boost low-shelf centre (Hz)
+    static constexpr double bassPeakDrive = 0.50;      // drive at which the LF boost peaks (≈ G5)
+    static constexpr double bassBoostMaxDb = 3.0;      // dB of LF boost at the peak
+    static constexpr double bassBoostSlopeDb = 6.0;    // dB lost per unit drive BELOW the peak
+    static constexpr double bassBoostFallDb = 2.5;     // dB lost per unit drive ABOVE the peak
     //   • bass CUT bell, fades OUT with drive — removes the low-drive low-mid EXCESS. A WIDE peaking
     //     bell (not a shelf: a shelf over-cuts sub-100 and under-cuts the peak): the excess is broad
     //     (100-330 Hz, peaking ~200), so a low-Q bell centred 185 flattens it to ±0.2 dB at G2.
@@ -796,12 +807,15 @@ private:
     }
 
     // Drive-dependent capture-match correction (see shelf*/bass* consts): a treble HIGH-SHELF that
-    // fades OUT with drive, a bass BOOST low-shelf that fades IN with drive (high-drive bloom), and a
-    // bass CUT bell that fades OUT with drive (low-drive low-mid excess). All on Stage 1's output.
+    // fades OUT with drive (retired by P7), a bass BOOST low-shelf that HUMPS with drive (peaking at
+    // bassPeakDrive — P8), and a bass CUT bell that fades OUT with drive (low-drive low-mid excess).
+    // All on Stage 1's output.
     void updateDriveShelf (double drive01) noexcept
     {
         const double trebleDb = std::max (0.0, shelfMaxDb - shelfSlopeDb * drive01);          // HF lift
-        const double bassBoostDb = std::min (bassBoostMaxDb, std::max (0.0, bassBoostSlopeDb * (drive01 - bassOnsetDrive)));
+        const double bassFall = bassBoostSlopeDb * std::max (0.0, bassPeakDrive - drive01)    // below the peak
+                              + bassBoostFallDb * std::max (0.0, drive01 - bassPeakDrive);    // above it
+        const double bassBoostDb = std::max (0.0, bassBoostMaxDb - bassFall);
         const double bassCutDb = -std::min (bassCutMaxDb, std::max (0.0, bassCutSlopeDb * (bassCutOffDrive - drive01)));
         if constexpr (trebleShelfEnabled)                                                     // retired by P7
             shelfCoeffs (1.0, std::pow (10.0, trebleDb / 20.0), shelfPivotHz, hsB0, hsB1, hsA1);

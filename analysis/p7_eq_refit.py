@@ -78,7 +78,9 @@ def old_set_db(K, drive01, freqs, fs):
     """The three drive-keyed instruments as currently shipped. Excludes warp + hfTrim, which are
     drive-INDEPENDENT and cancel exactly in the new-minus-old delta scored here."""
     treble = max(0.0, K["shelfMaxDb"] - K["shelfSlopeDb"] * drive01)
-    boost = min(K["bassBoostMaxDb"], max(0.0, K["bassBoostSlopeDb"] * (drive01 - K["bassOnsetDrive"])))
+    boost = max(0.0, K["bassBoostMaxDb"]                       # P8: a HUMP in drive, not a ramp
+                 - K["bassBoostSlopeDb"] * max(0.0, K["bassPeakDrive"] - drive01)
+                 - K["bassBoostFallDb"] * max(0.0, drive01 - K["bassPeakDrive"]))
     cut = -min(K["bassCutMaxDb"], max(0.0, K["bassCutSlopeDb"] * (K["bassCutOffDrive"] - drive01)))
     m = A._mag1(*A._shelf(1.0, 10 ** (treble / 20), K["shelfPivotHz"], fs), freqs, fs)
     m = m * A._mag1(*A._shelf(10 ** (boost / 20), 1.0, K["bassPivotHz"], fs), freqs, fs)

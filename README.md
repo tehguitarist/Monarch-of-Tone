@@ -60,16 +60,16 @@ Wave Digital Filters, in double precision, with absolute circuit voltages (not n
 All of this was checked, not assumed: every component value was cross-referenced across two
 independent schematic sources, and the stock circuit was directly A/B'd against NAM captures
 of a real King of Tone. After sub-sample time alignment and per-mode level matching, the
-plugin **nulls against the real pedal by −6.4 to −22.3 dB (median −16.6 dB)** across a
+plugin **nulls against the real pedal by −8.7 to −25.6 dB (median −22.6 dB)** across a
 44-capture sweep spanning all three clipping modes, the full drive range, and tone settings.
 The match is deepest through the most-used low/mid-gain range and shallower only at extreme
 drive. At a representative mid-gain setting (drive 5), the deepest achievable null per mode is:
 
 | Mode | Best null vs. the real pedal (drive 5) |
 |------|----------------------------------------|
-| Clean / Boost | **−21.2 dB** |
-| Overdrive | **−21.4 dB** |
-| Distortion | **−20.6 dB** |
+| Clean / Boost | **−23.3 dB** |
+| Overdrive | **−22.2 dB** |
+| Distortion | **−22.7 dB** |
 
 These are at the labelled knob settings — an active drive/tone/level search confirmed the
 nominal calibration is already optimal (tuning one part of the signal deeper only trades it

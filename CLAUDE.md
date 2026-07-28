@@ -213,15 +213,46 @@ clang-format -i src/**/*.{cpp,h}
       candidates were fit on FR and judged on the null; **deleting** the shelf beat shrinking it in
       every mode, so the simpler answer won on the arbiter rather than on taste. Harness
       `analysis/p7_eq_refit.py`. See `FR_THD_AUDIT.md` P7.
-  - **Remaining, in order — see `FR_THD_AUDIT.md` P8–P10:**
-    - **P8: reopen P1 — the sub-64 Hz deficit is PARTIALLY correctable.** P1's measurements were
-      right; its *conclusion* over-generalised from two shelves, both fit to zero the FR magnitude
-      and both ~2× the complex-optimal depth. The phase lead blocking a minimum-phase fix exists
-      **only below ~32 Hz**: at 40–80 Hz the deficit is still +0.5…+2.1 dB and the pedal **lags**
-      3–9°, which is exactly what a min-phase low-shelf supplies. **100 Hz +1.0 dB deepens the null
-      0.44 dB mean** (median −0.64) where P1's 60 Hz/+3.5 and 25 Hz/+5.0 cost +0.50 and +0.78.
-      Drive-indexed too, and entangled with the treble lift at G2–G4 — P7 has now cleared that
-      entanglement, so **P8 is next** and must be re-measured on the post-P7 baseline.
+  - **P8 the LF band read as ONE drive-keyed instrument — ✅ done (2026-07-29). Median null
+    −21.5 → −22.6 dB, 38 of 44 captures deeper, and the worst capture in the set moved for the
+    first time.** P1's measurements were right; its *conclusion* over-generalised from two shelves,
+    both fit to zero the FR magnitude and both ~2× the complex-optimal depth. The phase lead
+    blocking a minimum-phase fix exists **only below ~32 Hz**; at 40–80 Hz the pedal **lags** 3–9°,
+    exactly what a min-phase low-shelf supplies.
+    - **But the fix is NOT the new shelf both P1 and P8's own plan assumed.** A *fixed* 100 Hz
+      +1.0 dB shelf is knob-indexed on the arbiter — helps 1.0–1.6 dB at G2–G5, **hurts 0.6–1.5 dB
+      at G6–G10**, in every mode — which is `offline_null_probe`'s own stated tell that a fixed
+      filter is the wrong instrument. And the band already had a drive-keyed instrument in it:
+      **`bassBoost*`**, which P7 had deliberately left alone as "it belongs to P8". So the two were
+      fit as one set, P7's rule applied prospectively for once.
+    - **The old law was fit to one end of the drive axis.** `bassBoost` (105 Hz, onset G2.5,
+      7.5 dB/unit, cap 4.2) exists to counter the high-drive bass bloom, was measured at high drive,
+      and read as monotone because nothing had measured the low end. Per-drive fitting shows the
+      pedal wants LF gain at **every** drive — **+1.2 dB at G2 where the ramp gives exactly zero** —
+      peaking near G5 and then **falling back**: the ramp was ~1.2 dB short below G5 and ~2.4 dB
+      **over** at G10, and a ramp cannot express the fall at all.
+    - **Fix:** `bassBoost*` becomes a **hump in drive** — 85 Hz, 3.0 dB peak at drive 0.50, falling
+      6.0 dB/unit below and 2.5 above, floored at 0 (reached exactly at drive 0). **No new
+      instrument, no new mechanism, one law reshaped.** The offline optimum is broad (±10 Hz,
+      2.8–3.5 dB, peak 0.48–0.55 all within 0.07 dB), so it was not ground finer than the
+      pre-clip/post-clip placement caveat can carry.
+    - **Result (all 44 captures):** null **−25.1…−6.6 median −21.5 → −25.6…−8.7 median −22.6**, mean
+      and median both **1.05 dB deeper**; **38 deeper** (best −3.4 dB, G8 T5 Clean), **6 shallower by
+      at most +0.2 dB**, none worse. The **worst capture in the set improved 2.1 dB** (G10 T2 Dist
+      −6.6 → −8.7) — nothing had moved the G10 floor before. FR: the *drive-dependence* of the 20 Hz
+      error more than halves (−3.23…+2.95 → −2.12…+0.59 dB). All nine gates PASS; SMPTE IMD median
+      +0.05 dB, CCIF −0.00; even-harmonic series neutral except Boost H6 rms 7.9 → 10.9 (bias only
+      −3.2 → −3.6 — a quiet harmonic already ~6 dB short, accepted).
+    - **Left open:** the sub-32 Hz remainder — a near-constant ~2 dB shortfall at 20 Hz that an
+      85 Hz first-order shelf cannot reach without overshooting 80 Hz, and whose phase lead is
+      non-minimum-phase anyway. This is now the *whole* of the accepted LF residual.
+    - **Harness trap caught and fixed:** `comprehensive_report.py --keep-renders` and
+      `run_validation.py --render-dir` write **two different filename conventions into the same
+      directory**, and `offline_null_probe.load_pairs` matched only one — so a fresh render run
+      silently left the older set in place. The fit was re-run against a known-good post-P7 set
+      (identical to 4 decimals, so nothing rested on it). `load_pairs` now accepts both, takes the
+      newest per label, and warns when a directory's renders span >2 minutes.
+  - **Remaining, in order — see `FR_THD_AUDIT.md` P9–P10:**
     - **P9: Overdrive's mode-specific tilt** (+1.2…+2.5 dB at *every* drive, only mode that does)
       and its matching THD roll-off (−0.8 dB at 320 Hz → **−4.1 dB at 5 kHz** on the hot sweep).
       The documented "OD compresses 3–4 dB lighter" residual, but it has a **shape** — never worked.
@@ -261,13 +292,16 @@ preset browser. Supply-voltage mod (9/12/18V) and rail-saturation ADAA are in. L
 engineering: CI/CD (`.github/workflows/`), cross-platform VST3, and per-platform installers
 (`installer/`) — see README.
 
-**Calibration result (Step 11, real-pedal A/B; refreshed v1.4 P7 2026-07-29):** the plugin nulls against
-44 NAM captures (drive G2–G10, tone T2–T8, Clean/OD/Dist) at **−6.6 to −25.1 dB, median −21.5**, and
-is now at **−19.8 dB or better on every capture from G2 to G7** (worst G6 T5 OD). (Was −6.6 to −23.2, median −16.4→−16.6 after
-P2/P6. **P7** deepened the mean 2.46 dB and the median 4.9 dB — 24 captures deeper by up to 9.1 dB,
-concentrated at G2–G4 where the double-counted EQ correction lived, 2 shallower by ≤0.9 dB, and 18
-byte-identical because both refitted instruments are exactly zero at and above drive 0.55.) Best
-per-mode null at the labelled mid-gain settings (G5 T5): Clean/Boost −22.8, OD −21.2, Dist −21.4 dB.
+**Calibration result (Step 11, real-pedal A/B; refreshed v1.4 P8 2026-07-29):** the plugin nulls against
+44 NAM captures (drive G2–G10, tone T2–T8, Clean/OD/Dist) at **−8.7 to −25.6 dB, median −22.6**, and
+is now at **−19.6 dB or better on every capture from G2 to G7** (worst G6 T5 OD). (Was −6.6 to −23.2,
+median −16.4→−16.6 after P2/P6. **P7** deepened the mean 2.46 dB and the median 4.9 dB — 24 captures
+deeper by up to 9.1 dB, concentrated at G2–G4 where the double-counted EQ correction lived, 2 shallower
+by ≤0.9 dB, and 18 byte-identical because both refitted instruments are exactly zero at and above drive
+0.55. **P8** then deepened mean and median a further 1.05 dB — 38 of 44 deeper by up to 3.4 dB, 6
+shallower by ≤0.2, and it is the first change to move the **G10 floor**, taking the set's worst capture
+from −6.6 to −8.7 dB.) Best
+per-mode null at the labelled mid-gain settings (G5 T5): Clean/Boost −23.3, OD −22.2, Dist −22.7 dB.
 Excellent to mid gain; shallower only at very high drive (G8–G10) — an
 accepted device-physics / capture-aliasing residual, not a topology error (every Stage-1 value +
 topology re-traced exact against the Theseus schematic). The 44 captures (`analysis/pedal_export2/`,
@@ -304,14 +338,19 @@ reproduce.
     the reading and the direction were right and only the **instrument** was wrong — but a
     zero-phase shelf reaching 25 Hz is a multi-thousand-tap FIR (tens of ms latency) for ~0.6 dB.
     Ruled out on cost.
-  - **⚠️ CORRECTED SAME DAY by P8 — "don't re-attempt with any IIR EQ" is WITHDRAWN.** That held for
-    *these two shelves* only: both were fit to zero the **FR magnitude** and both are ~2× the
-    complex-optimal depth. The depth axis was never searched with a phase-aware metric. Measured
+  - **⚠️ CORRECTED by P8 (closed 2026-07-29) — "don't re-attempt with any IIR EQ" is WITHDRAWN, and
+    a min-phase IIR fix has now SHIPPED.** The prohibition held for *these two shelves* only: both
+    were fit to zero the **FR magnitude** and both are ~2× the complex-optimal depth. Measured
     per-band, the phase lead exists **only below ~32 Hz** — from 40–80 Hz the deficit is still
     +0.5…+2.1 dB and the pedal **lags 3–9°**, exactly what a min-phase low-shelf supplies.
-    **100 Hz +1.0 dB deepens the null 0.44 dB mean / 0.64 median** over 44 captures × 4 levels.
     Also: not a corner error — reaching +2.7 dB at 20 Hz needs C7 = 137 nF against a 100 nF ±10%
-    part, and a lower corner gives *less* lead, the wrong direction. See `FR_THD_AUDIT.md` P8.
+    part, and a lower corner gives *less* lead, the wrong direction.
+    **The depth axis was never searched with a phase-aware metric — and neither was the DRIVE axis,
+    which is where the answer was.** A *fixed* shelf of any depth is the wrong instrument (it splits
+    by knob: helps G2–G5, hurts G6–G10). P8 shipped the correction by refitting the **existing**
+    `bassBoost*` low-shelf into a hump in drive, adding no new filter at all — median null −21.5 →
+    −22.6 dB. `lfExt*` stays retired and is now redundant rather than merely rejected.
+    See `FR_THD_AUDIT.md` P8.
   - **Metric lesson (new, and the mirror image of the presence-bump one):** FR rms weights every
     third-octave band equally and is **blind to phase**; the time-domain null is complex. Note the
     "no guitar energy below 80 Hz" intuition does **not** apply to this test signal — an
@@ -374,8 +413,16 @@ OD/Dist nulls at mid/high drive (G5 OD −18.4→−23.7, G5 Dist −14.9→−1
 > was never measured, and when it was, the captures said the opposite — the plugin was too *bright*
 > at low drive, not too dark. It and the bass-cut bell below were each supplying about half of one
 > correction and were fit independently, so together they over-corrected G2 by ~1.65×. `shelfMaxDb`/
-> `shelfSlopeDb` are now 0; the bell carries the whole job. The **bass low-shelf** (`bassBoost*`) is
-> unchanged. See the v1.4 P7 roadmap entry and `FR_THD_AUDIT.md` P7.
+> `shelfSlopeDb` are now 0; the bell carries the whole job. See the v1.4 P7 roadmap entry and
+> `FR_THD_AUDIT.md` P7.
+>
+> **⚠️ The bass half was then REFIT by v1.4 P8 (2026-07-29) and is no longer "fading IN with
+> drive".** It is a **hump**: 85 Hz, 1.2 dB at G2, peaking 3.0 dB at G5, back to 1.75 dB at G10.
+> The monotone ramp was fit to one end of the axis — it counters the high-drive bloom, was measured
+> at high drive, and read as monotone because nothing had measured the low end, where the pedal
+> actually wants +1.2 dB and the ramp gave exactly zero. P8 also folded P1's separate sub-64 Hz
+> LF-extension shelf into this one rather than adding a second instrument to the same band on the
+> same key. See the v1.4 P8 roadmap entry and `FR_THD_AUDIT.md` P8.
 
 **Low-drive bass-cut bell + fixed HF trim (`MonarchChannel`, 2026-07-04, v1.3):** a later A/B (by ear
 + harmonic-immune tone bursts) found Boost/Clean ran **~+3 dB too bassy below ~250 Hz at low drive**
@@ -423,11 +470,13 @@ approximate-top mode (its 16 kHz is still deficient — use 2x+ for full fidelit
 linear WDF now runs at the OS rate too (relevant to the v1.1 perf pass).
 
 ### Accepted residuals (un-modeled second-order device physics, per user pref for circuit accuracy)
-- **Sub-64 Hz shortfall (~2.7 dB at 20 Hz, every drive/mode)** and the **LF THD gap it causes**
-  (40 Hz, G10 Clean, −6 dB sweep: pedal 35.6% vs plugin 4.7%). Not a topology error. **No longer
-  fully accepted — P8 (open) recovers part of it**: the blocking phase lead is confined to below
-  ~32 Hz, and a min-phase shelf at 100 Hz/+1.0 dB deepens the null 0.44 dB mean. What stays accepted
-  is the sub-32 Hz remainder. See `FR_THD_AUDIT.md` P8.
+- **Sub-32 Hz shortfall (~2 dB at 20 Hz, near-constant across drive)** and the **LF THD gap it
+  causes** (40 Hz, G10 Clean, −6 dB sweep: pedal 35.6% vs plugin 4.7%). Not a topology error.
+  **Narrowed by P8 (done 2026-07-29)** from "sub-64 Hz, ~2.7 dB, and strongly drive-dependent" —
+  refitting `bassBoost*` into a hump more than halved the drive-dependence of the 20 Hz error
+  (−3.23…+2.95 → −2.12…+0.59 dB). What is left is genuinely stuck: an 85 Hz first-order shelf deep
+  enough to reach 20 Hz overshoots 80 Hz, and below ~32 Hz the pedal's phase *leads*, so no
+  minimum-phase filter matches it at all. See `FR_THD_AUDIT.md` P1/P8.
 - **OD compresses ~3–4 dB lighter than the real pedal at hot input** (Distortion compression good,
   Δ~2 dB). **Not a flat offset — it has a shape** (P9, open): OD's THD falls off with frequency far
   faster than the pedal's, Δ −0.8 dB at 320 Hz → **−4.1 dB at 5 kHz** on the hot sweep, and the same

@@ -316,8 +316,24 @@ each unity by the G4–G5 crossover:
   about half of ONE correction and delivered ~6.6 dB of tilt at G2 where the captures need 3.95, so
   the plugin was too *bright* at low drive, not too dark. Deleting it and re-fitting the bell beat
   shrinking it on the null in every mode. See the "one see-saw" note under the bass-cut bell.
-- **Bass boost low-shelf** (`bassPivotHz` 105, `bassOnsetDrive`/`bassBoostSlopeDb`/`bassBoostMaxDb`):
-  LF lift that fades IN with drive — counters the documented bass-bloom-under-drive.
+- **Bass boost low-shelf** (`bassPivotHz` 85, `bassPeakDrive` 0.50, `bassBoostMaxDb` 3.0,
+  `bassBoostSlopeDb` 6.0 below the peak, `bassBoostFallDb` 2.5 above): LF lift that **humps** with
+  drive — 1.2 dB at G2, 3.0 at G5, back to 1.75 at G10, floored at 0 (reached exactly at drive 0, so
+  the floor never binds in range). **Refit by v1.4 P8 (2026-07-29)**, which folded P1/P8's separate
+  sub-64 Hz LF-extension shelf INTO this one instead of adding a second instrument to the same band
+  on the same key — P7's rule, applied prospectively for once.
+  > **It was 105 Hz / onset G2.5 / 7.5 dB per unit / cap 4.2 — a monotone ramp fit to ONE end of the
+  > drive axis.** It exists to counter the high-drive bass bloom, it was measured at high drive, and
+  > it read as monotone because nothing had measured the low end. Measured across the whole axis
+  > (`offline_null_probe.py shelf --pivot 85`, best dB per drive) the pedal wants LF gain at *every*
+  > drive — **+1.2 dB already at G2, where the ramp gives exactly zero** — peaking near G5 and then
+  > falling back, so the ramp was ~1.2 dB short below G5 and ~2.4 dB **over** at G10. A ramp cannot
+  > express the fall at all. A *fixed* 100 Hz shelf (P8's original plan) is the wrong instrument and
+  > says so loudly: it helps 1–1.6 dB at G2–G5 and hurts 0.6–1.5 dB at G6–G10, in every mode.
+  > Whole set: median null **−21.5 → −22.6 dB**, 38 of 44 deeper (best −3.4), 6 shallower by ≤0.2,
+  > and the **worst capture in the set improved 2.1 dB** (G10 T2 Dist −6.6 → −8.7). What remains is
+  > a near-constant ~2 dB shortfall at 20 Hz — the sub-32 Hz non-minimum-phase remainder, which an
+  > 85 Hz first-order shelf cannot reach without overshooting 80 Hz. See FR_THD_AUDIT.md P8.
 - **Bass cut bell** (`bassCutPivotHz` 185, `bassCutQ` 0.50 — a WIDE bell, fades OUT with drive to 0 by
   `bassCutOffDrive`=0.55≈G5.5; `bassCutSlopeDb` 10.909/`bassCutMaxDb` 6.0, a peaking biquad `bc*`,
   2026-07-04, **refit by v1.4 P7 2026-07-29 to carry the retired treble shelf's share too**): removes
@@ -415,8 +431,12 @@ bass-cut-bell coeffs update per block in `setDrive`, the warp + HF-trim shelves 
 > the EQ-correction shelves, being knob-keyed, apply Yellow@d's curve at Red's knob d — i.e. they do NOT
 > shift by 1⁄6 the way the gain does. Effect: at LOW Red drive the bass cut bell over-cuts ~1–2 dB vs a
 > gain-matched Yellow — **and P7 (2026-07-29) deepened that bell (4.6 → 6.0 dB) and extended its reach
-> (G5 → G5.5), so the Red mismatch is now proportionally larger and the bell is the only instrument
-> still causing it** (the treble shelf, the other knob-keyed offender, is retired). **Potential fix:** on the hiGain channel, key the shelves off an EFFECTIVE drive
+> (G5 → G5.5), so the Red mismatch is now proportionally larger.** The treble shelf, the other
+> knob-keyed offender, is retired — but **P8 (2026-07-29) put a second one back**: `bassBoost*` is
+> now non-zero at *every* drive (1.2 dB at G2, where the old ramp gave exactly 0) and humped rather
+> than monotone, so on Red it applies Yellow@d's LF curve where Yellow@(d+1⁄6)'s is wanted — worst
+> near the hump's peak, where the law's slope changes sign. Two knob-keyed instruments now carry
+> the mismatch, not one. **Potential fix:** on the hiGain channel, key the shelves off an EFFECTIVE drive
 > `drive01 + 1⁄6` (clamped) so Red is a fully consistent gain-shifted Yellow in EQ too. Left as-is for now
 > because Red has NO NAM reference — neither keying is validated, so it's a voicing choice either way.
 

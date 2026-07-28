@@ -129,7 +129,9 @@ def drive_shelf_db(drive01, freqs, fs, K):
     low-shelf, bass-cut bell, warp shelf, HF trim — the full pre-clip correction chain.
     `fs` is the OS'd processing rate (shBaseRate), i.e. session rate × the report's os_factor."""
     treble = max(0.0, K["shelfMaxDb"] - K["shelfSlopeDb"] * drive01)
-    bass_boost = min(K["bassBoostMaxDb"], max(0.0, K["bassBoostSlopeDb"] * (drive01 - K["bassOnsetDrive"])))
+    bass_boost = max(0.0, K["bassBoostMaxDb"]                       # P8: a HUMP in drive, not a ramp
+                 - K["bassBoostSlopeDb"] * max(0.0, K["bassPeakDrive"] - drive01)
+                 - K["bassBoostFallDb"] * max(0.0, drive01 - K["bassPeakDrive"]))
     bass_cut = -min(K["bassCutMaxDb"], max(0.0, K["bassCutSlopeDb"] * (K["bassCutOffDrive"] - drive01)))
     warp = min(K["warpMaxDb"], K["warpScaleDb"] * (48000.0 / fs) ** K["warpExp"])
 
