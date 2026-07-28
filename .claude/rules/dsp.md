@@ -192,12 +192,17 @@ to `railV = 3.3 + (v−9)·0.5` (knee = railV − 0.3): +0.5 V usable swing per 
 op-amp ceiling scales** — diode thresholds are junction-fixed. 9V = the validated ±3.3 V baseline
 exactly. Applied per block to both channels/strips.
 
-## Even-Harmonic Injection (`MonarchChannel::injectEvenHarmonic`) — OD/Distortion only
+## Even-Harmonic Injection (`MonarchChannel::injectEvenHarmonic`) — all three modes
 
-> **Boost no longer uses this** (v1.4 P2): its evens come from the asymmetric rails above, and
-> `asymBoost` is retired to 0. The claim below that the circuit "structurally rejects" an internal
-> asymmetry was only ever true of the diode modes — in Boost the rails ARE the nonlinearity, so
-> there is nothing to reject. OD/Dist still inject; they were re-fitted in v1.4 P3.
+> **Boost's mid/high path stays retired, but its LOW path is live** (v1.4 P2 → P3.2). P2 moved
+> Boost's evens to the asymmetric rails and retired `asymBoost` to 0, and above the rail knee that
+> is right. But the rails are knee-*triggered*, so below the knee the plugin was an exactly
+> symmetric clipper reading ≈−160 dBc where the pedal reads −18…−59 — 30 of 143 H2 cells. P3.2 fixed
+> that with `asymLowBoost` = −0.017: the low path is sourced from the clip output and is therefore
+> **always-on**, which is exactly the property the rails lack, and its `lowEnv` wash-out hands over
+> to the rails as drive rises. `asymBoost` (mid/high) remains 0 — the gap was never up there.
+> The claim below that the circuit "structurally rejects" an internal asymmetry was only ever true
+> of the diode modes — in Boost the rails ARE the nonlinearity, so there is nothing to reject.
 
 The KOT's *diode* clippers are **symmetric** → no even harmonics from the topology, and they
 structurally reject the circuit-accurate bias-shift route (an offset shifts clamp levels → equal
@@ -210,8 +215,11 @@ clip-depth-gated (clean stays symmetric) and DC-free (slow running-mean removal)
 - **Low band:** a second path sourced from a 150 Hz low-pass of the clip output (large only when
   clipping → self-gating), because Stage-1's high-shelf makes nodeG tiny <440 Hz so the mid/high
   gate misses low notes that still clip. Washed out by its **own** depth envelope (`lowEnv`,
-  `asymLowWash`/`asymLowThresh`).
-- Per-mode coefficients (`asymOD/Dist/Boost`, `asymLowOD/Dist/Boost`). Empirical model of the
+  `asymLowWash`/`asymLowThresh`). Its clamp reference `clampRef` is per-mode
+  (`asymClampOD`/`asymClampDist`, and `railV` in Boost), which is why it works unchanged in a mode
+  with no diodes — that is what let P3.2 fix Boost by setting one coefficient.
+- Per-mode coefficients (`asymOD/Dist/Boost`, `asymLowOD/Dist/Boost`). `asymBoost` is 0 (Boost's
+  mid/high evens come from the rails); **`asymLowBoost` = −0.017** (P3.2). Empirical model of the
   coupling-cap blocking-distortion device physics, not a circuit element.
 
 ### Band split + low-band wash-out (v1.4 P3, 2026-07-28) — the two rules that came out of it

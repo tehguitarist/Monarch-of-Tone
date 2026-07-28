@@ -110,17 +110,26 @@ error. Below 5 kHz the between-capture sd is ~0.3 dB. Do not fit anything above 
 
 ---
 
-## Finding 3 — the wandering FR peak is a readout, not a mechanism
+## Finding 3 — the wandering FR peak (revised 2026-07-28: it is NOT only a readout)
 
-Overall-FR peak location, plugin vs pedal, in octaves (`fr_thd_audit.py peaks`):
+Overall-FR peak location, plugin vs pedal, in octaves (`fr_thd_audit.py peaks`, `sweep_clean`):
 
-- **G3–G7, all three modes: within ±0.2 oct.** The plugin tracks the pedal wherever the tilt is right.
 - **G2 Clean: +0.16 to +0.30 oct** — the bass-cut bell over-cutting at low drive.
-- **G8–G10: +0.35 to +1.75 oct** (G10 T8 Clean: plugin 1216 Hz, pedal 362 Hz) — the documented
+- **G8–G10: +0.35 to +1.61 oct** (G10 T8 Clean: plugin 1109 Hz, pedal 362 Hz) — the documented
   high-drive bass bloom.
+- **G3–G7 — the original "within ±0.2 oct" claim was wrong.** It came from the summary line
+  (`G3–G7 only: mean +0.01`), and that mean is near zero only because the errors **cancel by
+  mode**: Distortion runs *negative* through G3–G5 (−0.20, −0.24, −0.25, −0.28) while OD runs
+  *positive* at G6–G7 (+0.38, +0.43). Max |error| in that band is **0.43 oct**, not 0.2. Opposite
+  signs in different modes at the same drive is a structural signature, not scatter.
 
-Every peak error sits directly on top of a tilt error already identified above. **No separate work
-item** — re-measure after Findings 1/2 are fixed and use it as a check.
+The G2 and G8–G10 rows do sit on top of tilt errors already identified. The G3–G7 mode-split does
+not obviously, so the peak is now its own open item — see **P6**.
+
+> **Metric note:** always read this table per sweep level and never trust its mean. On
+> `sweep_drv_-6` every peak drops to 60–350 Hz (LF-dominated once compressed) and the sign pattern
+> is different again — Dist goes to −0.9…−1.1 oct at G10 while OD goes +0.9…+1.2 at G2–G4. The
+> `all: mean` there is +0.05, which describes none of it.
 
 ---
 
@@ -546,32 +555,241 @@ let the empirical injections retire in OD/Dist the way `asymBoost` retired in P2
 H6 in isolation, but the knee re-fit shows the orders are coupled through one physical knee in the
 real device too.
 
-### P3.2 — Boost's evens vanish on the quiet driven sweeps — ❌ **NEW, open (found by P3.1's metric)**
+### P3.2 — Boost's evens vanish on the quiet driven sweeps — ✅ **DONE 2026-07-28**
 
-The whole-set `evens` view exposes something the P2 write-up could not see, because P2 measured at
-the −6 dB sweep only: on Boost, **30 of 143 H2 cells have the plugin at ≈−160 dBc** — not "a bit
+The whole-set `evens` view exposed something the P2 write-up could not see, because P2 measured at
+the −6 dB sweep only: on Boost, **30 of 143 H2 cells had the plugin at ≈−160 dBc** — not "a bit
 short", but *no even-harmonic mechanism engaged at all* — while the pedal reads −18 to −59 dBc
-there. Those cells are the low-drive/quiet driven sweeps, and the cause is structural: after P2,
-Boost's evens come **entirely** from the asymmetric rails, so when the swing does not reach the
-knee the plugin is a mathematically exact symmetric clipper. The real pedal clearly has some
-even-order mechanism that survives below rail clipping.
+there. Those cells are the low-drive/quiet driven sweeps, and the cause was structural: after P2,
+Boost's evens came **entirely** from the asymmetric rails, so when the swing does not reach the
+knee the plugin is a mathematically exact symmetric clipper. The real pedal has an even-order
+mechanism that survives below rail clipping.
 
-This is what inflates the Boost rows of the `evens` table (rms 47.7 dB, bias −22.5) — read the
-`silent` column, not the rms, for those rows. Not attempted here: the fix is a *different*
-mechanism (a small always-on asymmetry, or the retired `asymBoost` injection brought back for the
-below-knee region only), and it needs its own fit and null guard. P2's result at hot drive is not
-in question.
+**Step 0 — the target is real.** `p31_harm_floor.py` over the Boost captures puts every even order
+**+58.7 dB clear of the capture chain's harmonic floor at worst** (median +100), and the readings
+track drive the way a harmonic does and a floor does not. None of this gap was measurement noise.
 
-### P4 — the 1.6–5 kHz tilt  *(~1 dB; do it last)*
+**The fix needed no new mechanism** — and that is the finding. The plan proposed either a small
+always-on asymmetry or reviving `asymBoost`. Both were unnecessary: **P3.1's low path already does
+exactly this job and was already running in Boost**, with `railV` as its clamp reference
+(`clampRef`); only its coefficient `asymLowBoost` was zero. It has the one property the rails lack
+— sourced from a low-pass of the clip output, it is *always-on* rather than knee-triggered — and
+its `lowEnv` wash-out hands over to the rails as drive rises, so it fills the quiet regime and gets
+out of the way in the loud one. **The entire change is one constant: `asymLowBoost` 0 → −0.017.**
+
+Two candidate mechanisms were probed numerically first and rejected before this was found: a
+`tanh²` always-on term added to `railSaturate` (produces H2 at the right level but H4/H6 30–50 dB
+too weak — the same "a squared near-sine is nearly pure H2" trap P3.1 hit), and simply widening
+`railKneeMargin` (right H2:H4:H6 ratio, but no single margin is both gentle enough to leave OD's
+±1.64 V undisturbed and active down at 0.5 V).
+
+**Fitted in two passes.** A coarse sweep of |asymLowBoost| ∈ [0.002, 0.12] on the Boost subset gave
+a very broad rms minimum near 0.030; the whole 44-capture set then discriminated inside it, where
+aggregate rms is flat to ~0.1 dB across 0.017–0.030 and **H2's bias is the only thing that really
+moves** (+1.9 → +1.3 → +0.5 at 0.030 / 0.024 / 0.017). Zeroing H2 is P3.1's rule, so 0.017.
+
+Whole set, driven sweeps (`fr_thd_audit.py evens`):
+
+| order | silent | rms | bias |
+| --- | --- | --- | --- |
+| H2 | 30 → **0** | 47.7 → **6.9** | −22.5 → **+0.5** |
+| H4 | 24 → **0** | 43.2 → **8.3** | −18.3 → **−1.7** |
+| H6 | 11 → **0** | 31.5 → **11.1** | −12.1 → **−4.5** |
+
+Boost's even series is now on a par with OD/Distortion's (H2 rms 7.4 / 8.5), and its H4/H6 bias is
+the best of the three modes. `asymLowDriveScale` (4.90) turned out to give Boost the right
+H2:H4:H6 ratio as it stands, so **no Boost-specific knee was added and P3.1's fit is untouched**.
+
+**Guards.** OD and Distortion are **byte-identical** (sha256, verified by rebuilding with the
+coefficient zeroed) — P3/P3.1's fits cannot have moved. Boost's time-domain null changes by at most
+**0.005 dB**; SMPTE/CCIF IMD by ≤0.002 dB. Full 44-capture headline unchanged: **−22.7 to −6.8 dB,
+median −16.4**. The quiet *clean* sweep also improves and stays SHORT rather than hot.
+
+**Sign.** Unlike `railAsymV`, whose two signs give identical magnitude spectra, the signs are *not*
+equivalent here — this injection rides on the rails' own fixed-polarity asymmetry and can reinforce
+or partly cancel it. Small (subset rms 8.18 negative vs 8.46 positive, null within 0.01 dB either
+way) but negative wins, and it agrees with `asymLowOD`/`asymLowDist`.
+
+**What is left, stated plainly.** This closes the *silent* pathology, not the whole gap. The
+residual concentrates at 100 Hz on the quietest sweep at **high** drive, where the pedal reads
+≈−18 dBc — fully saturated — and the plugin, through the same 159 Hz Stage-2 HPF, simply does not
+swing far enough to reach its rails. That is **P1's LF shortfall seen through the clipper**, not a
+second missing even mechanism, and P1 established it is not correctable with any minimum-phase EQ.
+Don't chase it by raising this coefficient: that trades H2's now-zero bias for a few dB of H6.
+
+### P5 — FR peak: verification only, no separate work — ⚠️ **SUPERSEDED by P6 (2026-07-28)**
+
+Re-run `fr_thd_audit.py peaks` after P1/P4. G2/G8–G10 should tighten; the G8–G10 residual is the
+documented bass-bloom limit. **But the premise that G3–G7 is already clean was wrong** (Finding 3,
+revised), so the mid-gain band is a work item, not a check — see P6.
+
+### P6 — mid-gain FR peak displacement (G3–G7), sign-split by mode — ❌ **NEW, open — ordered BEFORE P4**
+
+**Reordered ahead of P4 (2026-07-28, user call):** P4 is a fixed `hfTrim`-style shelf tweak, and a
+mode-differentiated peak error can't be explained by a mode-independent shelf (see below) — so P6
+may change what P4 even needs to correct. Do P6 first; re-measure the 1.6–5 kHz tilt after.
+
+**Reported from the dashboard (user, 2026-07-28) and confirmed against the table.** The curve
+*shape* is right; where it **peaks** is not, and by more than the tilt findings account for. Every
+reported case reproduces exactly (`fr_thd_audit.py peaks`, `sweep_clean`, plug / ped / oct):
+
+| capture | plugin | pedal | oct |
+|---|---|---|---|
+| G6 T5 OD | 488 | 376 | **+0.38** |
+| G7 T5 OD | 457 | 339 | **+0.43** |
+| G5 T5 Dist | 287 | 342 | **−0.25** |
+| G4 T5 Dist | 342 | 404 | **−0.24** |
+| G5 T2 Dist | 243 | 296 | **−0.28** |
+| G10 T5 OD | 398 | 230 | +0.79 *(bloom band, already known)* |
+| G10 T8 Clean | 1109 | 362 | +1.61 *(bloom band, already known)* |
+
+**Why this is not just P1/P2/P4 restated:** those are broadband tilts, and a tilt moves every mode's
+peak the same way. Here Distortion is displaced **down** and OD **up** at the same drive settings,
+so a single global shelf cannot be the whole story.
+
+**Investigation so far (2026-07-28):**
+- **`driveShelf()` is not mode-aware** (`drive_shelf_db()` takes only `drive01`, applied identically
+  to Boost/OD/Dist), so candidate 2 (shelves crossing sign near G4–G5) cannot on its own produce an
+  *opposite*-signed error between OD and Dist at the same drive. Confirmed numerically: peak location
+  with the shelf's dB response subtracted back out (`raw-peak`, mirroring the `raw` view's method)
+  keeps the same sign as the shelved plugin output on every checked capture —
+  G4 T5 Dist −0.24→−0.49 oct, G5 T5 Dist −0.25→−0.13, G6 T5 OD +0.38→+0.42, G7 T5 OD +0.43→+0.50.
+  **Candidate 2 demoted** — the sign-split is in the raw circuit/clip behavior, not manufactured by
+  the correction shelves (though the shelves are visibly *not neutral* on this metric either — G4
+  Dist got worse with the shelf on, worth another look once the root mechanism is fixed).
+- **The "clean" sweep is not actually quiet at the clip stage.** `sweep_clean` is −30 dBFS at the
+  plugin input, but Stage 1 (+12.85 dB near-peak) and Stage 2 (fixed ×−22 / +27 dB) put ~+40 dB of
+  gain in front of both clippers — at G6, −30 dBFS → Stage 2 output ≈2.7 V, well past both OD's
+  ~±1.64 V feedback clamp and Dist's ~±0.584 V shunt clamp. So **both clip stages are genuinely
+  active on every sweep level including "clean"**, which is why the plugin's own clean-sweep peaks
+  differ hugely by mode at fixed drive/tone (G6 T5: Clean 837, OD 488, Dist 281 Hz) — this is
+  expected structurally, not a bug. It also means candidates 1 and 3 (both clip-depth-dependent)
+  remain live, and any linear/no-clipping explanation is ruled out.
+- **schematic-checker consulted (2026-07-28) on candidate 1 (mode-dependent Tone-stage loading) —
+  result: a real gap exists, but it is the WRONG SIGN to be the P6 cause; candidate 1 is ruled out.**
+  - **Distortion:** `ToneStage.h` takes V(node_HC) in via an `IdealVoltageSourceT` — a zero-impedance
+    handoff, in every mode, at every clip depth. That is circuit-inaccurate specifically for
+    Distortion: node_HC there is NOT an op-amp output, it's a passive `R12(1k) ∥ r_d(dynamic)`
+    junction (`SW2HardClip.h` correctly reads `voltage(dp)` off the diode pair, but `MonarchChannel`
+    then feeds that voltage into Tone with no series impedance). So the model omits a real,
+    level-dependent Thevenin resistance into the Tone stage's C8 shunt pole — genuinely a
+    Distortion-only gap (confirmed: OD's SW-1 clamp sits *inside* Stage 2's feedback loop, so pin7
+    stays a legitimate zero-impedance op-amp output at every clip depth — an ideal-op-amp
+    consequence, not an approximation. No comparable gap on the OD side).
+  - **But the direction is backwards.** `r_d = nVt/I` *shrinks* as clipping deepens, so the missing
+    series R is *largest near the clip threshold* (light clipping) and *shrinks toward the model's
+    always-zero baseline* as clipping deepens. A larger missing series R darkens the real pedal more
+    (pulls its Tone corner lower) at light clip, converging toward the model at hard clip. That
+    predicts the **model runs too bright / peak too HIGH** in Distortion, worst at light clip depth —
+    the opposite of the observed "Distortion peak too LOW" in the P6 table. **Real finding, wrong
+    sign — not the cause, don't fix it expecting it to move P6.** (It may still be worth modeling
+    correctly on its own merits — it's a legitimate node_HC idealization gap — but that's separate
+    from P6 and not prioritized here.)
+  - **SW-1/Stage-2 HPF mechanism (candidate for OD's opposite sign): ruled out.** The 159 Hz corner
+    (C7) is exactly level-independent by the same ideal-op-amp argument — no mechanism found that
+    would move OD's peak the way P6 shows it moving.
+  - **schematic-checker's own suggestion for where to look next:** the empirical, mode-asymmetric
+    corrections — `odLowShelf` (OD-only by construction) and the even-harmonic injection's per-mode
+    coefficients (`asymOD`/`asymDist`, `asymMidFc`/`asymLowFc` split) — or a measurement artifact in
+    `_peak_hz`'s broadband argmax.
+  - **Metric-artifact check done, ruled out:** pulled the raw per-band dB values around the peak for
+    G4 T5 Dist and G6 T5 OD — both are smooth, single, broad maxima (no double-hump, no noise spike)
+    genuinely centered one 1/3-octave band apart from the pedal's. `_peak_hz` is reading something
+    real, not an interpolation artifact.
+  - **`odLowShelf` checked and it's already pulling the right direction, not causing the error:**
+    it's a low-shelf lifting *below* 520 Hz, which pulls a broadband peak DOWN — the correct
+    direction for OD's too-high error (already accounted for in CLAUDE.md's "roughly halves the
+    hot-drive deficit" note; not the cause of the residual, since removing it would make the OD
+    error larger, not smaller). Also confirmed `odLowShelf` is NOT what `raw` strips (only
+    `driveShelf()` is), so the raw-peak numbers above already include its effect — the true
+    fully-uncorrected circuit error for OD is at least as large as the +0.42–0.50 oct raw numbers
+    already show, likely larger.
+  - **Where this leaves P6:** both circuit-topology candidates for the sign-split are now checked —
+    Distortion's real gap is wrong-signed, OD has no comparable gap at all. The remaining live
+    leads are the even-harmonic injection's per-mode spectral shaping and/or the accepted
+    OD-under-compresses-3–4-dB residual (less compression preserves more HF content at a given
+    input level, which biases OD's peak up — direction-consistent, not yet quantified). The
+    topology side is exhausted — next step is an isolation experiment, not more circuit tracing.
+
+### P6 next-session plan — isolation experiment (not yet run)
+
+**Status (2026-07-28): investigation paused here, deliberately.** Everything above this line is
+confirmed. Below is the next concrete step, written up so a fresh session can execute it without
+re-deriving the reasoning. **User has designated P6 as its own dedicated session** (2026-07-28) —
+don't fold it into unrelated work, and see [[feedback-depart-from-schematic-for-accuracy]] /
+`CLAUDE.md` note: **user has authorized departing from literal schematic fidelity for this item**,
+specifically because topology tracing (above) came back empty. That does not license skipping
+tracing on a *different* future discrepancy — it applies here because the trail already ran out.
+
+**What's set up and ready:**
+- `tools/PedalRender` is already built (`build/PedalRender_artefacts/Release/PedalRender`).
+- All 44 captures are present locally (`analysis/pedal_export2/`).
+- `comprehensive_report.py` caches the pedal (capture) side to `analysis/.cache/` and only
+  re-renders the plugin side each run — so iterating on a code change and re-running is much
+  faster than the ~10 min full-cold estimate elsewhere in this doc.
+- **Do not disturb the existing uncommitted P3.2 change in `src/dsp/MonarchChannel.h`**
+  (`asymLowBoost` −0.030, Boost-only) — it's orthogonal to OD/Dist FR shape, safe to build with
+  as-is, just don't lose it. `git diff` before and after any experiment edit to confirm only the
+  intended lines changed.
+
+**The experiment:** isolate whether the even-harmonic injection (`injectEvenHarmonic`,
+`MonarchChannel.h` ~line 768) or the accepted OD-under-compression residual drives the sign-split.
+`injectEvenHarmonic` returns `x + (mid/high term) + (low term)` — **don't just skip the call**,
+because `clipEnv` (updated inside it, line 771) also gates `odLowShelf`'s blend (line 587), so
+bypassing the call zeroes both mechanisms at once and conflates the two hypotheses. Instead:
+1. In `processClip` (line 574), keep the call for its state side-effects but discard its two
+   injected terms — e.g. temporarily change `injectEvenHarmonic`'s `return out;` (line 816) to
+   `return x;` so `clipEnv`/`lowEnv`/etc. still update (keeping `odLowShelf`'s gate behavior
+   identical to production) while the H2 terms themselves contribute nothing.
+2. Rebuild just `PedalRender` (`cmake --build build --target PedalRender`).
+3. Run `python3.11 analysis/comprehensive_report.py` (full run needed — FR peak location is a
+   whole-sweep property, can't subset captures with the current CLI).
+4. `python3.11 analysis/fr_thd_audit.py peaks` and compare the G4–G7 OD/Dist rows against the
+   baseline table above. Save the JSON first (`cp analysis/reports/comprehensive_data.json
+   /tmp/p6_baseline.json` or similar) so `--base` diffing / a revert-and-recheck is possible.
+5. **Revert the `injectEvenHarmonic` edit exactly** (`git diff` should show only the P3.2 hunk
+   remaining) and rebuild before doing anything else with this checkout.
+
+**Reading the result:**
+- If the OD/Dist sign-split shrinks or flips with injection neutralized → injection is implicated;
+  next step is refitting `asymMidFc`/`asymOD`/`asymDist` or the split's frequency, not adding a new
+  shelf.
+- If the sign-split is unchanged → the injection isn't it, and the remaining candidate is the
+  compression-asymmetry residual, which is a harder, more structural fix (likely needs its own
+  investigation into why OD's soft-clip compresses lighter than the real pedal, not a peak-chasing
+  correction).
+- Either way, **validate against all 44 captures**, not just the G4–G7 OD/Dist spot-checks — this
+  was an explicit user requirement. Re-run the full `peaks` table (both `sweep_clean` and the driven
+  sweeps) before calling any fix done, and re-run the time-domain null (`null_test.py`) since that
+  is the standing arbiter for any correction, per the P1/presence-bump precedent.
+- **Level dependence is NOT monotonic between clean and driven sweeps** — on `sweep_drv_-6` the same
+  captures don't reproduce the clean-sweep sign/magnitude cleanly (e.g. G5 T5 Dist flips to +0.11,
+  G6/G7 T5 OD drop to ~−0.06/−0.10). Either multiple mechanisms are at play at different clip depths,
+  or `_peak_hz`'s broadband-argmax is picking up a different spectral feature once the sweep is
+  heavily compressed (worth sanity-plotting a couple of driven-sweep FR curves before trusting that
+  table's peak number the way the clean-sweep one is trusted).
+
+**Method going forward:**
+- Read `peaks` **per sweep level** and per mode. Never use its `all:`/`G3–G7` mean — it cancels the
+  sign split (that is precisely how Finding 3's wrong ±0.2 claim was produced).
+- **Any fix must be validated against all 44 captures**, not just the 5 spot-check rows above — those
+  were the ones reported by eye off the dashboard and are confirmatory, not exhaustive. Re-run
+  `fr_thd_audit.py peaks` (full output, all captures, `sweep_clean` AND the driven sweeps) before
+  calling this closed.
+- **The null is the arbiter for any fix** — the standing rule from P1 and the presence-bump
+  reversion. A peak shift carries phase, and FR rms is blind to phase.
+
+**Do NOT start P6 by adding another shelf.** Every EQ-shaped correction attempted so far that was
+not traced to a mechanism first either reversed sign with drive or lost more null than it gained.
+Candidate 2 (a shelf-crossing artifact) is now demoted by the raw-vs-shelf test above — the fix, if
+one is needed, is more likely a clip-stage / tone-stage-loading change than an EQ shelf.
+
+### P4 — the 1.6–5 kHz tilt  *(~1 dB; do after P6)*
 
 Lower the `hfTrim` pivot to ~1.5–2 kHz with a shallower depth, or add a second gentle shelf.
 Confirm **by ear as well as by null** — it is the band the ear is most sensitive in, and a 1 dB
-change barely registers in the null test.
-
-### P5 — FR peak: verification only, no separate work
-
-Re-run `fr_thd_audit.py peaks` after P1/P4. G3–G7 should stay within ±0.2 oct and G2/G8–G10 should
-tighten. The G8–G10 residual is the documented bass-bloom limit.
+change barely registers in the null test. **Re-measure after P6** — if P6's fix touches the
+mid-gain spectral shape at all, this tilt should be re-read off fresh data before re-tuning `hfTrim`.
 
 ---
 

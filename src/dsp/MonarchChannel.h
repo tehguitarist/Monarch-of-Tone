@@ -158,8 +158,64 @@ public:
     // Dist ~0.58 V — so the same coeff gives different H2). Tuned to the captures' low-note H2.
     static constexpr double asymLowOD = -0.0178;   // OD low-band H2 coeff
     static constexpr double asymLowDist = -0.0153; // Distortion low-band H2 coeff
-    static constexpr double asymLowBoost = 0.0;   // Boost low-band (none — boost low notes ~clean)
+    static constexpr double asymLowBoost = -0.017; // Boost low-band — see P3.2 below
     static constexpr double asymLowFc = 150.0;    // low-band low-pass corner (Hz) — taper to ~440 Hz
+
+    // ---- P3.2: Boost's evens below the rail knee (v1.4, 2026-07-28) --------------------------
+    // asymLowBoost was 0 on the reasoning that "Boost low notes are ~clean", and after P2 gave the
+    // rails their asymmetry that looked settled: Boost's evens came entirely from the rails and
+    // matched the captures within ~1-3 dB. But P2 only ever measured the −6 dB sweep. The
+    // whole-set `evens` view (added in P3.1) showed the other half: on the two QUIET driven sweeps
+    // the plugin was not merely short but SILENT — 30 of 143 H2 cells at ≈−160 dBc, no even
+    // mechanism engaged at all, against a pedal reading −18 to −59 dBc. Below the knee an
+    // asymmetric clipper is still an EXACTLY symmetric map, so the plugin was mathematically
+    // perfect where the real pedal is not.
+    //
+    // The pedal's readings there are real signal, not capture noise: analysis/p31_harm_floor.py
+    // over the Boost captures puts every even order +58.7 dB clear of the chain's harmonic floor
+    // at worst (median +100), and they track drive the way a harmonic does and a floor does not.
+    //
+    // No new mechanism was needed — P3.1's low path already does exactly this job, and in Boost it
+    // was already wired and running with railV as its clamp reference (see clampRef); only its
+    // coefficient was zero. Sourced from a low-pass of the clip output, it is always-on rather
+    // than knee-triggered, which is the property the rails lack, and its lowEnv wash-out hands
+    // over to the rails as drive rises — so it fills in the quiet regime and gets out of the way
+    // in the loud one, with no threshold to tune.
+    // FITTED in two passes. A coarse sweep of |asymLowBoost| ∈ [0.002, 0.12] on the Boost subset
+    // (the scratch loop drives analysis/p2_rail_asym_fit.py) found a very broad rms minimum near
+    // 0.030; the whole 44-capture set then discriminated inside it, where the aggregate rms is
+    // flat to ~0.1 dB across 0.017–0.030 and **H2's bias is the only thing that really moves**
+    // (+1.9 at 0.030 → +1.3 at 0.024 → +0.5 at 0.017). Zeroing H2 is P3.1's rule — the coefficient
+    // sets level, and what is left in H4/H6 belongs to the knee, not to it — so 0.017 it is.
+    // Whole set, driven sweeps, before → after:
+    //     silent  H2 30 → 0,   H4 24 → 0,    H6 11 → 0
+    //     H2  rms 47.7 →  6.9  bias −22.5 → +0.5
+    //     H4  rms 43.2 →  8.3  bias −18.3 → −1.7
+    //     H6  rms 31.5 → 11.1  bias −12.1 → −4.5
+    // That puts Boost's even series on a par with OD/Distortion's (H2 rms 7.4 / 8.5), and its H4
+    // and H6 bias are the best of the three modes. The quiet CLEAN sweep improves too and stays
+    // SHORT rather than hot — the safe direction. H6's residual is the shared knee's limit, not
+    // Boost's: asymLowDriveScale (4.90) turned out to give Boost the right H2:H4:H6 ratio as it
+    // stands, so no Boost-specific knee was added and P3.1's fit is untouched.
+    //
+    // Guards. OD and Distortion are BYTE-IDENTICAL (this coefficient is selected only when neither
+    // switch is on), so P3/P3.1's fits cannot move. The time-domain null is unchanged to 0.01 dB
+    // on every capture — the injection is ~−50 dBc, far below what the null resolves. SMPTE/CCIF
+    // IMD unchanged.
+    //
+    // SIGN: unlike railAsymV, whose two signs give identical magnitude spectra, the signs are NOT
+    // equivalent here — this injection rides on the rails' own fixed-polarity asymmetry and can
+    // reinforce or partly cancel it. The difference is small (measured at the coarse optimum:
+    // subset rms 8.18 negative vs 8.46 positive, null within 0.01 dB either way) but negative
+    // wins, and it agrees with asymLowOD/asymLowDist — one mechanism, one polarity, all 3 modes.
+    //
+    // NOT fixed, and worth stating plainly: this closes the "silent" pathology, not the whole gap.
+    // The residual is concentrated at 100 Hz on the quietest sweep at HIGH drive, where the pedal
+    // reads ≈−18 dBc — fully saturated — and the plugin, with the same 159 Hz Stage-2 HPF, simply
+    // does not swing far enough to reach its rails. That is the documented LF shortfall (P1) seen
+    // through the clipper rather than a second missing even mechanism, and P1 established it is
+    // not correctable with any minimum-phase EQ. Do not chase it by raising this coefficient —
+    // that trades H2's now-zero bias for a few dB of H6 and re-creates the LF overshoot P3 removed.
 
     // ---- Band split + low-band wash-out (v1.4 P3, 2026-07-28) ---------------------------------
     // Both injection paths above were running FULL-RANGE, and at low frequency that was the
@@ -192,8 +248,10 @@ public:
     // {8..60} × coeff ∈ {1.0,1.4,1.8,2.5}x (analysis/p2_rail_asym_fit.py, OD/Dist G2–G10). Over
     // all 44 captures, driven sweeps: H2 rms error OD 10.3 → 6.9 dB, Dist 10.2 → 7.9, and the
     // systematic bias is GONE (OD +2.8 → 0.0, Dist +3.0 → +0.2). Odd orders are bit-identical, as
-    // is Boost (asymBoost = asymLowBoost = 0 — its evens come from the asymmetric rails), and the
-    // time-domain null is unchanged on every one of the 44 captures.
+    // was Boost at the time (asymBoost = asymLowBoost = 0 — its evens then came entirely from the
+    // asymmetric rails; P3.2 above later gave the low path a Boost coefficient, which is why this
+    // paragraph's "Boost unchanged" claim is historical), and the time-domain null is unchanged on
+    // every one of the 44 captures.
     // H4/H6 were left 11–16 dB short here and written off as out of this mechanism's reach ("a
     // squared source only makes H2"). That was WRONG and P3.1 (below) fixed them inside the same
     // mechanism; the coefficients and thresholds on this line were re-fitted there.

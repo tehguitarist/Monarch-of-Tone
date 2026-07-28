@@ -112,13 +112,56 @@ clang-format -i src/**/*.{cpp,h}
     short: accepted, since closing it costs H2 rms faster than it gains H6. Prerequisite settled
     first — `analysis/p31_harm_floor.py` shows the pedal's H4/H6 targets clear the capture chain's
     harmonic floor by 39 dB median / 6.9 dB worst, so none of the gap was measurement noise.
-  - **P3.2 Boost's evens vanish on the quiet driven sweeps — ❌ new, open.** Found by P3.1's
-    whole-set metric, which P2 could not see (it measured the −6 dB sweep only): **30 of 143** Boost
-    H2 cells have the plugin at ≈−160 dBc — no even-harmonic mechanism engaged at all — while the
-    pedal reads −18…−59 dBc. Structural: after P2, Boost's evens come *entirely* from the
-    asymmetric rails, so below the knee the plugin is an exactly symmetric clipper. Needs its own
-    mechanism and fit; P2's hot-drive result is not in question. See `FR_THD_AUDIT.md` P3.2.
-  - **Remaining:** a **+1 dB 1.6–5 kHz tilt** (P4), then P5 (verification only), plus P3.2. Audit
+  - **P3.2 Boost's evens vanish on the quiet driven sweeps — ✅ done (2026-07-28), in ONE constant.**
+    Found by P3.1's whole-set metric, which P2 could not see (it measured the −6 dB sweep only):
+    **30 of 143** Boost H2 cells had the plugin at ≈−160 dBc — no even-harmonic mechanism engaged at
+    all — while the pedal reads −18…−59 dBc, and `p31_harm_floor.py` puts those pedal readings
+    **+58.7 dB clear of the capture chain's floor at worst** (median +100), so the target was real.
+    The fix needed **no new mechanism**, which is the finding: **P3.1's low path was already wired
+    and running in Boost** (with `railV` as its `clampRef`) and only its coefficient was zero — and
+    it has exactly the property the rails lack, being sourced from a low-pass of the clip output and
+    so *always-on* rather than knee-triggered, with `lowEnv` handing over to the rails as drive
+    rises. `asymLowBoost` 0 → **−0.017**, chosen on the whole set where aggregate rms is flat across
+    0.017–0.030 and only H2's bias moves (P3.1's rule: zero H2). Driven sweeps, whole set: **silent
+    30/24/11 → 0**, H2 rms 47.7 → 6.9 (bias −22.5 → **+0.5**), H4 43.2 → 8.3 (−18.3 → −1.7), H6 31.5
+    → 11.1 (−12.1 → −4.5) — Boost's even series is now on a par with OD/Dist's and its H4/H6 bias is
+    the best of the three. Two invented mechanisms were probed numerically and rejected first (a
+    `tanh²` term on `railSaturate` — H4/H6 30–50 dB too weak, P3.1's "squared near-sine" trap again;
+    and widening `railKneeMargin` — right ratio, but no margin both spares OD's ±1.64 V and reaches
+    0.5 V). Guards: **OD/Dist byte-identical** (verified by rebuilding with the coefficient zeroed),
+    Boost null within **0.005 dB**, IMD ≤0.002 dB, 44-capture headline unchanged. What's left is at
+    100 Hz / quiet / high drive, where the pedal is fully saturated and the plugin can't swing to its
+    rails — that is **P1's LF shortfall seen through the clipper**, not a second mechanism. See
+    `FR_THD_AUDIT.md` P3.2.
+  - **P6 mid-gain FR peak displacement — ❌ new, open (2026-07-28), ordered BEFORE P4.** The FR
+    curve *shape* matches but the **peak frequency** is displaced at mid gain, and **the sign
+    splits by mode**: OD peaks too HIGH (G6 T5 488 vs 376 Hz, +0.38 oct; G7 +0.43) while Distortion
+    peaks too LOW (G4/G5 T5 342 vs 404, 287 vs 342, ≈−0.25 oct). Finding 3's original "G3–G7 within
+    ±0.2 oct" was wrong — it read the summary **mean**, which is ≈0 only because those opposite
+    signs cancel. A mode-independent tilt/shelf can't produce an opposite-signed error, so P1/P2/P4
+    don't explain it — confirmed numerically: stripping `driveShelf()` (which isn't mode-aware)
+    leaves the sign unchanged on every checked capture, and the "clean" (−30 dBFS) sweep isn't
+    actually quiet at the clip stage (Stage1+2 gain ≈+40 dB pushes it well past both diode clamps),
+    so both clip mechanisms are genuinely active at every sweep level. Do **P6 before P4** — a
+    clip/tone-stage-loading fix here should land before re-tuning `hfTrim`. Any fix must validate
+    against **all 44 captures**, not just the spot-checked rows. See `FR_THD_AUDIT.md` P6.
+    (G8–G10 peak error remains the documented bass bloom.)
+    - `schematic-checker` traced both topology candidates (2026-07-28) and **both are ruled out**:
+      Distortion's `node_HC` handoff into `ToneStage` is modelled as a zero-impedance ideal voltage
+      source at every clip depth, which is a real gap (it should carry `R12 ∥ r_d(dynamic)`) — but
+      the direction is backwards (predicts Distortion runs too BRIGHT at light clip, not the
+      observed too-dark), so it isn't the cause. OD's SW-1 feedback clamp sits inside Stage 2's
+      loop, so its 159 Hz HPF corner is exactly level-independent — no comparable mechanism found.
+      Topology side is exhausted; remaining leads are the even-harmonic injection's per-mode
+      coefficients and/or the accepted OD-under-compression residual.
+    - **User has designated P6 as its own dedicated session** (2026-07-28) and **authorized
+      departing from literal schematic fidelity for this item specifically**, since topology
+      tracing came back empty — see the `feedback-depart-from-schematic-for-accuracy` memory. The
+      next-session isolation-experiment plan (exact edit, build/run steps, how to read the result)
+      is written up in `FR_THD_AUDIT.md` under "P6 next-session plan" — start there, don't
+      re-derive it.
+  - **Remaining:** P6 (mid-gain FR peak, do first), then a **+1 dB 1.6–5 kHz tilt** (P4), P5 folded
+    into P6. Audit
     tools: `analysis/fr_thd_audit.py` (`evens` view = the even-series rms/bias table, `--base` for
     before/after), `analysis/p2_rail_asym_fit.py` (fast clip-nonlinearity fit loop, now with an IMD
     guard — also the P3/P3.1 harness), `analysis/p31_harm_floor.py` (harmonic noise floor).
