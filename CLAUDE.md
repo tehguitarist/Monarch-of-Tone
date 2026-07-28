@@ -167,13 +167,54 @@ clang-format -i src/**/*.{cpp,h}
     - **Rule it establishes:** a **gain-vs-knob error is not a tilt**, even though clipping makes it
       look like one in a single capture's FR. When an error is indexed by a knob, plot it against
       the knob before hypothesising a mechanism. See `FR_THD_AUDIT.md` P6.
-  - **Remaining:** a **+1 dB 1.6–5 kHz tilt** (P4) — re-measure first, since P6 changed clip depth
-    at G6+; P5 folded into P6. Audit
+  - **P4 the 1.6–5 kHz tilt — ❌ PREMISE WITHDRAWN (2026-07-28). There is no fixed tilt.**
+    Re-measured on fresh post-P6 data as the plan required. Aggregated over all 176 capture×sweep
+    rows the error looks like a textbook fixed tilt (**+0.23 dB/oct, 99% sign-consistent, ~1.8 dB
+    total**) and a retuned `hfTrim` collapses it 0.379 → **0.073 dB rms**. It is an **artifact**:
+    the error is indexed by **DRIVE and SWEEP LEVEL jointly**, so a median over either axis alone
+    averages the other away and neither marginal shows the extreme cell. **Third instance of the
+    same trap** (Finding 3's ±0.2 oct, P6's sign reading) — first one caught *while* building the
+    aggregate. On the cleanest linear instrument (Boost, clean sweep) the plugin is **flat to
+    ±0.5 dB wherever the drive shelf's treble lift is zero**, and where the lift is non-zero the
+    error tracks it **≈1:1** (G2 +3.92 dB vs 3.24 lift; G3 +2.45 vs 2.06; G4 +1.20 vs 0.88).
+    Distortion doesn't show it — the ±0.584 V clamp destroys the pre-clip tilt, so it's pre-clip
+    and mode-independent. Confirmed on the arbiter, not just FR: removing the lift from G2 T5 Clean
+    moves FR rms **1.51 → 0.44 dB** *and* the null **−15.10 → −25.23 dB**, and over the 17 affected
+    captures the null deepens **2.3–6.0 dB on every one**. The FR-optimal fixed shelf is rejected by
+    the null (splits by drive: −1.9 dB at G2 against +2.5 dB at G5–G6); the honest ceiling on a
+    *fixed* HF trim is ~0.1 dB. → **replaced by P7.**
+  - **Remaining, in order — see `FR_THD_AUDIT.md` P7–P10:**
+    - **P7 (next): refit the three drive-keyed EQ instruments as one set.** `shelfMaxDb`/
+      `shelfSlopeDb`, `bassCut*` and `bassBoost*` all act on the same low-drive tilt over the same
+      knob range and were all fit 2026-06-29/07-04 — **before** the warp recalibration, `hfTrim`
+      and P6 landed in overlapping territory. Fit against the **clean sweep**, guard with the driven
+      nulls. Largest single remaining defect (G2 nulls −15…−17 vs −24…−26 at G5–G6).
+    - **P8: reopen P1 — the sub-64 Hz deficit is PARTIALLY correctable.** P1's measurements were
+      right; its *conclusion* over-generalised from two shelves, both fit to zero the FR magnitude
+      and both ~2× the complex-optimal depth. The phase lead blocking a minimum-phase fix exists
+      **only below ~32 Hz**: at 40–80 Hz the deficit is still +0.5…+2.1 dB and the pedal **lags**
+      3–9°, which is exactly what a min-phase low-shelf supplies. **100 Hz +1.0 dB deepens the null
+      0.44 dB mean** (median −0.64) where P1's 60 Hz/+3.5 and 25 Hz/+5.0 cost +0.50 and +0.78.
+      Drive-indexed too, and entangled with the treble lift at G2–G4 — **must follow P7**.
+    - **P9: Overdrive's mode-specific tilt** (+1.4…+2.5 dB at *every* drive, only mode that does)
+      and its matching THD roll-off (−0.8 dB at 320 Hz → **−4.1 dB at 5 kHz** on the hot sweep).
+      The documented "OD compresses 3–4 dB lighter" residual, but it has a **shape** — never worked.
+      Not a linear-EQ fix; likely the same thing as the un-audited dynamics axis.
+    - **P10: the G8→G10 Boost discontinuity** (+4.9 dB tilt, clean sweep, 3/3 tones vs G8's −0.10).
+      Probably the documented G10 residual seen through `driveMakeup`'s 6.0 dB cap; confirm, don't assume.
+    - **Never audited at all** (in the captures, absent from `comprehensive_data.json`): **IMD**,
+      **dynamics/compression** (`lvl_-30…-3`), **discrete-tone THD**, **decay**. P2/P3/P6 all changed
+      the clip path underneath them.
+    Audit
     tools: `analysis/fr_thd_audit.py` (`evens` view = the even-series rms/bias table, `--base` for
     before/after), `analysis/p2_rail_asym_fit.py` (fast clip-nonlinearity fit loop, now with an IMD
     guard — also the P3/P3.1 harness), `analysis/p31_harm_floor.py` (harmonic noise floor),
     `analysis/p6_peak_fit.py` (FR-peak + compression-tilt subset harness, ~15 s; its `--in-gain`
-    probe is the clip-depth calibration that identified P6).
+    probe is the clip-depth calibration that identified P6), **`analysis/shape_audit.py`** (FR error
+    *shape*: the `cross` drive×level cross-tab that broke P4, and `clean` = Boost/clean-sweep, the
+    only near-linear instrument in the set), **`analysis/offline_null_probe.py`** (score an EQ
+    hypothesis on the arbiter without rebuilding — `transfer` gives complex pedal/plugin magnitude
+    **and phase**, `shelf` fits on the complex residual, `null` re-nulls the kept renders).
 
 ---
 
@@ -228,7 +269,15 @@ reproduce.
     every case (G6 Dist −19.6→−20.6, G5 OD −21.1→−22.4) while minimum-phase hurts every case. So
     the reading and the direction were right and only the **instrument** was wrong — but a
     zero-phase shelf reaching 25 Hz is a multi-thousand-tap FIR (tens of ms latency) for ~0.6 dB.
-    Ruled out on cost. **Don't re-attempt with any IIR EQ.**
+    Ruled out on cost.
+  - **⚠️ CORRECTED SAME DAY by P8 — "don't re-attempt with any IIR EQ" is WITHDRAWN.** That held for
+    *these two shelves* only: both were fit to zero the **FR magnitude** and both are ~2× the
+    complex-optimal depth. The depth axis was never searched with a phase-aware metric. Measured
+    per-band, the phase lead exists **only below ~32 Hz** — from 40–80 Hz the deficit is still
+    +0.5…+2.1 dB and the pedal **lags 3–9°**, exactly what a min-phase low-shelf supplies.
+    **100 Hz +1.0 dB deepens the null 0.44 dB mean / 0.64 median** over 44 captures × 4 levels.
+    Also: not a corner error — reaching +2.7 dB at 20 Hz needs C7 = 137 nF against a 100 nF ±10%
+    part, and a lower corner gives *less* lead, the wrong direction. See `FR_THD_AUDIT.md` P8.
   - **Metric lesson (new, and the mirror image of the presence-bump one):** FR rms weights every
     third-octave band equally and is **blind to phase**; the time-domain null is complex. Note the
     "no guitar energy below 80 Hz" intuition does **not** apply to this test signal — an
@@ -327,11 +376,14 @@ linear WDF now runs at the OS rate too (relevant to the v1.1 perf pass).
 
 ### Accepted residuals (un-modeled second-order device physics, per user pref for circuit accuracy)
 - **Sub-64 Hz shortfall (~2.7 dB at 20 Hz, every drive/mode)** and the **LF THD gap it causes**
-  (40 Hz, G10 Clean, −6 dB sweep: pedal 35.6% vs plugin 4.7%). Not a topology error and not
-  correctable in real time — the pedal's LF excess carries a **phase lead**, so every minimum-phase
-  EQ that fixes the magnitude worsens the waveform null. See the rejected-experiments entry above
-  and `analysis/FR_THD_AUDIT.md` P1.
-- OD compresses ~3–4 dB lighter than the real pedal at hot input (Distortion compression good, Δ~2 dB).
+  (40 Hz, G10 Clean, −6 dB sweep: pedal 35.6% vs plugin 4.7%). Not a topology error. **No longer
+  fully accepted — P8 (open) recovers part of it**: the blocking phase lead is confined to below
+  ~32 Hz, and a min-phase shelf at 100 Hz/+1.0 dB deepens the null 0.44 dB mean. What stays accepted
+  is the sub-32 Hz remainder. See `FR_THD_AUDIT.md` P8.
+- **OD compresses ~3–4 dB lighter than the real pedal at hot input** (Distortion compression good,
+  Δ~2 dB). **Not a flat offset — it has a shape** (P9, open): OD's THD falls off with frequency far
+  faster than the pedal's, Δ −0.8 dB at 320 Hz → **−4.1 dB at 5 kHz** on the hot sweep, and the same
+  fact makes OD the only mode carrying a tilt at every drive.
 - A small genuine HF-harmonic difference >8 kHz (tone-stage rolloff); the captures' own 4–6 kHz
   energy is partly NAM aliasing (the plugin's 8× anti-aliased clip is the more-correct version).
 - Per-mode capture levels are **normalized** (Boost/OD/Dist sit at the same level, physically

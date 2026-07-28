@@ -218,11 +218,16 @@ against the current `comprehensive_data.json`.**
   chart on the dashboard, and `fr_thd_audit.py h2` now reads the JSON instead of re-rendering (so
   it joins `all`).
 
-### P1 — sub-64 Hz LF extension  — ❌ **CLOSED 2026-07-28: real, but not correctable**
+### P1 — sub-64 Hz LF extension  — ⚠️ **SUPERSEDED by P8 (2026-07-28, same day): partially correctable**
 
-**Do not re-attempt without a new mechanism.** The deficit in Finding 1 is real and reproducible.
-It is also un-fixable by any filter a real-time plugin can use, because it is a **phase** problem
-wearing a magnitude problem's clothes. Full record below; the code sits disabled in
+> **Read P8 before acting on anything below.** P1's measurements are all correct and its two
+> shelves really were rejected by the null. Its *conclusion* — "un-fixable by any filter a real-time
+> plugin can use" — over-generalised from those two points. The phase lead that blocks a
+> minimum-phase fix exists **only below ~32 Hz**; from 40–80 Hz the pedal *lags*, and a shallower,
+> higher shelf (100 Hz, +1.0 dB — about half P1's depth) **deepens the null by 0.44 dB mean**.
+> The "do not re-attempt with any IIR EQ" instruction below is withdrawn.
+
+The deficit in Finding 1 is real and reproducible. Full record below; the code sits disabled in
 `MonarchChannel::lfExt*` (`lfExtEnabled = false`) for A/B.
 
 **Step 1 — topology (`schematic-checker`): no fix exists.** Every pole/zero-capable RC in both
@@ -276,6 +281,11 @@ Zero-phase helps everywhere; minimum-phase hurts almost everywhere. **The magnit
 right and the fix direction was right — the instrument was wrong.** A zero-phase shelf reaching
 25 Hz is a multi-thousand-tap FIR (tens of ms of latency) for a mean gain of ~0.6 dB. Not worth it,
 and unusable live. Ruled out on cost, not on principle.
+
+> **Corrected by P8:** "minimum-phase hurts" is true of *these two shelves* — both fit to zero the
+> FR magnitude, and both about twice the complex-optimal depth. A minimum-phase shelf at roughly
+> half the depth and an octave higher (100 Hz, +1.0 dB) **helps**: −0.44 dB mean null over all 44
+> captures × 4 levels. The depth axis was never searched with a phase-aware metric.
 
 **Step 5 — "what about changing a component value instead?" (asked and answered, don't re-ask).**
 No: it is strictly *worse*, for two reasons.
@@ -897,12 +907,155 @@ All nine per-stage validation gates still PASS (`SmokeTest_RC` … `SW2HardClip_
 reversed sign with drive or lost more null than it gained. A gain-vs-knob error is not a tilt, even
 though clipping makes it look like one in any single capture.
 
-### P4 — the 1.6–5 kHz tilt  *(~1 dB; do after P6)*
+### P4 — the 1.6–5 kHz tilt — ❌ **PREMISE WITHDRAWN 2026-07-28. There is no fixed tilt.**
 
-Lower the `hfTrim` pivot to ~1.5–2 kHz with a shallower depth, or add a second gentle shelf.
-Confirm **by ear as well as by null** — it is the band the ear is most sensitive in, and a 1 dB
-change barely registers in the null test. **Re-measure after P6** — if P6's fix touches the
-mid-gain spectral shape at all, this tilt should be re-read off fresh data before re-tuning `hfTrim`.
+Re-measured on fresh post-P6 data, as the plan required. The tilt is not a fixed linear-EQ error
+and `hfTrim` is not the instrument. **P4 is replaced by P7 (below).**
+
+**The trap, for the third time.** Aggregated over all 176 capture × sweep rows the error looks like
+a textbook fixed tilt: **+0.23 dB/oct, 99 % sign-consistent (excl. G10), ~1.8 dB total** across
+40 Hz–6.4 kHz. Fitting a replacement `hfTrim` collapses the median shape error from **0.379 →
+0.073 dB rms** (pivot 4500 → ~2000 Hz, depth −1.30 → −1.95). Every one-axis summary agrees. It is
+an artifact: the error is indexed by **DRIVE and SWEEP LEVEL jointly**, and a median over either
+axis alone averages the other away. Neither marginal shows the cell where both are extreme. This is
+the same failure as Finding 3's "±0.2 oct" and P6's per-capture sign reading — the third instance,
+and the first one found *while* building the aggregate.
+
+`analysis/shape_audit.py cross` is the view that breaks it (total dB over 80 Hz–5.12 kHz):
+
+| drive | shelf lift | clean | −18 | −12 | −6 |
+|-------|-----------|-------|-----|-----|-----|
+| G2 | 3.24 dB | **+3.02** | +1.60 | +1.37 | +1.31 |
+| G3 | 2.06 | **+2.45** | +1.46 | +1.01 | +0.64 |
+| G4 | 0.88 | +1.20 | +1.56 | +1.52 | +1.39 |
+| G5 | 0.00 | **+0.29** | +1.48 | +1.25 | +1.26 |
+| G8 | 0.00 | −0.10 | +0.66 | +0.72 | +1.25 |
+
+**The instrument to trust is `shape_audit.py clean` — Boost, clean sweep**, the most nearly-linear
+measurement in the set (on a driven sweep the H1 estimator still passes some harmonic energy, so a
+mode that distorts more reads hotter at HF for reasons that are not EQ):
+
+| drive | shelf lift | Boost | Overdrive | Distortion |
+|-------|-----------|-------|-----------|------------|
+| G2 | 3.24 dB | **+3.92** | +2.86 | +0.35 |
+| G3 | 2.06 | **+2.45** | +2.47 | −0.69 |
+| G4 | 0.88 | **+1.20** | +1.26 | −0.51 |
+| G5–G8 | 0.00 | **−0.47 / −0.12 / +0.40 / −0.10** | +1.43 … +1.92 | +0.29 … +1.79 |
+| G10 | 0.00 | **+4.89** | +1.61 | +1.70 |
+
+**Where the drive shelf's treble lift is zero, the plugin is flat to ±0.5 dB.** There is no fixed
+broadband tilt to correct. Where the lift is non-zero, the error tracks it **≈1:1** in Boost and
+Overdrive. Distortion does not show it because the ±0.584 V hard clamp destroys the pre-clip tilt —
+so the defect is pre-clip and mode-independent, and Distortion is merely insensitive to it.
+
+**Confirmed on the arbiter, not just on FR.** Removing the lift offline from `G2_T5_Clean`:
+FR shape rms **1.51 → 0.44 dB** *and* null **−15.10 → −25.23 dB**. Both metrics move together, which
+is what distinguishes this from a magnitude-only illusion. Over the 17 captures with a non-zero
+lift, removing 75–100 % of it deepens the null by **2.3–6.0 dB mean on every one of them**, and all
+three sweep levels agree on the direction.
+
+**Why the FR-optimal fixed shelf is rejected.** Scored on the null (`offline_null_probe.py null`),
+the 2 kHz/−1.95 dB winner of the FR fit is a wash — mean −0.13 dB but median ≈0, 21/44 deeper, with
+**+2.5 dB regressions at G5–G6 against −1.9 dB gains at G2**. It splits by drive, because all it was
+ever doing was cancelling the treble lift from the other end at the knob positions where the lift
+is large. The only fixed variants that are uniformly safe are high-pivot and small
+(6500 Hz/−2.80 dB: 39/44 deeper, worst +0.01, mean −0.078) — i.e. the honest ceiling on a *fixed*
+HF trim is ~0.1 dB, not the 0.3 dB the FR rms promised.
+
+### P7 — refit the three drive-keyed EQ instruments as one set  *(replaces P4; NEXT)*
+
+`shelfMaxDb` / `shelfSlopeDb` (treble lift, fades out by drive 0.475), `bassCut*` (185 Hz bell,
+fades out by G5) and `bassBoost*` (105 Hz low-shelf, fades IN with drive) all act on the same
+low-drive tilt over the same knob range. They were fit 2026-06-29 / 07-04 — **before** the warp
+recalibration (06-30), `hfTrim` (07-04) and P6 (07-28) landed in overlapping territory. The treble
+lift is now measurably spurious (above); the other two are the same vintage and must be re-read on
+the corrected baseline rather than assumed still-valid.
+
+- **Fit against the clean sweep**, guard with the driven nulls — not the reverse (see the metric
+  note in P4 above and the caveat in `offline_null_probe.py`).
+- **Sequence matters:** treble lift first, then re-measure. A broadband tilt error reads as "needs
+  more bass" once normalised, so fitting the LF instruments against the current baseline fits the
+  same defect twice from opposite directions.
+- Expected size: this is the largest single remaining defect in the plugin — G2 Boost/Clean nulls
+  around −15 to −17 dB against −24 to −26 dB at G5–G6.
+
+### P8 — reopen P1: the sub-64 Hz LF deficit is PARTIALLY correctable after all
+
+P1 closed this as "real but not correctable — the pedal's LF excess carries a phase lead, so every
+minimum-phase EQ that fixes the magnitude worsens the null." **That conclusion generalised from two
+data points and is wrong for most of the band.** P1's *measurements* were all correct.
+
+**What the complex transfer actually shows** (`offline_null_probe.py transfer`, clean sweep, G5/G6
+where the drive shelf is off so the reading is uncontaminated; + = pedal LEADS):
+
+| capture | 20 Hz | 32 Hz | 40 Hz | 50 Hz | 63 Hz | 80 Hz |
+|---------|-------|-------|-------|-------|-------|-------|
+| G5 T5 Clean | +3.5 dB / **+20°** | +2.7 / +4° | +2.1 / **−3°** | +1.4 / **−7°** | +0.7 / **−9°** | +0.1 / −9° |
+| G6 T5 Clean | +2.3 / **+27°** | +1.8 / +11° | +1.4 / +4° | +1.0 / **0°** | +0.5 / **−3°** | +0.1 / −4° |
+
+The phase lead is real **only below ~32 Hz**. From 40–80 Hz the deficit is still +0.5 to +2.1 dB and
+the pedal **lags** by 3–9° — which is exactly what a minimum-phase low-shelf supplies. In that band
+it is the *right* instrument, not the wrong one.
+
+**P1 tested two shelves, both roughly twice too deep and centred too low**, because both were fit to
+zero the **FR magnitude** rather than the complex residual. Reproduced on the null, all 44 captures ×
+4 sweep levels, full segments so 20–40 Hz is inside the scored window:
+
+| shelf | mean Δ null | median |
+|-------|------------|--------|
+| 60 Hz +3.5 dB | **+0.50** (worse) | +1.23 |
+| 25 Hz +5.0 dB | **+0.78** (worse) | +0.79 |
+| **100 Hz +1.0 dB** | **−0.44** (better) | **−0.64** |
+| 100 Hz +1.65 dB | −0.46 | −0.66 |
+| 100 Hz +2.5 dB | −0.10 | +0.25 |
+
+Scored on the complex residual `|D/S − 1|` weighted equal-energy-per-octave (`offline_null_probe.py
+shelf`), the optimum is **fc ≈ 75–100 Hz, +1.65 dB**, cutting the 30–120 Hz residual by **34–38 %**
+— and it improves **every** sub-band including 20–32 Hz (0.527 → 0.412), because the magnitude error
+down there is large enough that correcting *part* of it beats the phase penalty. P1's arithmetic
+assumed full magnitude correction and a 33° lead; the measured lead at G5/G6 is 20–27°.
+
+**Not a corner error.** To produce +2.7 dB at 20 Hz, Stage 2's 159 Hz HPF would have to sit at
+~116 Hz, i.e. C7 = 137 nF against a 100 nF ±10 % part — not a tolerance. And a *lower* corner gives
+*less* phase lead, the wrong direction for the 20 Hz reading. P1's topology tracing stands; the fix
+is genuinely artificial EQ, which is authorised.
+
+**Caveat that sets the order: this is drive-indexed too.** The +1.0 dB shelf gives −1.5 to −2.0 dB at
+G2–G4 and **+0.6 to +1.5 dB at G6–G8**, mode-independent. At G2–G4 it is entangled with the treble
+lift (a tilt error reads as "needs more bass" after normalisation), so **P8 must follow P7** and be
+re-measured on the corrected baseline. The sub-32 Hz remainder stays non-minimum-phase — though the
+lead needed is ~20° at 20 Hz ≈ **2.8 ms**, not the tens of ms P1 assumed, so even that is not
+obviously out of reach if it is ever worth the latency.
+
+### P9 — Overdrive's mode-specific tilt and its THD roll-off  *(open, unworked)*
+
+Overdrive carries **+1.4 to +2.5 dB of tilt at every drive, including where the drive shelf is off**
+(`shape_audit.py clean`, Overdrive column). It is the only mode that does. The same fact shows up in
+THD: on the hot sweep OD's distortion falls off far faster with frequency than the pedal's —
+Δ −0.8 dB at 320 Hz growing monotonically to **−4.1 dB at 5 kHz**, with the pedal holding 11–15 %
+while the plugin drops 11.9 → 6.9 %. This is the documented "OD compresses 3–4 dB lighter" residual,
+but it has a **shape**, which has never been worked. Do not paper it over with a linear shelf — it
+is a distortion-spectrum difference, and the accepted-residuals list should stop describing it as a
+flat offset.
+
+### P10 — the G8 → G10 Boost discontinuity  *(open, small, probably already-accepted)*
+
+G10 Boost reads **+4.9 dB of tilt on the clean sweep at all three tone settings** against G8 Boost's
+−0.10 — a sharp, tone-independent discontinuity, 3/3 captures, not capture noise. `driveMakeup`
+reaches its 6.0 dB cap around G9 and the measured G10 need is +6.8 dB, so this is plausibly the
+documented G10 residual seen through the cap. Worth an hour to confirm that rather than assume it.
+
+### Axes never audited at all
+
+`comprehensive_data.json` carries only `fr`, `thd`, `harmonics`, `h2`. These are in the captures but
+have never been compared against the plugin, and P2/P3/P6 all changed the clip path underneath them:
+
+- **IMD** (`imd_smpte`, `imd_ccif`) — used only as a *guard* in `p2_rail_asym_fit.py`, never as a target.
+- **Dynamics / compression** (`lvl_-30` … `lvl_-3` steps) — the source of the "OD compresses lighter"
+  claim, not re-measured since. Likely the same underlying thing as P9; look at them together.
+- **Discrete-tone THD** (`tone_82` … `tone_8000`) — computed by `comprehensive_report.py` but not emitted.
+- **Decay** (`decay_220`, `decay_1k`) — never examined.
+- **Red channel** — no NAM reference; unvalidatable by construction.
 
 ---
 
@@ -920,6 +1073,16 @@ python3 analysis/fr_thd_audit.py alias              # Finding 4 — why 6/8 kHz 
 python3 analysis/p31_harm_floor.py                  # P3.1 step 0 — capture-chain harmonic floor
 python3 analysis/p6_peak_fit.py                     # P6 — FR-peak + compression-tilt subset (~15 s)
 python3 analysis/p6_peak_fit.py --in-gain 3 6       # ...the clip-depth calibration probe
+
+python3 analysis/shape_audit.py cross               # P4/P7 — THE view: drive x sweep-level cross-tab
+python3 analysis/shape_audit.py clean               # P4/P7/P9 — Boost clean sweep, the linear instrument
+python3 analysis/shape_audit.py tilt                # ...the marginal that LOOKS conclusive and isn't
+
+# P8 / any EQ hypothesis — needs renders kept from a comprehensive_report.py run:
+python3 analysis/comprehensive_report.py --keep-renders /tmp/monarch_renders
+python3 analysis/offline_null_probe.py transfer     # complex pedal/plugin D(f): magnitude AND PHASE
+python3 analysis/offline_null_probe.py shelf --band 30 120          # fit on the COMPLEX residual
+python3 analysis/offline_null_probe.py null --low-shelf 100:1.0     # score it on the arbiter
 python3 analysis/fr_thd_audit.py h2                 # Finding 4 — H2 vs frequency (renders; needs PedalRender)
 
 python3 analysis/p2_rail_asym_fit.py --json run.json            # P2's fit/guard loop (~12 s)

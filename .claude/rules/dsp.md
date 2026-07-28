@@ -371,6 +371,17 @@ Result: null mean −16.07 → −16.59 dB over 44 captures, headline median −
 > bottom of the range. When an error is indexed by a knob, **plot it against the knob** before
 > hypothesising a mechanism — reading per-capture signs instead is what produced P6's false
 > "mode-differentiated" premise, and reading the G3–G7 mean is what hid it before that.
+>
+> **Generalised by P4 (2026-07-28), third instance — CROSS-TAB, don't marginalise.** The FR error is
+> indexed by **drive AND sweep level together**. A median over either axis alone averages the other
+> away, and *neither marginal shows the cell where both are extreme* — so the residual looked like a
+> textbook fixed tilt (+0.23 dB/oct, 99% sign-consistent, one shelf taking the median shape error
+> 0.379 → 0.073 dB rms) that does not exist. When a plausible error survives every one-axis summary,
+> **cross-tab the two axes before fitting anything** (`analysis/shape_audit.py cross`). Corollary:
+> a sign-consistent, tight-IQR marginal is *not* evidence that a fixed filter is the right
+> instrument — only the cross-tab and the null are. And prefer the **least-nonlinear** cell as the
+> instrument (Boost + clean sweep): on a driven sweep the H1 transfer estimator still passes some
+> harmonic energy, so a mode that distorts more reads hotter at HF for reasons that are not EQ.
 
 All the shelves above use the prewarped bilinear `shelfCoeffs` helper (a high-shelf sets Glo=1; a low-shelf sets
 Ghi=1; Glo=Ghi → exact unity). Result (render/2x+ paths): **50 Hz–16 kHz within ~1.2 dB at all
