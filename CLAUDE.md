@@ -183,25 +183,55 @@ clang-format -i src/**/*.{cpp,h}
     captures the null deepens **2.3–6.0 dB on every one**. The FR-optimal fixed shelf is rejected by
     the null (splits by drive: −1.9 dB at G2 against +2.5 dB at G5–G6); the honest ceiling on a
     *fixed* HF trim is ~0.1 dB. → **replaced by P7.**
-  - **Remaining, in order — see `FR_THD_AUDIT.md` P7–P10:**
-    - **P7 (next): refit the three drive-keyed EQ instruments as one set.** `shelfMaxDb`/
-      `shelfSlopeDb`, `bassCut*` and `bassBoost*` all act on the same low-drive tilt over the same
-      knob range and were all fit 2026-06-29/07-04 — **before** the warp recalibration, `hfTrim`
-      and P6 landed in overlapping territory. Fit against the **clean sweep**, guard with the driven
-      nulls. Largest single remaining defect (G2 nulls −15…−17 vs −24…−26 at G5–G6).
+  - **P7 refit the drive-keyed EQ instruments as one set — ✅ done (2026-07-29). Biggest null gain
+    yet: median −16.6 → −21.5 dB.** The 450 Hz treble lift is **retired** (`shelfMaxDb` 5.6 → 0,
+    `shelfSlopeDb` 11.8 → 0, behind a *derived* `trebleShelfEnabled` so the audio path and the
+    header-parsing harnesses cannot disagree) and the bass-cut bell absorbs its job: `bassCutQ`
+    0.45 → **0.50**, `bassCutOffDrive` 0.50 → **0.55**, `bassCutSlopeDb` 13.0 → **10.909**,
+    `bassCutMaxDb` 4.6 → **6.0**. Pivot 185 was already right; `bassBoost*` deliberately untouched
+    (freeing it wanted to move its pivot to 75 Hz — straight into P8's band — for 0.02 dB).
+    - **The rule it adds: P4's "least-nonlinear instrument" is necessary but NOT sufficient.** The
+      clean sweep *stops being linear part-way up the DRIVE knob* — THD 250 Hz–2 kHz (plugin/pedal)
+      runs 0.08/0.87 at G2 through 0.43/1.11 at G6, then **4.64/4.36 at G7, 7.63/7.71 at G8,
+      10.45/14.76 at G10**. Fit window is G2–G6. **Check that the instrument is still an instrument
+      at the far end of the axis you are sweeping** — a cell can be the least-nonlinear one
+      available and still be useless. This is what **withdrew P10's premise** (below).
+    - **The defect is ONE see-saw about 508 Hz** — that band reads −0.16…−0.31 dB at *every* drive
+      including G10, which is what identifies the pivot rather than assuming it. Tilt (HF−LF) runs
+      +3.95/+2.73/+1.25/+0.20/+0.02 dB at G2–G6, then reverses. The shipped law shape
+      (`max(0, max − slope·drive)`) already traced that trajectory; only the magnitude was wrong.
+    - **Why no single instrument could be read alone:** the lift and the bell each supplied ~half of
+      the same correction, so together they delivered ~6.6 dB of tilt at G2 where 3.95 is needed.
+      P4 measured the lift alone, saw that removing it fixed G2, and called it 100 % spurious —
+      right outcome, wrong reason (removing it left the bell's 3.9 dB standing, ≈ the 3.95 actually
+      required). **Corrections that overlap in band AND in keying must be measured in one pass.**
+    - **Result (all 44 captures):** median **−16.6 → −21.5**, range −6.6…−23.2 → −6.6…**−25.1**,
+      mean 2.46 dB deeper; 24 deeper (up to **−9.1 dB**, G2 T6.5 Clean), **18 byte-identical** (both
+      instruments are exactly 0 at and above drive 0.55, so nothing P6 fitted above G5 moved), 2
+      shallower (worst +0.9, G5 T8 OD). FR shape rms G2–G6 **0.941 → 0.259 dB**, and Boost/clean is
+      now flat to **±0.5 dB at every measurable drive**. All nine per-stage gates PASS. Two
+      candidates were fit on FR and judged on the null; **deleting** the shelf beat shrinking it in
+      every mode, so the simpler answer won on the arbiter rather than on taste. Harness
+      `analysis/p7_eq_refit.py`. See `FR_THD_AUDIT.md` P7.
+  - **Remaining, in order — see `FR_THD_AUDIT.md` P8–P10:**
     - **P8: reopen P1 — the sub-64 Hz deficit is PARTIALLY correctable.** P1's measurements were
       right; its *conclusion* over-generalised from two shelves, both fit to zero the FR magnitude
       and both ~2× the complex-optimal depth. The phase lead blocking a minimum-phase fix exists
       **only below ~32 Hz**: at 40–80 Hz the deficit is still +0.5…+2.1 dB and the pedal **lags**
       3–9°, which is exactly what a min-phase low-shelf supplies. **100 Hz +1.0 dB deepens the null
       0.44 dB mean** (median −0.64) where P1's 60 Hz/+3.5 and 25 Hz/+5.0 cost +0.50 and +0.78.
-      Drive-indexed too, and entangled with the treble lift at G2–G4 — **must follow P7**.
-    - **P9: Overdrive's mode-specific tilt** (+1.4…+2.5 dB at *every* drive, only mode that does)
+      Drive-indexed too, and entangled with the treble lift at G2–G4 — P7 has now cleared that
+      entanglement, so **P8 is next** and must be re-measured on the post-P7 baseline.
+    - **P9: Overdrive's mode-specific tilt** (+1.2…+2.5 dB at *every* drive, only mode that does)
       and its matching THD roll-off (−0.8 dB at 320 Hz → **−4.1 dB at 5 kHz** on the hot sweep).
       The documented "OD compresses 3–4 dB lighter" residual, but it has a **shape** — never worked.
-      Not a linear-EQ fix; likely the same thing as the un-audited dynamics axis.
-    - **P10: the G8→G10 Boost discontinuity** (+4.9 dB tilt, clean sweep, 3/3 tones vs G8's −0.10).
-      Probably the documented G10 residual seen through `driveMakeup`'s 6.0 dB cap; confirm, don't assume.
+      Not a linear-EQ fix; likely the same thing as the un-audited dynamics axis. **Now the largest
+      remaining shape error**: post-P7 Boost is flat to ±0.5 dB at every measurable drive, OD is not.
+    - **P10: the G8→G10 Boost discontinuity — ⚠️ PREMISE WITHDRAWN by P7 (2026-07-29).** The
+      "+4.9 dB tilt, clean sweep, 3/3 tones" is measured where the pedal reads **14.76 %** THD and
+      the plugin 10.45 % — not a linear-EQ measurement at all. Something at G10 is still real (its
+      nulls are the worst in the set at −6.6…−10.3), but the clean sweep cannot decide it. **Needs a
+      different instrument before it needs a fix** — fold it into the dynamics/discrete-tone axes.
     - **Never audited at all** (in the captures, absent from `comprehensive_data.json`): **IMD**,
       **dynamics/compression** (`lvl_-30…-3`), **discrete-tone THD**, **decay**. P2/P3/P6 all changed
       the clip path underneath them.
@@ -212,9 +242,12 @@ clang-format -i src/**/*.{cpp,h}
     `analysis/p6_peak_fit.py` (FR-peak + compression-tilt subset harness, ~15 s; its `--in-gain`
     probe is the clip-depth calibration that identified P6), **`analysis/shape_audit.py`** (FR error
     *shape*: the `cross` drive×level cross-tab that broke P4, and `clean` = Boost/clean-sweep, the
-    only near-linear instrument in the set), **`analysis/offline_null_probe.py`** (score an EQ
-    hypothesis on the arbiter without rebuilding — `transfer` gives complex pedal/plugin magnitude
-    **and phase**, `shelf` fits on the complex residual, `null` re-nulls the kept renders).
+    only near-linear instrument in the set — **and only up to G6**, per P7),
+    **`analysis/p7_eq_refit.py`** (the drive-keyed EQ set read as ONE set: `raw` strips all three to
+    expose the underlying defect, `seesaw` collapses it to the 508 Hz pivot, `fit` refits them
+    jointly, `--base pre-p7` re-reads a pre-P7 JSON), **`analysis/offline_null_probe.py`** (score an
+    EQ hypothesis on the arbiter without rebuilding — `transfer` gives complex pedal/plugin
+    magnitude **and phase**, `shelf` fits on the complex residual, `null` re-nulls the kept renders).
 
 ---
 
@@ -228,13 +261,14 @@ preset browser. Supply-voltage mod (9/12/18V) and rail-saturation ADAA are in. L
 engineering: CI/CD (`.github/workflows/`), cross-platform VST3, and per-platform installers
 (`installer/`) — see README.
 
-**Calibration result (Step 11, real-pedal A/B; refreshed v1.4 P6 2026-07-28):** the plugin nulls against
-44 NAM captures (drive G2–G10, tone T2–T8, Clean/OD/Dist) at **−6.6 to −23.2 dB, median −16.6**, down
-to ~−22 dB through mid gain (G4–G6). (Was −6.8 to −22.7, median −16.4 after P2. **P6** deepened the
-mean 0.52 dB — 13 captures deeper by up to 4.9 dB in the G6–G8 band, 5 shallower by ≤0.9 dB at G10,
-and 26 byte-identical because `driveMakeup` is exactly unity at and below G5.) Best per-mode null at
-the labelled mid-gain settings (G5 T5): Clean/Boost −21.2, OD −21.4, Dist −20.6 dB (unchanged by P6
-— G5 is at the make-up onset). Excellent to mid gain; shallower only at very high drive (G8–G10) — an
+**Calibration result (Step 11, real-pedal A/B; refreshed v1.4 P7 2026-07-29):** the plugin nulls against
+44 NAM captures (drive G2–G10, tone T2–T8, Clean/OD/Dist) at **−6.6 to −25.1 dB, median −21.5**, and
+is now at **−19.8 dB or better on every capture from G2 to G7** (worst G6 T5 OD). (Was −6.6 to −23.2, median −16.4→−16.6 after
+P2/P6. **P7** deepened the mean 2.46 dB and the median 4.9 dB — 24 captures deeper by up to 9.1 dB,
+concentrated at G2–G4 where the double-counted EQ correction lived, 2 shallower by ≤0.9 dB, and 18
+byte-identical because both refitted instruments are exactly zero at and above drive 0.55.) Best
+per-mode null at the labelled mid-gain settings (G5 T5): Clean/Boost −22.8, OD −21.2, Dist −21.4 dB.
+Excellent to mid gain; shallower only at very high drive (G8–G10) — an
 accepted device-physics / capture-aliasing residual, not a topology error (every Stage-1 value +
 topology re-traced exact against the Theseus schematic). The 44 captures (`analysis/pedal_export2/`,
 842 MB) are **local-only, gitignored** — re-capture against `analysis/test_signal_48k.wav` to
@@ -336,6 +370,13 @@ output (pre-clip): a **treble high-shelf** fading OUT with drive (restores the S
 **bass low-shelf** fading IN with drive (counters the bass-bloom-under-drive). Also *improves*
 OD/Dist nulls at mid/high drive (G5 OD −18.4→−23.7, G5 Dist −14.9→−19.1).
 
+> **⚠️ The treble half of this is RETIRED (v1.4 P7, 2026-07-29).** Its parenthesised rationale above
+> was never measured, and when it was, the captures said the opposite — the plugin was too *bright*
+> at low drive, not too dark. It and the bass-cut bell below were each supplying about half of one
+> correction and were fit independently, so together they over-corrected G2 by ~1.65×. `shelfMaxDb`/
+> `shelfSlopeDb` are now 0; the bell carries the whole job. The **bass low-shelf** (`bassBoost*`) is
+> unchanged. See the v1.4 P7 roadmap entry and `FR_THD_AUDIT.md` P7.
+
 **Low-drive bass-cut bell + fixed HF trim (`MonarchChannel`, 2026-07-04, v1.3):** a later A/B (by ear
 + harmonic-immune tone bursts) found Boost/Clean ran **~+3 dB too bassy below ~250 Hz at low drive**
 (G2), a bump PEAKING ~180 Hz that reverses to ~−1.8 dB thin by G10. Audible only in Boost (OD/Dist
@@ -344,7 +385,14 @@ bell, refined 07-05 from 160/Q0.7 to flatten the broad 100–330 Hz excess to ±
 OUT by G5 — a bell not a shelf (a shelf over-cuts sub-100, under-cuts the 150–220 peak). Validated:
 driven-sweep nulls **improve 1–2.8 dB at G2–G4 in ALL three modes**; only cost is a small clean-sweep
 (below-playing-level) regression at G2/G3 leaving them at −15…−18 dB (the excess is level-dependent, a
-knob-keyed cut can't fully separate the quiet clean sweep from playing level). A separate **fixed HF-trim
+knob-keyed cut can't fully separate the quiet clean sweep from playing level).
+**v1.4 P7 (2026-07-29) refit it** — Q 0.45→**0.50**, off-drive 0.5→**0.55**, slope 13.0→**10.909**,
+max 4.6→**6.0**, pivot 185 unchanged — so it now carries the retired treble shelf's share too. That
+also **dissolved the clean-sweep regression noted above** — G2/G3 clean-sweep nulls −14…−18 →
+**−23…−25**. So that regression was not the level-dependence it was attributed to; it was the
+double-counted correction, showing up worst on the one sweep where no clipping masked it. (The
+level-dependence hypothesis was never tested against the alternative — it was the only one on offer
+at the time.) A separate **fixed HF-trim
 high-shelf** (`hfTrim*`, −1.3 dB @ 4.5 kHz) eases the slightly-hot top end to match the captures within
 ~0.3 dB across 2–4.5 kHz (above that the captures roll off/alias — 6 kHz has a spurious −15 dB dip — so
 the trim is conservative and by-ear-confirmable, NOT fit to those artifacts). See dsp.md drive-shelf section.

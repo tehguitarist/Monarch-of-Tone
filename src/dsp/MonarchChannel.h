@@ -312,15 +312,24 @@ public:
     // TiltShelf and the even-harmonic injection, corrected empirically here. Two physically-keyed,
     // drive-scaled first-order shelves on Stage 1's output (NodeG, pre-clip so the clipper sees the
     // corrected spectrum), each fading to unity by the G4–G5 crossover:
-    //   • HIGH-SHELF, treble lift, fades OUT as drive rises — restores the Stage-1 HF shelf that
-    //     Av(s)=1+Z_upper/Z_lower lets collapse at low drive (the original "engaging it is dark").
+    //   • HIGH-SHELF, treble lift, fades OUT as drive rises. RETIRED by v1.4 P7 (2026-07-29) — its
+    //     rationale ("restores the Stage-1 HF shelf that Av(s)=1+Z_upper/Z_lower lets collapse at low
+    //     drive", the original "engaging it is dark") was never measured, and when it finally was,
+    //     the captures said the opposite: the plugin was too BRIGHT at low drive. See the P7 note
+    //     below the constants.
     //   • LOW-SHELF, bass lift, fades IN as drive rises — counters the documented
     //     bass-bloom-under-drive the model under-does (real pedal blooms low end as it compresses).
     // (The top-octave deficit once blamed on capture aliasing was actually bilinear warping of the
     // base-rate linear solve — now fixed by running the linear stages oversampled; see warp* below.)
     static constexpr double shelfPivotHz = 450.0; // treble high-shelf geometric centre (Hz)
-    static constexpr double shelfMaxDb = 5.6;     // HF lift at drive 0 (fades to 0 by ~drive 0.47)
-    static constexpr double shelfSlopeDb = 11.8;  // dB of HF lift lost per unit drive
+    static constexpr double shelfMaxDb = 0.0;     // RETIRED by P7 (was 5.6) — the bell does this job
+    static constexpr double shelfSlopeDb = 0.0;   // RETIRED by P7 (was 11.8)
+    // Single source of truth: the analysis harnesses parse these constants out of this header, so
+    // the flag is DERIVED from them and cannot drift from what the audio path actually does.
+    // Covers both signs so it stays airtight if the instrument is ever revived as a CUT: the gain
+    // law is max(0, shelfMaxDb − shelfSlopeDb·drive01), which is non-zero somewhere in
+    // drive01 ∈ [0,1] iff shelfMaxDb > 0 OR shelfSlopeDb < 0.
+    static constexpr bool trebleShelfEnabled = (shelfMaxDb > 0.0 || shelfSlopeDb < 0.0);
     // The Clean/Boost EQ error vs the captures is a bass TILT that reverses with drive — the plugin
     // runs ~+3 dB too bassy (a bump PEAKING ~180 Hz) at low drive (G2) and ~−1.8 dB too thin at high
     // drive (G10). The two ends need different SHAPES (a bell at low drive, a shelf at high drive), so
@@ -333,15 +342,32 @@ public:
     //   • bass CUT bell, fades OUT with drive — removes the low-drive low-mid EXCESS. A WIDE peaking
     //     bell (not a shelf: a shelf over-cuts sub-100 and under-cuts the peak): the excess is broad
     //     (100-330 Hz, peaking ~200), so a low-Q bell centred 185 flattens it to ±0.2 dB at G2.
+    // Refit with the treble shelf as ONE set by v1.4 P7 (2026-07-29): the pivot was already right,
+    // but the bell now carries the WHOLE low-drive correction, so it is deeper (4.6 → 6.0) and
+    // reaches one knob position further up (G5 → ~G5.5). maxDb is reached exactly at drive 0
+    // (= slope × offDrive), so the clamp never binds anywhere inside the knob's range.
     static constexpr double bassCutPivotHz = 185.0;    // cut-bell centre (Hz)
-    static constexpr double bassCutQ = 0.45;           // cut-bell width (low Q = wide, covers 100-330)
-    static constexpr double bassCutOffDrive = 0.5;     // cut fades to 0 at this drive (== G5)
-    static constexpr double bassCutSlopeDb = 13.0;     // dB of cut per unit drive below the cutoff
-    static constexpr double bassCutMaxDb = 4.6;        // cap on the low-drive cut
+    static constexpr double bassCutQ = 0.50;           // cut-bell width (low Q = wide, covers 100-330)
+    static constexpr double bassCutOffDrive = 0.55;    // cut fades to 0 at this drive (≈ G5.5)
+    static constexpr double bassCutSlopeDb = 10.909;   // dB of cut per unit drive below the cutoff
+    static constexpr double bassCutMaxDb = 6.0;        // cap on the low-drive cut (hit at drive 0)
     // Fixed (drive-independent) HF trim high-shelf: eases the plugin's slightly-hot top end toward
     // the captures (matches them within ~0.3 dB across 2-4.5k, where the captures are reliable).
     static constexpr double hfTrimPivotHz = 4500.0;    // HF-trim high-shelf centre (Hz)
     static constexpr double hfTrimDb = -1.3;           // HF cut above the pivot (dB)
+    // ---- v1.4 P7 (2026-07-29): why the treble half above is retired ---------------------------
+    // The treble lift and the bass-cut bell were fit INDEPENDENTLY (2026-06-29 / 07-04) and were
+    // each supplying about half of ONE correction, so together they delivered ~6.6 dB of tilt at G2
+    // where the captures need ~3.95. Measured as a set on Boost + clean sweep, the whole drive-keyed
+    // defect is a single see-saw about 508 Hz — that band reads −0.16…−0.31 dB at EVERY drive, i.e.
+    // it is the pivot — whose tilt runs +3.95/+2.73/+1.25/+0.20/+0.02 dB at G2…G6 and then reverses.
+    // The bell alone reproduces all of it (a 185 Hz cut lifts everything above it relatively), so the
+    // shelf had nothing left to do: deleting it and re-fitting the bell beat keeping a reduced shelf
+    // on the null in every mode. FR shape rms over G2–G6 0.941 → 0.259 dB; nulls up to 10.2 dB
+    // deeper at G2. Byte-identical at and above G5.5, where both instruments are already zero.
+    // NOTE the earlier claim above — that the lift "restores the Stage-1 HF shelf Av(s) lets
+    // collapse at low drive" — was never measured; the captures say the plugin was too BRIGHT at low
+    // drive, not too dark. See FR_THD_AUDIT.md P7.
 
     // ---- DRIVE make-up: the 3-terminal pot's missing second action (v1.4 P6, 2026-07-28) --------
     // FLAT (no EQ) gain into Stage 2, keyed to the DRIVE knob, zero at and below `driveMakeupOnset`
@@ -480,7 +506,11 @@ public:
         tone.prepare (rate);
         volume.prepare (rate);
         shBaseRate = rate;
-        updateDriveShelf (0.5); // default = unity pass-through until setDrive() runs
+        // Unity pass-through until setDrive() runs. Keyed off bassCutOffDrive rather than a literal
+        // 0.5: P7 moved the bell's zero to 0.55, which silently made the old `0.5` a −0.55 dB bell.
+        // Harmless either way (setDrive() runs every block before processing, and the filter state
+        // is zeroed just below), but a hardcoded number here goes stale the moment a law is retuned.
+        updateDriveShelf (bassCutOffDrive);
         // Bilinear-warp top-octave correction: rate-only, tracks the measured 1x/2x/4x→8x deficit
         // so the live (2x) and render (4x/8x) paths share the same top octave (see warp* consts).
         const double warpDb = std::min (warpMaxDb, warpScaleDb * std::pow (48000.0 / shBaseRate, warpExp));
@@ -773,16 +803,21 @@ private:
         const double trebleDb = std::max (0.0, shelfMaxDb - shelfSlopeDb * drive01);          // HF lift
         const double bassBoostDb = std::min (bassBoostMaxDb, std::max (0.0, bassBoostSlopeDb * (drive01 - bassOnsetDrive)));
         const double bassCutDb = -std::min (bassCutMaxDb, std::max (0.0, bassCutSlopeDb * (bassCutOffDrive - drive01)));
-        shelfCoeffs (1.0, std::pow (10.0, trebleDb / 20.0), shelfPivotHz, hsB0, hsB1, hsA1);  // treble high-shelf
+        if constexpr (trebleShelfEnabled)                                                     // retired by P7
+            shelfCoeffs (1.0, std::pow (10.0, trebleDb / 20.0), shelfPivotHz, hsB0, hsB1, hsA1);
         shelfCoeffs (std::pow (10.0, bassBoostDb / 20.0), 1.0, bassPivotHz, lsB0, lsB1, lsA1); // bass boost low-shelf
         peakCoeffs (bassCutPivotHz, bassCutDb, bassCutQ, bcB0, bcB1, bcB2, bcA1, bcA2);        // bass cut bell
     }
 
     inline double driveShelf (double x) noexcept
     {
-        const double t = hsB0 * x + hsB1 * hsX1 - hsA1 * hsY1; // treble high-shelf
-        hsX1 = x;
-        hsY1 = t;
+        double t = x;
+        if constexpr (trebleShelfEnabled) // retired by P7 — the bass-cut bell carries this correction
+        {
+            t = hsB0 * x + hsB1 * hsX1 - hsA1 * hsY1; // treble high-shelf
+            hsX1 = x;
+            hsY1 = t;
+        }
         const double b = lsB0 * t + lsB1 * lsX1 - lsA1 * lsY1; // bass boost low-shelf
         lsX1 = t;
         lsY1 = b;

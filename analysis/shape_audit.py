@@ -37,8 +37,12 @@ import fr_thd_audit as A  # noqa: E402
 # captures are not trustworthy above ~8 kHz and the warp shelf lives at 6.5 kHz.
 FIT_LO, FIT_HI = 80.0, 5120.0
 
-# MonarchChannel::updateDriveShelf -- trebleDb = max(0, shelfMaxDb - shelfSlopeDb * drive01)
-SHELF_MAX_DB, SHELF_SLOPE_DB = 5.6, 11.8
+# MonarchChannel::updateDriveShelf -- trebleDb = max(0, shelfMaxDb - shelfSlopeDb * drive01).
+# Parsed live out of the header rather than hardcoded: v1.4 P7 RETIRED this instrument (both
+# constants are now 0), and a stale copy here would have kept printing a lift that no longer
+# exists -- exactly the drift fr_thd_audit.channel_consts() was written to prevent.
+_K = A.channel_consts()
+SHELF_MAX_DB, SHELF_SLOPE_DB = _K["shelfMaxDb"], _K["shelfSlopeDb"]
 
 
 def treble_lift(drive01):

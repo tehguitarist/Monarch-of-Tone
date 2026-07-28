@@ -962,22 +962,121 @@ is large. The only fixed variants that are uniformly safe are high-pivot and sma
 (6500 Hz/−2.80 dB: 39/44 deeper, worst +0.01, mean −0.078) — i.e. the honest ceiling on a *fixed*
 HF trim is ~0.1 dB, not the 0.3 dB the FR rms promised.
 
-### P7 — refit the three drive-keyed EQ instruments as one set  *(replaces P4; NEXT)*
+### P7 — refit the drive-keyed EQ instruments as one set — ✅ **DONE 2026-07-29**
 
-`shelfMaxDb` / `shelfSlopeDb` (treble lift, fades out by drive 0.475), `bassCut*` (185 Hz bell,
-fades out by G5) and `bassBoost*` (105 Hz low-shelf, fades IN with drive) all act on the same
-low-drive tilt over the same knob range. They were fit 2026-06-29 / 07-04 — **before** the warp
-recalibration (06-30), `hfTrim` (07-04) and P6 (07-28) landed in overlapping territory. The treble
-lift is now measurably spurious (above); the other two are the same vintage and must be re-read on
-the corrected baseline rather than assumed still-valid.
+**Largest single improvement in the project's null history: median −16.6 → −21.5 dB over all 44
+captures**, best-null range −6.6…−23.2 → −6.6…**−25.1**, mean 2.46 dB deeper. 24 captures deeper
+(up to **−9.1 dB**, G2 T6.5 Clean), **18 byte-identical**, 2 shallower (G5 T5 OD +0.1, G5 T8 OD
++0.9). FR rms better on 18, worse on 4 (all ≤0.06 dB). All nine per-stage gates still PASS.
 
-- **Fit against the clean sweep**, guard with the driven nulls — not the reverse (see the metric
-  note in P4 above and the caveat in `offline_null_probe.py`).
-- **Sequence matters:** treble lift first, then re-measure. A broadband tilt error reads as "needs
-  more bass" once normalised, so fitting the LF instruments against the current baseline fits the
-  same defect twice from opposite directions.
-- Expected size: this is the largest single remaining defect in the plugin — G2 Boost/Clean nulls
-  around −15 to −17 dB against −24 to −26 dB at G5–G6.
+The fix is **one constant set**: the 450 Hz treble lift is **retired** (`shelfMaxDb` 5.6 → 0,
+`shelfSlopeDb` 11.8 → 0, guarded by a derived `trebleShelfEnabled` so the audio path and the
+harnesses that parse this header cannot disagree), and the bass-cut bell absorbs its job —
+`bassCutQ` 0.45 → **0.50**, `bassCutOffDrive` 0.50 → **0.55**, `bassCutSlopeDb` 13.0 → **10.909**,
+`bassCutMaxDb` 4.6 → **6.0**. `bassCutPivotHz` stays 185 (it was already right) and `bassBoost*` is
+**untouched** (see below). Harness: `analysis/p7_eq_refit.py`.
+
+#### The rule P7 adds: P4's "least-nonlinear instrument" is necessary but NOT sufficient
+
+P4 established *fit on Boost + clean sweep*. That is still right, but the clean sweep **stops being
+linear part-way up the DRIVE knob**, and nothing in the pipeline was checking. THD of the clean
+sweep, 250 Hz–2 kHz, plugin / pedal:
+
+| G2 | G3 | G4 | G5 | G6 | G7 | G8 | G10 |
+|----|----|----|----|----|----|----|-----|
+| 0.08/0.87 | 0.09/0.58 | 0.10/0.64 | 0.11/0.79 | 0.43/1.11 | **4.64/4.36** | **7.63/7.71** | **10.45/14.76** |
+
+So the fit window is **G2–G6**; G7 up is a distortion-spectrum difference read through an H1
+estimator, not linear EQ. **Check that your instrument is still an instrument at the far end of
+the axis you are sweeping** — a cell can be the least-nonlinear one available and still be useless.
+
+**This retires P10's premise.** The "+4.9 dB G10 Boost discontinuity on the clean sweep, 3/3 tones"
+is measured where the pedal reads 14.76 % THD and the plugin 10.45 %. It is not an EQ measurement.
+See the revised P10 below.
+
+#### The defect is ONE see-saw about 508 Hz
+
+With all three drive-keyed instruments removed (`p7_eq_refit.py raw --base pre-p7`), the underlying
+defect collapses to a single tilt. The **508 Hz band reads −0.16…−0.31 dB at every drive including
+G10** — that near-constancy across the whole knob is what identifies it as the pivot, not an
+assumption. The correction the plugin needs, in dB:
+
+| drive | 202 Hz | 508 Hz | 3225 Hz | tilt (HF−LF) |
+|-------|--------|--------|---------|--------------|
+| G2 | −2.15 | −0.28 | +1.80 | **+3.95** |
+| G3 | −1.54 | −0.25 | +1.19 | +2.73 |
+| G4 | −0.90 | −0.23 | +0.35 | +1.25 |
+| G5 | −0.46 | −0.16 | −0.26 | +0.20 |
+| G6 | −0.20 | −0.24 | −0.18 | +0.02 |
+| G7 * | +0.20 | −0.19 | −0.87 | −1.07 |
+| G10 * | +3.50 | −0.31 | −2.44 | −5.94 |
+
+The low side is a **bell** (it rolls off below 100 Hz, it is not a shelf); the high side plateaus
+above ~1.6 kHz. The shipped law shape — `max(0, max − slope·drive)`, saturating near G5 — already
+reproduces that trajectory almost exactly. **The law was right; only the magnitude was wrong.**
+
+#### Why measuring one instrument alone lied
+
+The treble lift and the bell were each supplying **about half of the same correction**, so together
+they delivered ~6.6 dB of tilt at G2 where 3.95 dB is needed — a 1.65× overshoot that neither
+instrument's own history would reveal. P4 measured the lift alone, found removing it fixed G2, and
+concluded it was 100 % spurious. That reading was right about the *outcome* at G2 and wrong about
+the *reason*: removing 3.04 dB of lift left the bell's 3.9 dB standing, which happens to be near
+the 3.95 dB actually required. **When two corrections overlap in band and in keying, neither can be
+read without the other in the same measurement.**
+
+#### What was tested, and what the arbiter picked
+
+Both candidates were fit on FR and then judged on the null over a 21-capture low-drive-weighted
+subset (`p2_rail_asym_fit.py --captures …`, ~22 s per iteration):
+
+| candidate | FR rms G2–G6 | null Δ clean | drv_−12 | drv_−6 |
+|-----------|--------------|--------------|---------|--------|
+| shipped | 0.941 dB | — | — | — |
+| A: shelf reduced to 1.75 dB + bell 4.75/Q0.60 | 0.262 | −2.54 | −1.37 | −0.96 |
+| **B: shelf DELETED + bell 6.0/Q0.50/off 0.55** | **0.259** | **−3.04** | **−1.76** | **−1.28** |
+
+B wins on the arbiter in every mode *and* is one instrument simpler, so the simpler answer did not
+have to be argued for. Its neighbours (Q 0.45; maxDb 6.5) both land within ±0.05 dB on the null —
+a flat optimum, not a knife edge. FR shape rms over the fit window: **0.941 → 0.259 dB**, and G2's
+rows individually 1.17–1.40 → 0.17–0.24.
+
+**Leave-one-drive-out shows no overfit**: refitting without a drive and scoring on it gives
+essentially the fitted numbers (G2 held out 0.253 vs 0.211 fitted; G4/G5/G6 identical to 3 dp).
+
+**Containment is structural, not lucky**: both instruments are exactly zero at and above drive
+0.55, so all 18 captures at G6 and above are **byte-identical**. Nothing P6 fitted above G5 moved.
+
+#### The one axis neither metric scored — measured after the fact, and it is fine
+
+Both instruments used here are **level-blind**: `p7_eq_refit.py` mean-removes every row, and the
+null applies a best-fit gain. So the *flat* component of the refit was unconstrained — and it is
+not zero (removing a treble lift and deepening a bass cut both take broadband energy out). Checked
+afterwards on `gain_db_applied`, tone-averaged, Boost:
+
+| | G2 | G3 | G4 | G5 | G6–G10 |
+|---|----|----|----|----|--------|
+| clean sweep, before | −0.95 | −0.49 | −0.08 | +0.22 | −0.17…+0.82 |
+| clean sweep, after | **+1.17** | +0.89 | +0.58 | +0.42 | unchanged |
+| **−6 dB driven sweep, Δ** | **+0.12** | +0.09 | +0.06 | +0.05 | 0.00 |
+
+At **playing level the shift is ≤0.12 dB** — the clipper absorbs a pre-clip level change, which is
+also why the driven nulls improved so much anyway. On the quiet clean sweep G2 moves ~2 dB, but the
+*spread across drive is unchanged* (sd 0.52 dB before and after); the V-shape became a monotone
+decline. No corrective instrument is warranted, and adding one pre-clip would fight the null gain
+just won. Recorded because "the metric is blind to X" is how this project's last four errors
+happened — here X was flat level, and it was checked rather than assumed.
+
+(Ignore the OD/Distortion columns of that table for absolute level: per-mode capture levels are
+**normalised**, so OD sits ~+7 dB and Distortion ~+14 dB by construction. Only within-mode
+differences mean anything.)
+
+#### `bassBoost*` deliberately left alone — it belongs to P8
+
+Freeing the 105 Hz low-shelf in the same fit bought 0.262 → 0.242 dB and wanted to move its pivot
+to **75 Hz**, i.e. straight into P8's band, on a fit window where the instrument is barely active
+(its real job is G7+, which is exactly where the clean sweep stops being measurable). That is the
+entanglement P8 already warned about, arriving from the other direction. Left untouched.
 
 ### P8 — reopen P1: the sub-64 Hz LF deficit is PARTIALLY correctable after all
 
@@ -1038,12 +1137,23 @@ but it has a **shape**, which has never been worked. Do not paper it over with a
 is a distortion-spectrum difference, and the accepted-residuals list should stop describing it as a
 flat offset.
 
-### P10 — the G8 → G10 Boost discontinuity  *(open, small, probably already-accepted)*
+### P10 — the G8 → G10 Boost discontinuity  *(open — but the PREMISE is withdrawn, 2026-07-29)*
 
-G10 Boost reads **+4.9 dB of tilt on the clean sweep at all three tone settings** against G8 Boost's
-−0.10 — a sharp, tone-independent discontinuity, 3/3 captures, not capture noise. `driveMakeup`
-reaches its 6.0 dB cap around G9 and the measured G10 need is +6.8 dB, so this is plausibly the
-documented G10 residual seen through the cap. Worth an hour to confirm that rather than assume it.
+**Original claim:** G10 Boost reads +4.9 dB of tilt on the clean sweep at all three tone settings
+against G8 Boost's −0.10 — a sharp, tone-independent discontinuity, 3/3 captures, not capture noise.
+
+**P7 withdrew the measurement.** That reading comes from a sweep carrying **10.45 % THD (plugin) /
+14.76 % (pedal)** — see P7's instrument-validity table. `shape_audit.py clean` restricts to the
+least-nonlinear *cell*, but nothing was checking that the cell was still linear at the far end of
+the drive axis, and above ~G6 it is not. A tilt measured through an H1 estimator on a 10–15 %-THD
+sweep is a distortion-spectrum difference wearing an EQ costume. "3/3 tones, not capture noise" is
+true and irrelevant — it is consistent because the *distortion* is consistent.
+
+**What survives:** something at G10 is real (the nulls are −6.6 to −10.3 dB there, far the worst in
+the set, and `driveMakeup` does cap at 6.0 dB against a measured G10 need of +6.8). But it is not
+established to be linear EQ, and the clean sweep cannot decide it. **P10 needs a different
+instrument before it needs a fix** — a discrete-tone or level-stepped measurement, i.e. it should
+be folded into the never-audited dynamics/THD axes rather than pursued as a tilt.
 
 ### Axes never audited at all
 
@@ -1078,6 +1188,11 @@ python3 analysis/shape_audit.py cross               # P4/P7 — THE view: drive 
 python3 analysis/shape_audit.py clean               # P4/P7/P9 — Boost clean sweep, the linear instrument
 python3 analysis/shape_audit.py tilt                # ...the marginal that LOOKS conclusive and isn't
 
+python3 analysis/p7_eq_refit.py raw --base pre-p7   # P7 — the defect with the drive-keyed set REMOVED
+python3 analysis/p7_eq_refit.py seesaw              # ...the same defect as one see-saw about 508 Hz
+python3 analysis/p7_eq_refit.py fit                 # ...refit all of them together (~3 min)
+python3 analysis/p7_eq_refit.py score --base pre-p7 # ...per-capture residual, before/after
+
 # P8 / any EQ hypothesis — needs renders kept from a comprehensive_report.py run:
 python3 analysis/comprehensive_report.py --keep-renders /tmp/monarch_renders
 python3 analysis/offline_null_probe.py transfer     # complex pedal/plugin D(f): magnitude AND PHASE
@@ -1088,6 +1203,12 @@ python3 analysis/fr_thd_audit.py h2                 # Finding 4 — H2 vs freque
 python3 analysis/p2_rail_asym_fit.py --json run.json            # P2's fit/guard loop (~12 s)
 python3 analysis/p2_rail_asym_fit.py --compare run.json         # ...and the A/B against a saved run
 ```
+
+`p7_eq_refit.py` reads only the JSON, so its `--base` must be told what the JSON's renders were
+made WITH whenever the header has moved on since (`--base pre-p7` is the shipped shorthand).
+Everything else in this file parses `MonarchChannel.h` live and stays correct automatically —
+`shape_audit.py` did NOT until P7 fixed it, and its hardcoded `SHELF_MAX_DB = 5.6` would have gone
+on printing a treble lift that no longer exists.
 
 `p2_rail_asym_fit.py` is the fast loop P2 **and P3** were fitted with (~16 s for a 16-capture
 subset, against ~10 min for the full `comprehensive_report.py`): it renders a small capture subset and

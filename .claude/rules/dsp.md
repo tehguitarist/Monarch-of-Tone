@@ -307,12 +307,20 @@ not Stage 1's tilt — so this is a second-order/capture-chain effect, not a top
 with **two drive-scaled first-order shelves on Stage 1's output** (`processPre`, pre-clip so the
 clipper sees the corrected spectrum; runs at the oversampled rate with the rest of the channel),
 each unity by the G4–G5 crossover:
-- **Treble high-shelf** (`shelfPivotHz` 450, `shelfMaxDb`/`shelfSlopeDb`): HF lift that fades OUT
-  with drive — restores the Stage-1 HF shelf `Av=1+Z_upper/Z_lower` lets collapse at low drive.
+- **Treble high-shelf** (`shelfPivotHz` 450, `shelfMaxDb`/`shelfSlopeDb`) — **RETIRED by v1.4 P7
+  (2026-07-29)**; both constants are 0 and the section is compiled out via a *derived*
+  `trebleShelfEnabled = (shelfMaxDb > 0.0)`, so the audio path and the harnesses that parse this
+  header cannot disagree. It was justified as restoring the Stage-1 HF shelf that
+  `Av=1+Z_upper/Z_lower` lets collapse at low drive (the "engaging it is dark" complaint) — a claim
+  that was never measured. Measured jointly with the bass-cut bell, the two were each supplying
+  about half of ONE correction and delivered ~6.6 dB of tilt at G2 where the captures need 3.95, so
+  the plugin was too *bright* at low drive, not too dark. Deleting it and re-fitting the bell beat
+  shrinking it on the null in every mode. See the "one see-saw" note under the bass-cut bell.
 - **Bass boost low-shelf** (`bassPivotHz` 105, `bassOnsetDrive`/`bassBoostSlopeDb`/`bassBoostMaxDb`):
   LF lift that fades IN with drive — counters the documented bass-bloom-under-drive.
-- **Bass cut bell** (`bassCutPivotHz` 185, `bassCutQ` 0.45 — a WIDE bell, fades OUT with drive to 0 by
-  `bassCutOffDrive`=0.5≈G5; `bassCutSlopeDb`/`bassCutMaxDb`, a peaking biquad `bc*`, 2026-07-04): removes
+- **Bass cut bell** (`bassCutPivotHz` 185, `bassCutQ` 0.50 — a WIDE bell, fades OUT with drive to 0 by
+  `bassCutOffDrive`=0.55≈G5.5; `bassCutSlopeDb` 10.909/`bassCutMaxDb` 6.0, a peaking biquad `bc*`,
+  2026-07-04, **refit by v1.4 P7 2026-07-29 to carry the retired treble shelf's share too**): removes
   the **low-drive low-mid EXCESS** — Boost/Clean ran ~+3 dB too bassy below ~250 Hz at G2 (a broad bump
   spanning 100–330 Hz, so a bell not a shelf — a shelf over-cuts sub-100 and under-cuts the peak; and the
   bell must be WIDE/low-Q to flatten the whole 100–330 span — a narrow bell centred at 160 left a +0.7 dB
@@ -322,6 +330,17 @@ each unity by the G4–G5 crossover:
   three modes**; the only cost is a small clean-sweep (very-quiet, below playing level) regression at
   G2/G3 that leaves them at still-excellent −15 to −18 dB (the excess is level-dependent — bigger at
   playing level than at the near-silent clean sweep — and a knob-keyed cut can't tell them apart).
+  > **v1.4 P7 (2026-07-29) — the bell now carries the WHOLE low-drive correction, and the sentence
+  > above about "level-dependence" was wrong.** Read as a set with the treble shelf, the drive-keyed
+  > defect is **one see-saw about 508 Hz** (that band reads −0.16…−0.31 dB at *every* drive, which is
+  > what identifies the pivot); its tilt runs +3.95/+2.73/+1.25/+0.20/+0.02 dB at G2–G6 and then
+  > reverses. The two instruments each supplied ~half of it, fit independently, so together they
+  > over-corrected G2 by ~1.65×. Refit: Q 0.45→**0.50**, off-drive 0.5→**0.55**, slope 13.0→**10.909**,
+  > max 4.6→**6.0** (reached exactly at drive 0, so the clamp never binds in range); pivot 185 unchanged.
+  > The clean-sweep regression it was blamed for is **gone** — G2/G3 clean nulls −14…−18 → **−23…−25**.
+  > Whole set: median null **−16.6 → −21.5 dB**, 24 deeper (≤9.1 dB), 18 byte-identical, 2 shallower
+  > (≤0.9). **Fit window is G2–G6 only** — above that the clean sweep carries 4.6–15 % THD and is no
+  > longer a linear FR measurement (see FR_THD_AUDIT.md P7).
 - **Fixed HF-trim high-shelf** (`hfTrimPivotHz` 4.5k, `hfTrimDb` −1.3, drive-independent, `ht*`,
   2026-07-04): eases the slightly-hot top end so the plugin matches the captures within ~0.3 dB across
   2–4.5 kHz (where the captures are reliable; above that they roll off/alias erratically — 6 kHz shows a
@@ -395,7 +414,9 @@ bass-cut-bell coeffs update per block in `setDrive`, the warp + HF-trim shelves 
 > track the ACTUAL Stage-1 output (`nodeG`/`clipEnv`), so they correctly behave like Yellow@(d+1⁄6). But
 > the EQ-correction shelves, being knob-keyed, apply Yellow@d's curve at Red's knob d — i.e. they do NOT
 > shift by 1⁄6 the way the gain does. Effect: at LOW Red drive the bass cut bell over-cuts ~1–2 dB vs a
-> gain-matched Yellow. **Potential fix:** on the hiGain channel, key the shelves off an EFFECTIVE drive
+> gain-matched Yellow — **and P7 (2026-07-29) deepened that bell (4.6 → 6.0 dB) and extended its reach
+> (G5 → G5.5), so the Red mismatch is now proportionally larger and the bell is the only instrument
+> still causing it** (the treble shelf, the other knob-keyed offender, is retired). **Potential fix:** on the hiGain channel, key the shelves off an EFFECTIVE drive
 > `drive01 + 1⁄6` (clamped) so Red is a fully consistent gain-shifted Yellow in EQ too. Left as-is for now
 > because Red has NO NAM reference — neither keying is validated, so it's a voicing choice either way.
 
