@@ -19,7 +19,7 @@ short of the real pedal.
 |---|---|---|
 | 1 | Universally light 20–80 Hz | **Confirmed** — largest defect in the plugin; present in the raw circuit at every drive. *(2026-07-28: confirmed real, but CLOSED as not correctable — the excess carries a phase lead, so every minimum-phase EQ that fixes the magnitude worsens the null. See P1.)* |
 | 2 | A touch hot from 800 Hz up; maybe knob variance | **Confirmed as real, rejected as knob variance** — it does not track the TONE knob at all |
-| 3 | The FR peak moves and the plugin doesn't match it | **Confirmed it moves, but it is a readout of #1/#2 + the known bloom** — no separate mechanism |
+| 3 | The FR peak moves and the plugin doesn't match it | **Confirmed, and it WAS a separate mechanism.** Both earlier verdicts here were wrong: "a readout of #1/#2" (this row, from the ±0.2 oct *mean*) and "mode-differentiated" (P6's first framing, from per-capture signs). It is a mode-independent **gain-vs-DRIVE-knob deficit above G5** — fixed in P6 by `driveMakeup` |
 | 4 | THD fine overall, clean harmonics off, no 6–8.5 kHz THD | **Split** — the 6–8.5 kHz gap is mostly a measurement artifact; the clean/even-harmonic problem is real and much bigger than it looked |
 
 ---
@@ -125,6 +125,13 @@ Overall-FR peak location, plugin vs pedal, in octaves (`fr_thd_audit.py peaks`, 
 
 The G2 and G8–G10 rows do sit on top of tilt errors already identified. The G3–G7 mode-split does
 not obviously, so the peak is now its own open item — see **P6**.
+
+**Resolved 2026-07-28 (P6), and the "structural signature" sentence above is the trap.** Opposite
+signs by mode at the same drive is *not* evidence of a mode-differentiated mechanism. It is one
+mode-independent drift in DRIVE crossing zero at a different knob position per mode, because each
+mode has a different low-drive intercept. Both readings of this table failed the same way — the
+mean cancelled the effect, the per-capture signs mis-attributed it — because **neither plots the
+error against the drive axis**, which is the axis it lives on. See P6.
 
 > **Metric note:** always read this table per sweep level and never trust its mean. On
 > `sweep_drv_-6` every peak drops to 60–350 Hz (LF-dominated once compressed) and the sign pattern
@@ -621,13 +628,38 @@ Don't chase it by raising this coefficient: that trades H2's now-zero bias for a
 
 Re-run `fr_thd_audit.py peaks` after P1/P4. G2/G8–G10 should tighten; the G8–G10 residual is the
 documented bass-bloom limit. **But the premise that G3–G7 is already clean was wrong** (Finding 3,
-revised), so the mid-gain band is a work item, not a check — see P6.
+revised), so the mid-gain band is a work item, not a check — see P6. **P6 is now done**; the
+G8–G10 residual it did not close is still the documented bass-bloom limit.
 
-### P6 — mid-gain FR peak displacement (G3–G7), sign-split by mode — ❌ **NEW, open — ordered BEFORE P4**
+### P6 — mid-gain FR peak displacement — ✅ **DONE (2026-07-28). The premise was wrong: it is not a sign split.**
 
-**Reordered ahead of P4 (2026-07-28, user call):** P4 is a fixed `hfTrim`-style shelf tweak, and a
-mode-differentiated peak error can't be explained by a mode-independent shelf (see below) — so P6
-may change what P4 even needs to correct. Do P6 first; re-measure the 1.6–5 kHz tilt after.
+**Result first.** The item was framed as "OD's peak is too HIGH, Distortion's too LOW at the same
+drive — so some mode-differentiated mechanism must exist", and three sessions of topology tracing
+looking for that mechanism came back empty. There is no mode-differentiated mechanism. Reading the
+same table as a **trajectory in drive** instead of a list of per-capture errors shows one
+mode-independent effect: **the pedal's FR peak migrates ~1.4–1.7 octaves downward from G2 to G10;
+the plugin's migrates only 0.2–1.0.** The sign split is that single monotone drift crossing zero at
+a different knob position in each mode, because each mode starts from a different low-drive offset.
+
+The cause is a **gain-vs-DRIVE-knob curve error above ~G5** — the plugin is short of drive into its
+clip stages, ~0 dB up to G5 rising to ~+6.8 dB at G10 — and the fix is the half of the real
+3-terminal DRIVE pot's dual action the 2-terminal model drops. `MonarchChannel::driveMakeup`, one
+flat drive-keyed gain at NodeG, zero at and below G5. Peak-error rms over the P6 subset: **OD 0.44 →
+0.14 oct, Dist 0.37 → 0.21, Clean 0.66 → 0.35**; null over all 44 captures **0.52 dB deeper on the
+mean** (up to 4.9 dB in P6's own G6–G8 band); **every capture at or below G5 is byte-identical**, so
+none of the G2–G5 fitting from earlier passes moved. Full numbers and the fit below.
+
+**Still do P4 after this** — `driveMakeup` changes clip depth at G6+, so re-read the 1.6–5 kHz tilt
+off fresh data before touching `hfTrim`. (The original reason for the ordering — "a
+mode-differentiated peak error can't be explained by a mode-independent shelf" — was based on the
+premise this item just overturned, but the ordering itself is still right, for the simpler reason
+that P6 moved the data P4 must be fit to.)
+
+---
+
+*Everything from here down is the original investigation, kept because its measurements are sound
+and several are still load-bearing. Its framing — that a mode-differentiated mechanism must exist —
+is the part that was wrong.*
 
 **Reported from the dashboard (user, 2026-07-28) and confirmed against the table.** The curve
 *shape* is right; where it **peaks** is not, and by more than the tilt findings account for. Every
@@ -642,6 +674,29 @@ reported case reproduces exactly (`fr_thd_audit.py peaks`, `sweep_clean`, plug /
 | G5 T2 Dist | 243 | 296 | **−0.28** |
 | G10 T5 OD | 398 | 230 | +0.79 *(bloom band, already known)* |
 | G10 T8 Clean | 1109 | 362 | +1.61 *(bloom band, already known)* |
+
+#### The reframing that solved it — read the table as a trajectory, not a list
+
+Same `sweep_clean` data, T5, arranged by drive (plugin / pedal Hz, and the octave error):
+
+| mode | G2 | G3 | G4 | G5 | G6 | G7 | G8 | G10 | plugin migration G2→G10 | pedal | deficit |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| Clean | 970/818 (+0.24) | 954/901 | 891/857 | 800/897 (−0.17) | 837/912 | 860/787 | 875/684 | 834/315 (+1.40) | **−0.22 oct** | −1.38 | **−1.16** |
+| OD | 775/745 (+0.06) | 700/659 | 619/607 | 520/498 (+0.06) | 488/376 (+0.38) | 457/339 | 431/277 | 398/230 (+0.79) | **−0.96 oct** | −1.70 | **−0.74** |
+| Dist | 452/498 (−0.14) | 401/462 | 342/404 | 287/342 (−0.25) | 281/279 | 274/240 | 265/191 | 253/150 (+0.76) | **−0.83 oct** | −1.73 | **−0.89** |
+
+Read down the columns and the "sign split" disappears. **The pedal's peak slides 1.4–1.7 octaves
+down as DRIVE is opened; the plugin's slides 0.2–1.0.** Every mode has the same sign and a similar
+size of deficit. What differs per mode is only the **intercept**: at G2 Clean sits at +0.24, OD at
++0.06, Dist at −0.14. Distortion starts below zero, so the common upward drift crosses zero around
+G6 and reads "too low" at G4–G5; OD starts at zero and reads "too high" by G6. Two rows of one
+monotone trend, sampled either side of its own zero crossing.
+
+**The methodological error was in the aggregation, twice over.** Finding 3 read the G3–G7 *mean*
+and got ≈0 because the opposite signs cancel; P6 then read the per-capture *signs* and inferred a
+mode-differentiated mechanism from what is a per-mode intercept. Neither view shows the drive axis,
+which is where the whole effect lives. **When an error is indexed by a knob, plot it against the
+knob before hypothesising a mechanism.**
 
 **Why this is not just P1/P2/P4 restated:** those are broadband tilts, and a tilt moves every mode's
 peak the same way. Here Distortion is displaced **down** and OD **up** at the same drive settings,
@@ -710,79 +765,137 @@ so a single global shelf cannot be the whole story.
     OD-under-compresses-3–4-dB residual (less compression preserves more HF content at a given
     input level, which biases OD's peak up — direction-consistent, not yet quantified). The
     topology side is exhausted — next step is an isolation experiment, not more circuit tracing.
+  - **All of the above is sound and all of it was aimed at the wrong target.** There is no
+    mode-differentiated mechanism to find, so its absence was the correct result — see the
+    trajectory reframing above. Keep the tracing conclusions (the `node_HC` idealization gap is
+    still real and still unmodelled); discard only the premise that drove the search. The planned
+    isolation experiment on `injectEvenHarmonic` was **never run and is now moot** — the injection
+    is knee-triggered and mode-keyed, and could not have produced a mode-*independent* drive-slope
+    deficit of this size.
 
-### P6 next-session plan — isolation experiment (not yet run)
+#### The measurement that identified the cause
 
-**Status (2026-07-28): investigation paused here, deliberately.** Everything above this line is
-confirmed. Below is the next concrete step, written up so a fresh session can execute it without
-re-deriving the reasoning. **User has designated P6 as its own dedicated session** (2026-07-28) —
-don't fold it into unrelated work, and see [[feedback-depart-from-schematic-for-accuracy]] /
-`CLAUDE.md` note: **user has authorized departing from literal schematic fidelity for this item**,
-specifically because topology tracing (above) came back empty. That does not license skipping
-tracing on a *different* future discrepancy — it applies here because the trail already ran out.
+**The FR peak is a clip-depth meter.** `analysis/p6_peak_fit.py --in-gain` pre-scales the plugin's
+input and deconvolves against the *same* scaled reference, so the result stays a transfer function
+and a pure gain cannot move the peak — any movement it produces is nonlinear. It moves it a lot,
+and almost linearly: **−0.35 oct per +3 dB** of pre-clip level, consistently across modes and drive
+settings. That converts every octave error in the table into a number of dB of missing drive:
 
-**What's set up and ready:**
-- `tools/PedalRender` is already built (`build/PedalRender_artefacts/Release/PedalRender`).
-- All 44 captures are present locally (`analysis/pedal_export2/`).
-- `comprehensive_report.py` caches the pedal (capture) side to `analysis/.cache/` and only
-  re-renders the plugin side each run — so iterating on a code change and re-running is much
-  faster than the ~10 min full-cold estimate elsewhere in this doc.
-- **Do not disturb the existing uncommitted P3.2 change in `src/dsp/MonarchChannel.h`**
-  (`asymLowBoost` −0.030, Boost-only) — it's orthogonal to OD/Dist FR shape, safe to build with
-  as-is, just don't lose it. `git diff` before and after any experiment edit to confirm only the
-  intended lines changed.
+| | G2 | G4 | G5 | G6 | G7 | G8 | G10 |
+|---|---|---|---|---|---|---|---|
+| OD, dB of drive the plugin is short | +0.5 | +0.3 | +0.5 | **+3.2** | +3.7 | +5.5 | +6.8 |
+| Dist, same | −1.2 | −2.1 | −2.1 | +0.1 | +1.6 | +4.0 | +6.5 |
 
-**The experiment:** isolate whether the even-harmonic injection (`injectEvenHarmonic`,
-`MonarchChannel.h` ~line 768) or the accepted OD-under-compression residual drives the sign-split.
-`injectEvenHarmonic` returns `x + (mid/high term) + (low term)` — **don't just skip the call**,
-because `clipEnv` (updated inside it, line 771) also gates `odLowShelf`'s blend (line 587), so
-bypassing the call zeroes both mechanisms at once and conflates the two hypotheses. Instead:
-1. In `processClip` (line 574), keep the call for its state side-effects but discard its two
-   injected terms — e.g. temporarily change `injectEvenHarmonic`'s `return out;` (line 816) to
-   `return x;` so `clipEnv`/`lowEnv`/etc. still update (keeping `odLowShelf`'s gate behavior
-   identical to production) while the H2 terms themselves contribute nothing.
-2. Rebuild just `PedalRender` (`cmake --build build --target PedalRender`).
-3. Run `python3.11 analysis/comprehensive_report.py` (full run needed — FR peak location is a
-   whole-sweep property, can't subset captures with the current CLI).
-4. `python3.11 analysis/fr_thd_audit.py peaks` and compare the G4–G7 OD/Dist rows against the
-   baseline table above. Save the JSON first (`cp analysis/reports/comprehensive_data.json
-   /tmp/p6_baseline.json` or similar) so `--base` diffing / a revert-and-recheck is possible.
-5. **Revert the `injectEvenHarmonic` edit exactly** (`git diff` should show only the P3.2 hunk
-   remaining) and rebuild before doing anything else with this checkout.
+Flat to G5, then a steep rise. Two independent checks agree:
 
-**Reading the result:**
-- If the OD/Dist sign-split shrinks or flips with injection neutralized → injection is implicated;
-  next step is refitting `asymMidFc`/`asymOD`/`asymDist` or the split's frequency, not adding a new
-  shelf.
-- If the sign-split is unchanged → the injection isn't it, and the remaining candidate is the
-  compression-asymmetry residual, which is a harder, more structural fix (likely needs its own
-  investigation into why OD's soft-clip compresses lighter than the real pedal, not a peak-chasing
-  correction).
-- Either way, **validate against all 44 captures**, not just the G4–G7 OD/Dist spot-checks — this
-  was an explicit user requirement. Re-run the full `peaks` table (both `sweep_clean` and the driven
-  sweeps) before calling any fix done, and re-run the time-domain null (`null_test.py`) since that
-  is the standing arbiter for any correction, per the P1/presence-bump precedent.
-- **Level dependence is NOT monotonic between clean and driven sweeps** — on `sweep_drv_-6` the same
-  captures don't reproduce the clean-sweep sign/magnitude cleanly (e.g. G5 T5 Dist flips to +0.11,
-  G6/G7 T5 OD drop to ~−0.06/−0.10). Either multiple mechanisms are at play at different clip depths,
-  or `_peak_hz`'s broadband-argmax is picking up a different spectral feature once the sweep is
-  heavily compressed (worth sanity-plotting a couple of driven-sweep FR curves before trusting that
-  table's peak number the way the clean-sweep one is trusted).
+- **The best-fit gain the harness must add to the plugin** (`gain_db_applied`, `sweep_clean`) rises
+  monotonically with drive in Boost/Clean — the mode with no diode clamp, so output level still
+  tracks gain: **−0.69 dB at G2 → +4.83 dB at G10**, a 5.5 dB gain-vs-knob deficit measured without
+  reference to the peak metric at all.
+- **The time-domain null — the standing arbiter — splits at the same knob position.** Feeding extra
+  pre-clip level *hurts* at G5 and *helps* from G6 up:
 
-**Method going forward:**
+  | capture | +0 dB | +3 dB | +5 dB |
+  |---|---|---|---|
+  | G5 T5 OD | **−21.1** | −19.2 | −15.8 |
+  | G6 T5 OD | −16.9 | **−22.1** | −20.0 |
+  | G8 T5 OD | −12.1 | −14.5 | **−15.1** |
+  | G8 T5 Clean | −16.2 | −18.9 | **−19.2** |
+
+  This is what makes it a curve error rather than a level error: a single global gain cannot be
+  simultaneously right at G5 and 5 dB short at G8, and the null says both.
+
+#### The fix — `MonarchChannel::driveMakeup`, and why it is not another shelf
+
+The deficit is a **flat level into the clip stages that should grow with the DRIVE knob**. That is
+exactly what circuit.md §7's accepted simplification drops. The real DRIVE pot is 3-terminal
+(wiper → Stage-1 feedback, pin3 → R6 → C5 → Stage 2); the model uses a 2-terminal rheostat, which
+keeps the feedback action and discards the second one. The literal wiring was tried and **rejected
+for over-swinging Stage-2 gain (~28 dB vs the measured ~10.6)**, and the 2026-06-29 re-derivation
+established precisely what the discarded action does: it **moves Stage 2's flat LEVEL, not Stage 1's
+tilt**. So the literal topology had the right shape and the wrong magnitude, and the measurement
+above is that shape, fitted:
+
+```cpp
+driveMakeupOnset   = 0.5    // G5 — where the null and the peak metric both say the deficit starts
+driveMakeupSlopeDb = 14.0   // dB per unit drive past the onset
+driveMakeupMaxDb   = 6.0    // cap, reached ~G9
+```
+
+applied at NodeG in `processPre`, before `driveShelf`. Stage 1 is linear, so this cannot change
+Stage 1's own voicing — only the level the clip stages see. **Below G5 the gain is exactly 1.0, so
+every capture at or below G5 renders byte-identical** and none of the G2–G5 fitting from the
+bass-cut-bell / drive-shelf passes is disturbed.
+
+**Why no EQ shape is involved, and why that matters:** every previous attempt at this band was
+EQ-shaped, and each one reversed sign with drive or lost more null than it gained (the fixed
+presence bump, the LF-extension shelf, the tilt shelf). A gain-vs-knob error *looks* like a tilt in
+any single-capture FR because clipping converts level into spectral shape — but it cannot be
+corrected by one, since the required correction is a different amount at every knob position and
+zero at the bottom of the range. **`driveMakeup` carries no filter state at all.**
+
+#### Validation and what remains
+
+Full 44-capture `fr_thd_audit.py peaks`, `sweep_clean` (the trusted level — see the level-dependence
+note below):
+
+| | before | after |
+|---|---|---|
+| all 44, mean | +0.24 oct | **+0.08** |
+| all 44, median | +0.11 | **+0.06** |
+| all 44, sd | 0.44 | **0.28** |
+| G3–G7, max abs | 0.43 | **0.28** |
+
+Per-mode rms over the P6 subset (`p6_peak_fit.py`): OD **0.44 → 0.14**, Dist **0.37 → 0.21**,
+Clean **0.66 → 0.35**.
+
+**The null — the arbiter — agrees, over all 44 captures** (`run_validation.py --captures
+analysis/pedal_export2`): headline **−22.7…−6.8 dB, median −16.4 → −23.2…−6.6, median −16.6**;
+mean **−16.07 → −16.59 dB**. 13 captures deeper, 5 shallower, **26 byte-identical** (every G2–G5
+row). The gains land exactly in P6's band, in all three modes:
+
+| deeper | | shallower | |
+|---|---|---|---|
+| G7 T5 OD | −15.8 → **−20.7** | G10 T2 OD | −8.4 → −7.5 |
+| G8 T5 Clean | −16.2 → **−19.8** | G10 T2/T5/T8 Dist | −6.8/−6.8/−7.3 → −6.6/−6.6/−7.1 |
+| G8 T5 OD | −12.1 → **−15.1** | G10 T2 Clean | −9.6 → −9.5 |
+| G6 T5 OD | −17.0 → **−19.8** | | |
+| G7 T5 Clean | −19.9 → **−22.6** | | |
+| G6/G7 T5 Dist | −20.7/−19.1 → **−22.2/−20.8** | | |
+
+All nine per-stage validation gates still PASS (`SmokeTest_RC` … `SW2HardClip_Sine`,
+`FullChain_DualChannel`, plus `OSFidelity`/`PerfBenchmark`/`TrimLock`).
+
+**Residuals, and why they are left:**
+- **G2–G5 is untouched by construction** (gain is exactly 1.0 below the onset), so Distortion's
+  −0.24/−0.25/−0.28 oct at G4–G5 survives. That is the *intercept* half of the decomposition, not
+  the drift, and it is a genuinely mode-dependent offset — the one place the original "mode split"
+  framing does apply. Small, and no mechanism identified; left open.
+- **G10 still runs +0.2 to +0.9 oct high.** The measured need there is +6.8 dB and the cap is 6.0;
+  raising the cap buys a little peak accuracy and gives it back on the G10 Distortion null. This is
+  the documented bass-bloom/high-drive residual and is not fully a drive-curve effect.
+- **G10 T2 OD moved −0.15 → −0.72 oct** and is also the one capture whose null gives back ~1 dB.
+  Its pedal peak (381 Hz) is non-monotone against its own neighbours (G10 T5 = 230, G10 T8 = 344),
+  so this is the one row where the capture, not the plugin, looks anomalous. Flagged, not fitted to.
+
+**Method notes that still stand (do not re-learn these):**
 - Read `peaks` **per sweep level** and per mode. Never use its `all:`/`G3–G7` mean — it cancels the
-  sign split (that is precisely how Finding 3's wrong ±0.2 claim was produced).
-- **Any fix must be validated against all 44 captures**, not just the 5 spot-check rows above — those
-  were the ones reported by eye off the dashboard and are confirmatory, not exhaustive. Re-run
-  `fr_thd_audit.py peaks` (full output, all captures, `sweep_clean` AND the driven sweeps) before
-  calling this closed.
-- **The null is the arbiter for any fix** — the standing rule from P1 and the presence-bump
-  reversion. A peak shift carries phase, and FR rms is blind to phase.
+  sign split, which is exactly how Finding 3's wrong ±0.2 claim was produced.
+- **`sweep_clean` is the trusted level for this metric.** On `sweep_drv_-6` the same captures do not
+  reproduce the clean-sweep sign/magnitude (G5 T5 Dist flips to +0.11; G6/G7 T5 OD drop to
+  ~−0.06/−0.10) because the sweep is heavily compressed and the broadband argmax starts tracking a
+  different spectral feature. Level dependence here is not monotonic.
+- **The "clean" sweep is not quiet at the clip stage.** It is −30 dBFS at the input, but Stage 1 +
+  Stage 2 put ~+40 dB in front of both clippers, so at G6 it reaches ~2.7 V — past OD's ±1.64 V
+  clamp and Dist's ±0.584 V. Both clip stages are active at every sweep level, which is why the
+  plugin's own peaks differ so much by mode at fixed drive (G6 T5: Clean 837, OD 488, Dist 281 Hz).
+  Structural, not a bug — and it is why a linear/no-clipping explanation was ruled out early.
+- **Any fix must be validated against all 44 captures and against the null**, not the spot-check
+  rows. A peak shift carries phase and FR rms is blind to phase.
 
-**Do NOT start P6 by adding another shelf.** Every EQ-shaped correction attempted so far that was
-not traced to a mechanism first either reversed sign with drive or lost more null than it gained.
-Candidate 2 (a shelf-crossing artifact) is now demoted by the raw-vs-shelf test above — the fix, if
-one is needed, is more likely a clip-stage / tone-stage-loading change than an EQ shelf.
+**Do NOT re-solve this with a shelf.** Every EQ-shaped correction attempted in this band either
+reversed sign with drive or lost more null than it gained. A gain-vs-knob error is not a tilt, even
+though clipping makes it look like one in any single capture.
 
 ### P4 — the 1.6–5 kHz tilt  *(~1 dB; do after P6)*
 
@@ -805,6 +918,8 @@ python3 analysis/fr_thd_audit.py harm               # Finding 4 — H2–H7 anch
 python3 analysis/fr_thd_audit.py evens --base OLD.json  # P3/P3.1 — even-series rms+bias, before/after
 python3 analysis/fr_thd_audit.py alias              # Finding 4 — why 6/8 kHz THD is invalid
 python3 analysis/p31_harm_floor.py                  # P3.1 step 0 — capture-chain harmonic floor
+python3 analysis/p6_peak_fit.py                     # P6 — FR-peak + compression-tilt subset (~15 s)
+python3 analysis/p6_peak_fit.py --in-gain 3 6       # ...the clip-depth calibration probe
 python3 analysis/fr_thd_audit.py h2                 # Finding 4 — H2 vs frequency (renders; needs PedalRender)
 
 python3 analysis/p2_rail_asym_fit.py --json run.json            # P2's fit/guard loop (~12 s)

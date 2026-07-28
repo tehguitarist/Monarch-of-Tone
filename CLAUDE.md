@@ -133,38 +133,47 @@ clang-format -i src/**/*.{cpp,h}
     100 Hz / quiet / high drive, where the pedal is fully saturated and the plugin can't swing to its
     rails — that is **P1's LF shortfall seen through the clipper**, not a second mechanism. See
     `FR_THD_AUDIT.md` P3.2.
-  - **P6 mid-gain FR peak displacement — ❌ new, open (2026-07-28), ordered BEFORE P4.** The FR
-    curve *shape* matches but the **peak frequency** is displaced at mid gain, and **the sign
-    splits by mode**: OD peaks too HIGH (G6 T5 488 vs 376 Hz, +0.38 oct; G7 +0.43) while Distortion
-    peaks too LOW (G4/G5 T5 342 vs 404, 287 vs 342, ≈−0.25 oct). Finding 3's original "G3–G7 within
-    ±0.2 oct" was wrong — it read the summary **mean**, which is ≈0 only because those opposite
-    signs cancel. A mode-independent tilt/shelf can't produce an opposite-signed error, so P1/P2/P4
-    don't explain it — confirmed numerically: stripping `driveShelf()` (which isn't mode-aware)
-    leaves the sign unchanged on every checked capture, and the "clean" (−30 dBFS) sweep isn't
-    actually quiet at the clip stage (Stage1+2 gain ≈+40 dB pushes it well past both diode clamps),
-    so both clip mechanisms are genuinely active at every sweep level. Do **P6 before P4** — a
-    clip/tone-stage-loading fix here should land before re-tuning `hfTrim`. Any fix must validate
-    against **all 44 captures**, not just the spot-checked rows. See `FR_THD_AUDIT.md` P6.
-    (G8–G10 peak error remains the documented bass bloom.)
-    - `schematic-checker` traced both topology candidates (2026-07-28) and **both are ruled out**:
-      Distortion's `node_HC` handoff into `ToneStage` is modelled as a zero-impedance ideal voltage
-      source at every clip depth, which is a real gap (it should carry `R12 ∥ r_d(dynamic)`) — but
-      the direction is backwards (predicts Distortion runs too BRIGHT at light clip, not the
-      observed too-dark), so it isn't the cause. OD's SW-1 feedback clamp sits inside Stage 2's
-      loop, so its 159 Hz HPF corner is exactly level-independent — no comparable mechanism found.
-      Topology side is exhausted; remaining leads are the even-harmonic injection's per-mode
-      coefficients and/or the accepted OD-under-compression residual.
-    - **User has designated P6 as its own dedicated session** (2026-07-28) and **authorized
-      departing from literal schematic fidelity for this item specifically**, since topology
-      tracing came back empty — see the `feedback-depart-from-schematic-for-accuracy` memory. The
-      next-session isolation-experiment plan (exact edit, build/run steps, how to read the result)
-      is written up in `FR_THD_AUDIT.md` under "P6 next-session plan" — start there, don't
-      re-derive it.
-  - **Remaining:** P6 (mid-gain FR peak, do first), then a **+1 dB 1.6–5 kHz tilt** (P4), P5 folded
-    into P6. Audit
+  - **P6 mid-gain FR peak displacement — ✅ done (2026-07-28), and the premise was wrong.** It was
+    framed as a **mode sign-split** (OD peaks too HIGH — G6 T5 488 vs 376 Hz, +0.38 oct — while
+    Distortion peaks too LOW, G4/G5 ≈−0.25), and three sessions hunting a mode-differentiated
+    mechanism found nothing, correctly: **there isn't one.** Reading the same table as a
+    **trajectory in drive** instead of a list of per-capture errors shows one mode-*independent*
+    effect — the pedal's FR peak migrates **1.4–1.7 octaves down** from G2 to G10, the plugin's only
+    0.2–1.0. The "split" is that single monotone drift crossing zero at a different knob position in
+    each mode, because each mode has a different low-drive intercept (G2: Clean +0.24, OD +0.06,
+    Dist −0.14). Finding 3's original "±0.2 oct" hid it by averaging; P6's sign reading hid it by
+    dropping the drive axis. **Two aggregation errors on the same data.**
+    - **Cause:** a **gain-vs-DRIVE-knob curve error above ~G5**. The FR peak is a clip-depth meter
+      (**−0.35 oct per +3 dB** of pre-clip level, measured with `p6_peak_fit.py --in-gain`), which
+      converts the error into dB of missing drive: ~0 to G5, then **+3.2/+3.7/+5.5/+6.8** at
+      G6/G7/G8/G10. Confirmed twice independently — Boost's best-fit gain vs the captures rises
+      **−0.69 → +4.83 dB** across G2→G10 (a metric that never touches the peak), and the
+      **time-domain null splits at the same knob position**: extra pre-clip level *hurts* at G5 and
+      *helps* from G6 up (G6 T5 OD −16.9 → −22.1 at +3 dB).
+    - **Fix:** `MonarchChannel::driveMakeup` — one flat drive-keyed gain at NodeG (onset 0.5,
+      14 dB/unit, cap 6 dB), **not a shelf**. It restores the half of the real 3-terminal DRIVE
+      pot's dual action the 2-terminal model drops: the literal wiring was rejected for over-swinging
+      Stage-2 gain (28 vs 10.6 dB), and the 2026-06-29 re-derivation had already shown the discarded
+      action moves **Stage 2's flat LEVEL, not Stage 1's tilt** — right shape, wrong magnitude. So
+      the schematic-departure authorization ended up not being needed.
+    - **Result (all 44 captures):** null **−22.7…−6.8 median −16.4 → −23.2…−6.6 median −16.6**, mean
+      **0.52 dB deeper**; 13 deeper (up to **−4.9 dB**, G7 T5 OD), 5 shallower (worst +0.9, the
+      anomalous G10 T2 OD), **26 byte-identical** — the gain is exactly 1.0 below G5, so no earlier
+      G2–G5 fit moved. Peak error: all-44 mean +0.24 → **+0.08** oct, sd 0.44 → **0.28**; rms OD
+      0.44 → **0.14**, Dist 0.37 → 0.21, Clean 0.66 → 0.35. All nine per-stage gates still PASS.
+    - **Left open:** Distortion's −0.25 oct at G4–G5 (below the onset — the genuine *intercept*
+      part, no mechanism found) and the G10 residual (documented bass bloom; the measured need is
+      +6.8 dB vs the 6.0 cap, and raising it trades against the G10 Distortion null).
+    - **Rule it establishes:** a **gain-vs-knob error is not a tilt**, even though clipping makes it
+      look like one in a single capture's FR. When an error is indexed by a knob, plot it against
+      the knob before hypothesising a mechanism. See `FR_THD_AUDIT.md` P6.
+  - **Remaining:** a **+1 dB 1.6–5 kHz tilt** (P4) — re-measure first, since P6 changed clip depth
+    at G6+; P5 folded into P6. Audit
     tools: `analysis/fr_thd_audit.py` (`evens` view = the even-series rms/bias table, `--base` for
     before/after), `analysis/p2_rail_asym_fit.py` (fast clip-nonlinearity fit loop, now with an IMD
-    guard — also the P3/P3.1 harness), `analysis/p31_harm_floor.py` (harmonic noise floor).
+    guard — also the P3/P3.1 harness), `analysis/p31_harm_floor.py` (harmonic noise floor),
+    `analysis/p6_peak_fit.py` (FR-peak + compression-tilt subset harness, ~15 s; its `--in-gain`
+    probe is the clip-depth calibration that identified P6).
 
 ---
 
@@ -178,14 +187,13 @@ preset browser. Supply-voltage mod (9/12/18V) and rail-saturation ADAA are in. L
 engineering: CI/CD (`.github/workflows/`), cross-platform VST3, and per-platform installers
 (`installer/`) — see README.
 
-**Calibration result (Step 11, real-pedal A/B; refreshed v1.4 P2 2026-07-28):** the plugin nulls against
-44 NAM captures (drive G2–G10, tone T2–T8, Clean/OD/Dist) at **−6.8 to −22.7 dB, median −16.4**, down
-to ~−22 dB through mid gain (G4–G6). (Was −6.4 to −22.3, median −16.6 at v1.3. P2 deepened both ends
-and improved the **mean** by 0.12 dB — Boost 0.29 — with the gains at high drive and small ≤0.7 dB
-regressions at G2–G4; the median reads 0.2 dB shallower only because it sits among those low-drive
-captures.) Best per-mode null at the labelled mid-gain settings (G5 T5):
-Clean/Boost −21.2, OD −21.4, Dist −20.6 dB (OD/Dist up ~3 dB from the v1.2 baseline after the
-odLowShelf + bass-tilt work). Excellent to mid gain; shallower only at very high drive (G8–G10) — an
+**Calibration result (Step 11, real-pedal A/B; refreshed v1.4 P6 2026-07-28):** the plugin nulls against
+44 NAM captures (drive G2–G10, tone T2–T8, Clean/OD/Dist) at **−6.6 to −23.2 dB, median −16.6**, down
+to ~−22 dB through mid gain (G4–G6). (Was −6.8 to −22.7, median −16.4 after P2. **P6** deepened the
+mean 0.52 dB — 13 captures deeper by up to 4.9 dB in the G6–G8 band, 5 shallower by ≤0.9 dB at G10,
+and 26 byte-identical because `driveMakeup` is exactly unity at and below G5.) Best per-mode null at
+the labelled mid-gain settings (G5 T5): Clean/Boost −21.2, OD −21.4, Dist −20.6 dB (unchanged by P6
+— G5 is at the make-up onset). Excellent to mid gain; shallower only at very high drive (G8–G10) — an
 accepted device-physics / capture-aliasing residual, not a topology error (every Stage-1 value +
 topology re-traced exact against the Theseus schematic). The 44 captures (`analysis/pedal_export2/`,
 842 MB) are **local-only, gitignored** — re-capture against `analysis/test_signal_48k.wav` to

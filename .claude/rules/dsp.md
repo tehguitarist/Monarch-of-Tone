@@ -336,7 +336,43 @@ each unity by the G4–G5 crossover:
   keeps low/mid at exact unity at every rate — without it the near-Nyquist prewarp droops the whole
   spectrum (several dB at 1x). 1x stays the low-CPU/approximate-top mode (warpMaxDb cap).
 
-All use the prewarped bilinear `shelfCoeffs` helper (a high-shelf sets Glo=1; a low-shelf sets
+## DRIVE make-up gain (`MonarchChannel::driveMakeup`) — v1.4 P6, 2026-07-28
+
+**Not a shelf — a flat, drive-keyed gain**, applied at NodeG in `processPre` (before `driveShelf`).
+Stage 1 is linear, so it changes only the level the clip stages see, never Stage 1's voicing.
+
+```
+driveMakeupOnset = 0.5 (G5) | driveMakeupSlopeDb = 14.0 | driveMakeupMaxDb = 6.0 (reached ~G9)
+```
+
+**Below G5 the gain is exactly 1.0 → every capture at or below G5 renders byte-identical**, so the
+G2–G5 bass-cut-bell / drive-shelf fits are untouched (26 of 44 captures unchanged in the null).
+
+**What it models:** the half of the real 3-terminal DRIVE pot's dual action that circuit.md §7's
+2-terminal rheostat approximation drops. The literal wiring was rejected for over-swinging Stage-2
+gain (~28 dB vs the measured ~10.6), and the 2026-06-29 re-derivation showed what the discarded
+action actually does — it **moves Stage 2's flat LEVEL, not Stage 1's tilt**. Right shape, wrong
+magnitude; this is the shape, fitted.
+
+**Why it exists / how it was measured (FR_THD_AUDIT.md P6).** The plugin's overall FR peak sits too
+high above ~G5, and the error grows with drive in *every* mode — the pedal's peak migrates 1.4–1.7
+octaves down across the DRIVE sweep, the plugin's only 0.2–1.0. The FR peak is a **clip-depth
+meter** (−0.35 oct per +3 dB of pre-clip level), which converts the error into dB of missing drive:
+~0 up to G5, then +3.2/+3.7/+5.5/+6.8 at G6/G7/G8/G10. Two independent confirmations: Boost's
+best-fit gain vs the captures rises −0.69 → +4.83 dB from G2 to G10, and the **time-domain null
+splits at the same knob position** — extra pre-clip level hurts at G5 and helps from G6 up.
+Result: null mean −16.07 → −16.59 dB over 44 captures, headline median −16.4 → −16.6, gains up to
+4.9 dB in P6's own G6–G8 band; peak-error rms OD 0.44 → 0.14 oct, Dist 0.37 → 0.21, Clean 0.66 → 0.35.
+
+> **Rule this establishes:** a **gain-vs-knob** error is not a tilt, even though clipping makes it
+> look like one in any single capture's FR. Every EQ-shaped attempt in this band (fixed presence
+> bump, LF-extension shelf, tilt shelf) reversed sign with drive or lost more null than it gained,
+> because the required correction is a different amount at every knob position and zero at the
+> bottom of the range. When an error is indexed by a knob, **plot it against the knob** before
+> hypothesising a mechanism — reading per-capture signs instead is what produced P6's false
+> "mode-differentiated" premise, and reading the G3–G7 mean is what hid it before that.
+
+All the shelves above use the prewarped bilinear `shelfCoeffs` helper (a high-shelf sets Glo=1; a low-shelf sets
 Ghi=1; Glo=Ghi → exact unity). Result (render/2x+ paths): **50 Hz–16 kHz within ~1.2 dB at all
 gain/tone** (worst ~2.3 dB at the tone-down top-octave corner); also *improves* OD/Dist nulls at
 mid/high drive. State (`hs*`/`ls*`/`bc*`/`ws*`/`ht*`) resets in `prepareLinear`/`reset`; drive-shelf +

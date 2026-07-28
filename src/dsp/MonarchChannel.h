@@ -343,6 +343,28 @@ public:
     static constexpr double hfTrimPivotHz = 4500.0;    // HF-trim high-shelf centre (Hz)
     static constexpr double hfTrimDb = -1.3;           // HF cut above the pivot (dB)
 
+    // ---- DRIVE make-up: the 3-terminal pot's missing second action (v1.4 P6, 2026-07-28) --------
+    // FLAT (no EQ) gain into Stage 2, keyed to the DRIVE knob, zero at and below `driveMakeupOnset`
+    // and rising above it. This is NOT another correction shelf — it is the half of the real pot's
+    // dual action the 2-terminal rheostat approximation drops. circuit.md §7 keeps the 2-terminal
+    // model because the literal 3-terminal wiring over-swings Stage-2 gain (~28 dB vs the measured
+    // ~10.6 dB), and the earlier re-derivation established what the dual action actually does: it
+    // moves Stage 2's FLAT LEVEL, not Stage 1's tilt. The literal topology therefore had the right
+    // SHAPE and the wrong MAGNITUDE; this is that shape, fitted.
+    //
+    // Measured two independent ways, in agreement (FR_THD_AUDIT.md P6):
+    //   • FR peak location is a clip-depth meter — the plugin's overall FR peak moves -0.35 oct per
+    //     +3 dB of pre-clip level. Reading the peak error back through that calibration, the drive
+    //     the plugin is SHORT of is ~0 dB up to G5, then +3.2 (G6) / +3.7 (G7) / +5.5 (G8) / +6.8
+    //     (G10) in OD, with the same shape in Distortion.
+    //   • The time-domain null (the standing arbiter) splits at the same knob position: adding
+    //     pre-clip level HURTS at G5 and HELPS from G6 up (OD G6 -16.9 -> -22.1 dB at +3 dB).
+    // So the deficit is a gain-vs-knob CURVE error above G5, not a broadband tilt — which is why
+    // every EQ-shaped attempt at this reversed sign with drive.
+    static constexpr double driveMakeupOnset = 0.5;    // knob position where the deficit starts (G5)
+    static constexpr double driveMakeupSlopeDb = 14.0; // dB of make-up per unit drive past the onset
+    static constexpr double driveMakeupMaxDb = 6.0;    // cap (reached ~G9; the G10 need is +6.8)
+
     // ---- LF extension (fixed low-shelf, 2026-07-28 — FR_THD_AUDIT.md Finding 1 / P1) -----------
     // The plugin is short of the real pedal below ~64 Hz in EVERY mode at EVERY drive, and the gap
     // SURVIVES stripping every correction shelf above (fr_thd_audit.py `raw`): it is in the raw WDF
@@ -529,6 +551,9 @@ public:
     {
         stage1.setDrive (d);
         updateDriveShelf (d); // drive-dependent Stage-1 voicing correction (see shelf* consts)
+        const double makeupDb = std::min (driveMakeupMaxDb,
+                                          std::max (0.0, driveMakeupSlopeDb * (d - driveMakeupOnset)));
+        driveMakeup = std::pow (10.0, makeupDb / 20.0); // see driveMakeup* consts
     }
     void setTone (double t) { tone.setTone (t); }
     void setPresence (double p) { tone.setPresence (p); }
@@ -572,7 +597,14 @@ public:
 
     // Base-rate front: input network + Stage 1 → V(NodeG), then the drive-dependent voicing
     // correction (high-shelf; unity pass-through once drive ≳ 0.47, see shelf* consts).
-    inline double processPre (double x) noexcept { return driveShelf (stage1.processSample (x)); }
+    // `driveMakeup` is flat, so it is equivalent anywhere between Stage 1 and the clipper; it sits
+    // here (before driveShelf, i.e. at NodeG) because that is where the real pot's second action
+    // feeds Stage 2. Stage 1 is linear, so this cannot change Stage 1's own voicing — only the
+    // level presented to the clip stages, which is exactly what the measurement says is short.
+    inline double processPre (double x) noexcept
+    {
+        return driveShelf (driveMakeup * stage1.processSample (x));
+    }
 
     // Oversampled nonlinear span: Stage2 (or SW1 soft clip) → op-amp rail-sat → SW2 (or pass)
     // → V(node_HC). This is the ONLY part that should run at the oversampled rate.
@@ -863,6 +895,9 @@ private:
 
     // OD clip-depth-gated low-mid restoration (ol* = OD low-shelf; runs post-clip at the OS rate).
     double olB0 { 1.0 }, olB1 { 0.0 }, olA1 { 0.0 }, olX1 { 0.0 }, olY1 { 0.0 };
+
+    // Flat DRIVE make-up into Stage 2 (stateless — a gain, not a filter). Set in setDrive.
+    double driveMakeup { 1.0 };
 
     double clipEnv { 0.0 };   // clipping-depth envelope (gates the even-harmonic coeff)
     double meanSq { 0.0 };    // slow ⟨soft²⟩ (removes only DC from the H2 injection)

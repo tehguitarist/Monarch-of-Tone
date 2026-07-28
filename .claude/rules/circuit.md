@@ -182,8 +182,14 @@ Both clipping stages are **symmetric** matched pairs — use `DiodePairT` only, 
 - **DRIVE pot modelled as a 2-terminal rheostat** inside Z_upper, not its literal 3-terminal
   wiring (wiper=output, pin3→R6→Stage2). Tested: the literal 3-terminal model over-swings Stage-2
   gain (≈28 dB total vs the measured ~10.6 dB), so the 2-terminal approximation matches the
-  captures *better*. Kept.
+  captures *better*. Kept — but it is only *half* right: the discarded second action moves Stage
+  2's flat LEVEL, and the plugin was measurably short of drive above G5 (~+3 dB at G6, +6.8 at
+  G10) as a result. Restored as a fitted flat gain, `MonarchChannel::driveMakeup` (dsp.md; v1.4 P6).
 - **High-drive gain residual** vs the real pedal (real rises ~2–3 dB more at G8–G10, with a
   bass-bloom-under-drive) is accepted device-physics / capture variance, not a topology error —
   every Stage-1 value + topology was re-traced exact against the Theseus schematic. The model has
   the effect but under-drives it; boosting the plugin input reproduces the bloom exactly.
+  **Partly closed by v1.4 P6:** that "boosting the input reproduces it" note turned out to be the
+  measurement, not just an analogy — the deficit was quantified at ~0 dB to G5 rising to +6.8 dB at
+  G10 and is now supplied by `driveMakeup` (above). What remains at G8–G10 after that is the true
+  accepted residual.
