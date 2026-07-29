@@ -43,7 +43,9 @@ cmake --build build --target Monarch_AU     # AU (primary) / Monarch_VST3 / Mona
 clang-format -i src/**/*.{cpp,h}
 ```
 
-**CMake minimum:** 3.15 | **C++ standard:** 17 | **macOS target:** 10.13+ | **Version:** 1.3.0
+**CMake minimum:** 3.15 | **C++ standard:** 17 | **macOS target:** 10.13+ | **Version:** 1.4.0
+(single-sourced from `project(MonarchOfTone VERSION …)` in CMakeLists.txt → `MONARCH_VERSION_STRING`
+→ the UI's version label; never hardcode it anywhere else)
 
 ---
 
@@ -53,15 +55,47 @@ clang-format -i src/**/*.{cpp,h}
   file collapsed to load-bearing facts (values, topology, decisions+why), "DONE" narratives and
   resolved discrepancy back-and-forth removed, experiments folded to one-line "tried X → Y"
   notes. Stale facts reconciled to the actual code (Stage-1 floors, input cap, OS defaults).
-- **v1.1 — CPU / latency / memory optimization pass (TODO).** Profile `MonarchChannel` /
-  oversampling / WDF-solve cost; add CPU-usage and latency measurement to the test suite (a
-  benchmark reporting ms/block and reported plugin latency per oversampling factor) and publish
-  the numbers in the README. While profiling, flag anything that *costs* CPU but also *improves*
-  fidelity (diode-stage ADAA, finer NR iteration, etc.) as a candidate for an optional "HQ" mode
-  rather than the default path — **discuss with the user before implementing an HQ toggle**; this
-  is a flag for a future decision, not a green light to add it now.
-- **v1.4 — FR / harmonic accuracy pass (IN PROGRESS). → `analysis/FR_THD_AUDIT.md`** — full
-  findings, evidence and the ordered P0–P5 work plan live there; don't re-derive them here.
+- **v1.1 — CPU / latency / memory optimization pass. ✅ Done (2026-06-29, commit `c81664b`).**
+  Three probes shipped, all wired into ctest as **finite-only** gates (they assert no NaN/Inf,
+  never an absolute CPU %, which varies with the host): **`PerfBenchmark`** (CPU % of realtime +
+  reported latency per OS factor × clip mode, through the real stereo processor — the source of
+  the README Performance table), **`OSFidelity`** (how close 1x/2x/4x sit to 8x), and
+  **`FeatureProfile`** (header-only: CPU *and* accuracy of a candidate lever together).
+  - **The HQ toggle was measured and REJECTED — don't re-propose it without new evidence.** The
+    roadmap flagged it for discussion; `FeatureProfile` answered it instead. The diode-quality
+    lever buys accuracy that is inaudible next to what the OS factor already does, and
+    **oversampling *is* the quality-vs-CPU dial** — it is the only setting that measurably changes
+    the sound. A second knob would have split the same axis in two.
+  - **And the "cheap" side of that lever is a PESSIMISATION — re-confirmed 2026-07-29.** Chowdsp's
+    `DiodeQuality::Good` is both less accurate *and*, in two of three modes, **slower** than
+    `Best`: Best/Good CPU = **0.74× Boost, 1.01× OD, 0.87× Dist**, while the two differ by only
+    1.7e-07 (null −61…−83 dB, THD identical to 4 dp). `Best` is Wright-Omega and lands in roughly
+    one step; `Good` iterates. **Never assume the lower-quality setting is the faster one** —
+    measure both, as `FeatureProfile` does, or an "Eco" mode ships that costs more and sounds worse.
+  - **⚠️ Re-measure per release — v1.4 cost ~1.5× overall and ~1.9× in Overdrive (2026-07-29).**
+    Attributed properly: the pre-v1.4 commit (`d15128b`) was rebuilt and benchmarked **on the same
+    machine in the same session**, so this is code, not thermals or hardware. 8x, CPU % of
+    realtime: Boost 18.8 → 29.2, **OD 27.5 → 50.2**, Dist 24.7 → 37.0; render 16.6 → 26.6.
+    - **The shape of the regression localises half of it, MEASURED:** pre-v1.4 OD and Distortion
+      were comparable (27.5 vs 24.7) and now OD has pulled far ahead, which is a mode-selective
+      cost, and the only mode-selective thing v1.4 added is **`sw1Ceil` + its ADAA** (P9 step 3,
+      inside the `sw1On` branch). The remaining all-modes share is **inferred, not yet isolated** —
+      IC_A's rail-sat ADAA (P9, `processPre`) and the `injectEvenHarmonic` paths are the
+      candidates. Flip `stage1RailsEnabled` / zero `sw1CeilV` and re-run `PerfBenchmark` to split
+      them properly before acting on it.
+    - Every one of these is a per-sample map inside the oversampled span, so it is paid **×OS ×2
+      pedal channels ×2 audio channels** — a map that costs 20 ns/sample costs ~1.3 µs per output
+      frame at 8x stereo, against a 20.8 µs budget at 48 kHz. **Cheap-looking per-sample work is
+      not cheap here.**
+    - **Don't benchmark a hypothesis against a remembered number.** The June table was measured on
+      unknown thermal state; the only sound comparison is rebuilding the old commit now. A
+      `git worktree` at the old SHA costs one JUCE compile and removes the confound entirely.
+- **v1.4 — FR / harmonic accuracy pass. ✅ Done (2026-07-29). → `analysis/FR_THD_AUDIT.md`** — full
+  findings, evidence and the worked P0–P10 plan live there; don't re-derive them here. Headline:
+  null median **−16.4 → −23.1 dB**, and −21.9 dB or better on every capture from G2 to G7. Every
+  remaining gap is an explicitly accepted residual with its evidence recorded (sub-32 Hz
+  non-minimum-phase LF; the G8–G10 clip corner, ~half of which is target-side noise). **The
+  ordered plan is finished — there is no open P-item.**
   - **P0 harness hygiene — ✅ done (2026-07-28).** THD above the H3 limit (~6.3 kHz) now reports
     `na` (both estimators fail up there: Farina is H2-only, the discrete fallback aliases onto the
     fundamental at 6/8 kHz), the FR trust band (40 Hz–8 kHz) is owned by `comprehensive_report.py`
@@ -516,6 +550,34 @@ clang-format -i src/**/*.{cpp,h}
     so quiet orders can be trusted — NAM renders have no measurement noise, ≈−140 dBc).
     **Every `p9_*` view reads `/tmp/monarch_renders`** — the shared dir all the other harnesses use;
     `p9_od_compression.py` had its own and silently read a stale vintage (fixed in P9 step 3).
+- **v1.5 — the ADAA identity-region droop (OPEN, found 2026-07-29 during the v1.4 perf re-measure).
+  Not yet validated on the arbiter — do that before changing a line of DSP.**
+  - **What is CERTAIN, because it is arithmetic.** First-order ADAA of the *identity* map is not the
+    identity. Below the knee `railAntideriv` returns `½x²`, so the difference quotient is
+    `½(x² − x₋₁²)/(x − x₋₁)` = **`(x + x₋₁)/2`** — a midpoint average, i.e. a half-sample delay and a
+    one-zero HF rolloff `|H(f)| = |cos(πf/fs_os)|`. Per stage, at 16 kHz: **−6.02 dB at 1x, −1.25 at
+    2x, −0.30 at 4x, −0.07 at 8x.**
+  - **And it is definitely reached.** `railSaturateADAA (pin7)` at `processClip` runs
+    **unconditionally in every mode**, while in OD the feedback clipper holds `|pin7| ≤ 1.64 V`
+    against a knee of 2.4/3.6 V — so in Overdrive that call is *only ever* the midpoint filter. Same
+    applies to `sw1CeilADAA` below its 0.5 V knee and IC_A's `railSaturateADAA` below 2.4 V, and
+    they **cascade**: three stages at 2x is 0.866³ ≈ **−3.7 dB at 16 kHz**.
+  - **⚠️ This collides with a shipped explanation, and that is the interesting part.** dsp.md
+    attributes the top-octave deficit to **bilinear warping** and records it as "16 kHz: −2.4 dB
+    @48k → −0.2 @96k → ~0 @192k". The ADAA droop has the **same monotone collapse with OS rate**, so
+    the `warp*` shelf — which was *fitted* to a "warp-free baseline vs 8x" deficit — has been
+    absorbing **both mechanisms as one**. That is P7's rule again, a fourth time: **two corrections
+    overlapping in band AND in keying, fit as one.** The tone-safety note in circuit.md ("in OD the
+    rails never engage → no tone change, verified byte-for-byte") is true of the *saturation* and
+    false of the *ADAA wrapper*.
+  - **The fix is also the CPU win, which is why it is the next item.** An early-out returning `x`
+    when both `x` and `x₋₁` are below the knee removes a per-sample transcendental-free-but-not-free
+    map from the hot path in every mode — the same maps the perf regression above is charged to.
+  - **⚠️ But it CHANGES THE AUDIO and the warp shelf was fitted with the droop in place**, so
+    removing it without re-fitting `warp*` will over-brighten 2x/4x. **Order: measure the split
+    first** (`OSFidelity` with the early-out, vs without), **then re-fit `warp*`, then judge on the
+    44-capture null** — not on FR, per the standing rule that FR generates the hypothesis and the
+    null decides. Do not ship the early-out as "just an optimisation": it is a voicing change.
 
 ---
 
