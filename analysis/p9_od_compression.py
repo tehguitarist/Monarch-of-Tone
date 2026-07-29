@@ -44,6 +44,23 @@ WHAT THE VIEWS ARE FOR.
            one segment, unlike `comp`'s synthetic level steps -- the natural-dynamics version of
            the same test, at two frequencies. Needs renders.
 
+  `knee`   P10's instrument (added 2026-07-29): the same decay segments read against the KNOWN
+           INPUT ENVELOPE instead of self-anchored, which SEPARATES the two things every other view
+           here reports mixed together -- gain into the clipper (the knee's INPUT level, an x-axis
+           quantity that no normalisation can touch) from the ceiling (the plateau, y-axis). Read
+           the BOOST rows only; see view_knee's docstring for why OD/Dist are structurally invalid.
+
+CAPTURE-AXIS CAVEAT (established 2026-07-29, applies to every view here and to the whole harness).
+Absolute levels are comparable across DRIVE within a mode, but NOT across TONE: the captures carry
+a flat, capture-side gain that varies with the TONE knob by about 5 dB from T2 to T8 (plugin-minus-
+pedal broadband error runs -3.2 / -1.3 / +1.8 dB at T2 / T5 / T8, the SAME +-0.2 dB in all three
+modes and at every drive, and frequency-flat to +-0.5 dB from 100 Hz to 4.7 kHz). It cannot be the
+tone stack: with C6 open at 100 Hz the pot is a plain series resistance into the load, so LF output
+MUST rise as TONE rises -- the plugin's does (+1.3 dB T2->T8) and the pedal's FALLS 3.7 dB. The two
+agree on the tilt SPAN to 0.01 dB, so the filter matches and only the level differs. It is invisible
+to the null (best-fit gain per capture) and to the FR audit (shape metric), which is why it survived
+this long. Compare across DRIVE freely; hold TONE fixed when comparing levels.
+
 WHAT THIS SCRIPT FOUND (2026-07-29) -- read before re-running any of it:
 
   * P9's premise is WITHDRAWN. `valid` shows OD's clean sweep carries 1.4-6 % THD from G2 to G5, so
@@ -72,7 +89,7 @@ LEVEL IS NOT SHAPE, and the arbiter is still the null. This script measures; it 
 
 Usage:
   p9_od_compression.py tilt|thd                             # JSON only, <1 s
-  p9_od_compression.py orders|valid|comp|tones|decay [--render-dir DIR]
+  p9_od_compression.py orders|valid|comp|tones|decay|knee [--render-dir DIR]
   p9_od_compression.py gain [--in-gain 0 2 4]               # renders; slow
   p9_od_compression.py all
 """
@@ -435,11 +452,86 @@ def view_decay(render_dir, out=sys.stdout, n_windows=8):
                 print(f"G{dv * 10:<7.0f}" + "".join(f"{v:>+8.2f}" for v in vals), file=out)
 
 
+def view_knee(render_dir, out=sys.stdout, n_windows=16, drop_db=3.0):
+    """P10's instrument: separate GAIN-INTO-THE-CLIPPER from CEILING, on the decay segments.
+
+    `decay` self-anchors, so it can only report the two mixed together. This view reads the same
+    signal against the KNOWN INPUT ENVELOPE instead, and reports two numbers per curve:
+
+      plateau    the output level the curve saturates at            (a y-axis quantity)
+      knee-in    the INPUT level at which the output has fallen
+                 `drop_db` below that plateau                       (an x-axis quantity)
+
+    The knee is the one that matters, because it is an INPUT level and is therefore immune to the
+    captures' per-mode level normalisation (CLAUDE.md) — no re-gaining, no self-anchoring, nothing
+    to argue about. A gain error moves the knee horizontally; a ceiling error moves the plateau
+    vertically. Everything before this measured them as one blurred quantity.
+
+    Read the dKnee column: negative = the plugin clips EARLIER than the pedal (too much gain),
+    positive = the plugin clips LATER (too little). Levels are comparable across DRIVE within a
+    mode but NOT across TONE — see the module docstring's capture-axis caveat.
+
+    ⚠ ONLY THE BOOST ROWS ARE VALID, and that is not a detail. The metric assumes the curve HAS a
+    plateau, which is true only where the ceiling is flat — the op-amp rails, i.e. Boost. In
+    Overdrive the output keeps climbing above the diode clamp (`Vf + i_in*R11`, the whole subject of
+    P9), so `max(yout[:3])` reads a rising slope as the "plateau" and the 3 dB point slides with it:
+    OD's dKnee column prints −2.7/−3.2/−6.2/−10.6 at G6/G7/G8/G10, which is that artifact and NOT
+    a gain error of any kind. In Distortion the ±0.584 V shunt compresses so hard that above G6 the
+    output never falls 3 dB inside the segment at all (`nan`). Both are reported rather than hidden
+    so the failure is visible; read Boost, and read `comp`/`decay` for the other two modes.
+    """
+    orig, items = _pairs(render_dir)
+    for name, f0 in (("decay_220", 220.0), ("decay_1k", 1000.0)):
+        xin = _win_levels(orig, name, n_windows)
+        print(f"\n=== CLIP KNEE — {name}, vs the KNOWN input envelope "
+              f"({xin[0]:.1f} .. {xin[-1]:.1f} dBFS) ===", file=out)
+        print(f"  plateau = saturated output (dBFS, per-mode normalised — compare WITHIN a mode\n"
+              f"  only). knee-in = input dBFS where the output is {drop_db:.0f} dB below plateau;\n"
+              f"  it is an INPUT level, so it needs no normalisation at all. dKnee = plugin minus\n"
+              f"  pedal: POSITIVE means the plugin needs MORE gain. 'nan' = never left the plateau.",
+              file=out)
+        for mode in MODES:
+            sel = sorted([it for it in items if it["mode"] == mode], key=lambda it: it["drive"])
+            if not sel:
+                continue
+            print(f"\n-- {mode}", file=out)
+            print(f"{'drive':<7}{'ped plat':>10}{'ped knee':>10}"
+                  f"{'plg plat':>10}{'plg knee':>10}{'dKnee':>9}", file=out)
+            rows = {}
+            for it in sel:
+                pe = _knee(xin, _win_levels(it["cap"], name, n_windows), drop_db)
+                pl = _knee(xin, _win_levels(it["ren"], name, n_windows), drop_db)
+                rows.setdefault(it["drive"], []).append(pe + pl)
+            for dv in sorted(rows):
+                v = np.nanmedian(np.array(rows[dv], float), axis=0)
+                print(f"G{dv * 10:<6.0f}" + "".join(f"{c:10.2f}" for c in v)
+                      + f"{v[3] - v[1]:+9.2f}", file=out)
+
+
+def _win_levels(x, name, n_windows):
+    """Per-window rms (dBFS) of one segment — the same windowing for input, capture and render."""
+    s = A.seg(x, name, guard=0.02)
+    w = len(s) // n_windows
+    return np.array([A.db(A.rms(s[i * w:(i + 1) * w])) for i in range(n_windows)])
+
+
+def _knee(xin, yout, drop_db):
+    """(plateau dBFS, input dBFS at plateau-drop_db) by linear interpolation between windows."""
+    plateau = float(np.max(yout[:3]))
+    target = plateau - drop_db
+    for i in range(len(yout) - 1):
+        if yout[i] >= target >= yout[i + 1]:
+            f = (yout[i] - target) / (yout[i] - yout[i + 1] + 1e-12)
+            return plateau, float(xin[i] + f * (xin[i + 1] - xin[i]))
+    return plateau, float("nan")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("view", nargs="?", default="all",
-                    choices=["tilt", "thd", "orders", "valid", "comp", "tones", "decay", "gain", "all"])
+                    choices=["tilt", "thd", "orders", "valid", "comp", "tones", "decay", "knee",
+                             "gain", "all"])
     ap.add_argument("--render-dir", default=DEFAULT_RENDERS)
     ap.add_argument("--sweep", default="sweep_drv_-6")
     ap.add_argument("--bin", default="build/PedalRender_artefacts/Release/PedalRender")
@@ -467,6 +559,8 @@ def main():
         view_tones(a.render_dir)
     if a.view in ("decay", "all"):
         view_decay(a.render_dir)
+    if a.view in ("knee", "all"):
+        view_knee(a.render_dir)
 
 
 if __name__ == "__main__":

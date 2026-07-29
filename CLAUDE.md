@@ -338,11 +338,52 @@ clang-format -i src/**/*.{cpp,h}
         (`/tmp/monarch_renders_p9`) while everything else uses `/tmp/monarch_renders`, so it
         **reported step 3 as "no change"** on the first run. Now shared. Same class as P8's
         two-naming-conventions trap: **never give a harness its own render dir.**
-    - **P10: the G8→G10 Boost discontinuity — ⚠️ PREMISE WITHDRAWN by P7 (2026-07-29).** The
-      "+4.9 dB tilt, clean sweep, 3/3 tones" is measured where the pedal reads **14.76 %** THD and
-      the plugin 10.45 % — not a linear-EQ measurement at all. Something at G10 is still real (its
-      nulls are the worst in the set at −6.6…−10.3), but the clean sweep cannot decide it. **Needs a
-      different instrument before it needs a fix** — fold it into the dynamics/discrete-tone axes.
+    - **P10: the G8→G10 discontinuity — ⚠️ MEASURED at last (step 1 done 2026-07-29), and the fix
+      is BLOCKED BY P9's, not by the gain law.** The original "+4.9 dB tilt, clean sweep, 3/3 tones"
+      premise stays withdrawn (P7: that sweep carries 10–15 % THD). The replacement instrument is
+      **`p9_od_compression.py knee`** — the decay segments read against the *known input envelope*
+      instead of self-anchored, which separates **gain into the clipper** (the knee's *input* level)
+      from **ceiling** (the plateau). The knee is an **x-axis** quantity, so the captures' per-mode
+      level normalisation cannot touch it: it is the first number P10 has ever had that needs no
+      caveat.
+      - **The number:** Boost dKnee (plugin − pedal) is **±0.4 dB at G2–G8 on decay_220 and ±1.0 on
+        decay_1k, then +5.28 / +6.21 dB at G10.** The pedal's gain-vs-knob law **accelerates** at
+        the top (−1.7 dB per 0.1 knob over G2–G8, **−4.0** over G8–G10); `driveMakeup`'s capped ramp
+        decelerates. **A cap is the wrong shape, not just the wrong number.**
+      - **Two candidates built and scored; both rejected.** Raising the cap 6.0 → 7.0 (G2–G8
+        byte-identical by construction) buys 0.7–0.9 dB on the quiet Boost sweeps and loses
+        0.06–0.19 on every driven one. Replacing the cap with the shape the circuit implies —
+        `1/(R6 + R(1−d))`, one parameter, reproducing P6's fitted ramp within 0.5 dB at every drive
+        P6 could measure and supplying **+11.3 dB at G10** — moves only the nine G10 captures:
+        **Clean −1.7/−2.1/−2.5 dB better, Dist +0.8/+0.9/+0.8 worse, OD +1.6/+1.0/+1.1 worse**;
+        median −23.1 → −23.2 but the set's **worst capture −8.6 → −7.0**. Mean ≈ 0.0. Rejected.
+      - **The split is the finding.** The correction is right in the one mode with **no diode
+        clipper** and wrong in **both** diode modes — in OD it drives P9's `sw1Ceil` harder, which
+        P9 already records as over-correcting at G10; in Dist it pushes further into a clamp the
+        model already squares off too hard. So **`driveMakeup`'s cap is not "0.8 dB short", it is
+        masking a clip-path error at G10** — and the order of operations is now established: **fix
+        the G10 clip behaviour first, then reinstate the gain shape** (candidate 2 is the shape).
+        Same single defect as P6's cap and P9's G8–G10 remainder, seen from a fourth side.
+      - **Open, and the likely next lead:** the pedal's **Boost ceiling falls with drive** — plateau
+        −13.91 → −15.53 dB (decay_1k) G2→G10 against a plugin flat to 0.16 dB; `lvl_-3` **peak**
+        output −10.12 → −12.17 dBFS against a plugin flat to 0.14; and the pedal's H3/H5 at `lvl_-3`
+        go −20.9/−24.0 (G2) → −15.7/−22.8 (G8) → **−21.2/−30.4 (G10)**, i.e. *less* distorted at
+        G10, where the plugin is fully saturated from G2 on. A ceiling that drops **and** softens as
+        the knob rises is the missing half. Supply sag is the obvious suspect and the load refutes
+        it (Boost leaves pin7 driving ~0.13 mA), so this needs its own measurement first. **Do not
+        fit it as a drive-keyed ceiling.**
+    - **⚠️ Capture-axis caveat (2026-07-29) — absolute levels are comparable across DRIVE within a
+      mode, but NOT across TONE.** The captures carry a flat, capture-side gain that varies with the
+      TONE knob: plugin-minus-pedal broadband error runs **−3.2 / −1.3 / +1.8 dB at T2 / T5 / T8**,
+      the same ±0.2 dB in **all three modes at every drive**, frequency-flat to ±0.5 dB over
+      100 Hz–4.7 kHz. It **cannot** be the tone stack — at 100 Hz C6 is effectively open, so the pot
+      is a plain series resistance into the load and LF output *must* rise with TONE; the plugin's
+      does (+1.3 dB T2→T8) and the pedal's **falls 3.7 dB**. Pedal and plugin agree on the tilt
+      *span* to 0.01 dB, so the filter matches and only the level differs — a level that moves with
+      a knob but not with frequency is a volume setting, not a filter. Invisible to the null
+      (best-fit gain per capture) and to the FR tables (shape metric), which is how it survived this
+      long. **Do not read a tone-indexed level difference as a plugin defect.** Recorded in
+      `p9_od_compression.py`'s module docstring.
     - **Never audited at all** (in the captures, absent from `comprehensive_data.json`): **IMD**,
       **dynamics/compression** (`lvl_-30…-3`), **discrete-tone THD**, **decay**. P2/P3/P6 all changed
       the clip path underneath them.
@@ -365,6 +406,11 @@ clang-format -i src/**/*.{cpp,h}
     headers ONLY, so a candidate is a **~1 s** recompile of the real `processClip` instead of a
     plugin rebuild + 44-capture render; watch its `dG` column, because a self-anchored objective
     cannot see a candidate re-levelling the whole mode).
+    **`analysis/p9_od_compression.py knee`** (P10 — the ONE view that separates *gain into the
+    clipper* from *ceiling*: the decay segments read against the known input envelope, so the knee
+    is an **input** level and needs no normalisation. **Boost rows only** — in OD the output keeps
+    climbing above the clamp so the "plateau" is a slope and the metric prints artifacts, in Dist it
+    never falls 3 dB inside the segment above G6).
     **Every `p9_*` view reads `/tmp/monarch_renders`** — the shared dir all the other harnesses use;
     `p9_od_compression.py` had its own and silently read a stale vintage (fixed in P9 step 3).
 
@@ -641,6 +687,12 @@ linear WDF now runs at the OS rate too (relevant to the v1.1 perf pass).
 - `p31_harm_floor.py` measures the **capture chain's harmonic noise floor** by gating the Farina IR
   at fractional orders (between the harmonic impulses). Run it before fitting any quiet harmonic —
   it is what proved the H4/H6 targets were real signal (39 dB median margin) and not noise.
+- **Absolute levels are comparable across DRIVE within a mode, NOT across TONE** (2026-07-29): the
+  captures carry a flat capture-side gain that varies ~5 dB with the TONE knob (−3.2/−1.3/+1.8 dB
+  at T2/T5/T8, identical in all three modes, frequency-flat). Proven not to be the tone stack —
+  at 100 Hz the pot is a plain series R into the load, so LF *must* rise with TONE and the pedal's
+  falls. Invisible to the null and to the FR shape tables. Hold TONE fixed when comparing levels;
+  never read a tone-indexed level difference as a plugin defect. See FR_THD_AUDIT.md P10 step 1.
 - **Bands that are NOT trustworthy:** FR above ~8 kHz (±18 dB capture-side spread) and THD above
   ~5 kHz (Farina is H2-only there; the discrete-tone fallback aliases onto the fundamental at 6 and
   8 kHz — the captures read up to 291% THD). Don't fit anything to them. See FR_THD_AUDIT.md §4.

@@ -460,6 +460,25 @@ driveMakeupOnset = 0.5 (G5) | driveMakeupSlopeDb = 14.0 | driveMakeupMaxDb = 6.0
 **Below G5 the gain is exactly 1.0 → every capture at or below G5 renders byte-identical**, so the
 G2–G5 bass-cut-bell / drive-shelf fits are untouched (26 of 44 captures unchanged in the null).
 
+> **⚠️ The 6.0 dB CAP is load-bearing and is NOT simply "0.8 dB short" (v1.4 P10, 2026-07-29).**
+> Measured on the one instrument that can separate gain from ceiling — `p9_od_compression.py knee`,
+> which reads the decay segments against the *known input envelope*, so the clip knee is an **input**
+> level and the captures' level normalisation cannot touch it — the plugin's gain law tracks the
+> pedal's to **±0.4 dB (decay_220) / ±1.0 (decay_1k) from G2 to G8** and is **+5.3 / +6.2 dB short
+> at G10**. The pedal's law *accelerates* at the top of the knob (−1.7 dB per 0.1 over G2–G8, −4.0
+> over G8–G10); a capped ramp decelerates, so **the cap is the wrong shape**.
+> **Both fixes were built and both are rejected by the arbiter.** Raising the cap to 7.0 (G2–G8
+> byte-identical by construction) buys 0.7–0.9 dB on the quiet Boost sweeps and loses 0.06–0.19 on
+> every driven one. Replacing the cap with the circuit's own shape — `1/(R6 + R(1−d))`, one
+> parameter, within 0.5 dB of this fitted ramp at every drive P6 could measure, +11.3 dB at G10 —
+> moves only the nine G10 captures and splits **by mode**: Boost **−1.7/−2.1/−2.5 dB better**,
+> Distortion +0.8/+0.9/+0.8 worse, OD +1.6/+1.0/+1.1 worse; the set's worst capture goes −8.6 →
+> −7.0. **The split is the point:** the correction is right in the only mode with no diode clipper
+> and wrong in both diode modes, because the extra pre-clip level drives `sw1Ceil` (already
+> over-correcting at G10 — see its section) and SW-2's clamp harder. So the cap is **masking a
+> clip-path error at G10**. Fix the G10 clip behaviour first; reinstate the hyperbolic shape after.
+> Do not re-attempt the gain half on its own. See FR_THD_AUDIT.md P10 step 1.
+
 **What it models:** the half of the real 3-terminal DRIVE pot's dual action that circuit.md §7's
 2-terminal rheostat approximation drops. The literal wiring was rejected for over-swinging Stage-2
 gain (~28 dB vs the measured ~10.6), and the 2026-06-29 re-derivation showed what the discarded

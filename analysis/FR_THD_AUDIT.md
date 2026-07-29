@@ -1476,6 +1476,95 @@ is. Not yet investigated: whether it's `driveMakeup`'s 6.0 dB cap (short of the 
 as needed at G10) or the rail knee behaving differently on a transient attack than on the steady
 captures it was fit against. See the P9 step-1 write-up above for the full table.
 
+#### P10 step 1 — the defect is MEASURED (2026-07-29): a 5.3–6.2 dB clip-knee error at G10, and supplying it is rejected by the arbiter
+
+**The instrument: `p9_od_compression.py knee`.** `decay` self-anchors, so it can only report gain
+and ceiling mixed together. The new view reads the same segments against the **known input
+envelope** and reports two separable numbers per curve — the **plateau** (saturated output, y-axis)
+and the **knee**, the *input* level at which the output has fallen 3 dB below that plateau. **The
+knee is an x-axis quantity, so the captures' per-mode level normalisation cannot touch it** — no
+re-gaining, no self-anchoring, nothing to argue about. That is what makes this the first clean
+number P10 has ever had.
+
+**Boost, `decay_220` / `decay_1k` — the plugin's gain law is right to ±0.4 / ±1.0 dB from G2 to G8
+and then 5.3 / 6.2 dB short at G10:**
+
+| dKnee (plugin − pedal, dB; + = plugin needs MORE gain) | G2 | G3 | G4 | G5 | G6 | G7 | G8 | **G10** |
+|---|---|---|---|---|---|---|---|---|
+| decay_220 | −0.14 | −0.19 | −0.23 | −0.11 | −0.33 | +0.02 | +0.07 | **+5.28** |
+| decay_1k  | +0.57 | +0.40 | +0.42 | +0.97 | +0.76 | +0.82 | +0.59 | **+6.21** |
+
+Read the pedal's own knee column and the shape of the error is obvious: the pedal's knee moves
+**−1.7 dB per 0.1 knob over G2–G8 and −4.0 dB per step over G8–G10** — its gain-vs-knob law
+*accelerates* at the top. `driveMakeup`'s capped ramp *decelerates* (−1.8 dB/step, then −1.35).
+**A cap is the wrong shape, not merely the wrong number.**
+
+**Two candidates were built, rendered and scored. Both rejected.**
+
+1. **Raise the cap 6.0 → 7.0 dB** (the law's own extrapolation; P6's measured "+6.8 need"). Only
+   drive > 0.929 is affected, so G2–G8 is byte-identical by construction — verified. It buys
+   **0.7–0.9 dB on the three quiet Boost sweeps and loses 0.06–0.19 dB on every driven one.**
+   A wash, exactly as P6 predicted when it chose the cap.
+2. **Replace the cap with the shape the circuit implies** — the DRIVE pot's second action is a
+   series resistance into Stage 2's virtual ground, so level goes as `1/(R6 + R(1−d))`: flat over
+   most of the knob, blowing up as the wiper reaches the end. One parameter (`R6/R` = 0.187), and
+   it reproduces P6's fitted ramp within 0.5 dB at every drive P6 could measure (G6 1.37 vs 1.40,
+   G7 2.99 vs 2.80, G8 4.98 vs 4.20) while supplying **+11.3 dB at G10** — i.e. the measured 5.3 dB
+   on top of the shipped 6.0.
+
+**Same-day A/B, `run_validation.py`, all 44 captures** (only the nine G10 captures move):
+
+| G10 capture | shipped | candidate 2 | Δ |
+|---|---|---|---|
+| T2 / T5 / T8 **Clean** | −10.6 / −10.9 / −11.4 | −12.3 / −13.0 / −13.9 | **−1.7 / −2.1 / −2.5 (better)** |
+| T2 / T5 / T8 **Dist**  | −8.7 / −8.8 / −9.3   | −7.9 / −7.9 / −8.5    | +0.8 / +0.9 / +0.8 (worse) |
+| T2 / T5 / T8 **OD**    | −8.6 / −10.3 / −11.3 | −7.0 / −9.3 / −10.2   | +1.6 / +1.0 / +1.1 (worse) |
+
+Headline: median −23.1 → −23.2, range −8.6…−25.6 → **−7.0**…−25.6. Mean over the nine ≈ 0.0 dB, and
+it makes the **worst capture in the set worse**. Rejected.
+
+**But the split is the finding, and it is diagnostic rather than disappointing.** The correction is
+right in the one mode with **no diode clipper** — Boost gains 1.7–2.5 dB, in the direction and
+roughly the amount the knee measurement predicts — and wrong in **both** diode modes. In OD the
+extra pre-clip level drives P9 step 3's `sw1Ceil` harder, and P9's own write-up already records that
+ceiling as **over-correcting at G10** (comp error +2.25 → −2.83 dB there, wrong-signed by
+construction); in Distortion it pushes further into a ±0.584 V clamp the model already squares off
+too hard. So:
+
+> **P10's restated conclusion: the G10 gain shortfall is real, measured, and NOT the thing to fix
+> first.** The clip path's own G10 behaviour is what blocks it. `driveMakeup`'s 6.0 dB cap is doing
+> double duty — it is not just "0.8 dB short", it is *masking* a clip-path error, and every attempt
+> to correct the gain alone will keep trading Boost against OD/Dist for that reason. **Fix the G10
+> clip behaviour first; the gain law then follows for free**, and candidate 2 is the shape to
+> reinstate when it does. This is the same single defect P6 and P9 both left open, now measured from
+> the fourth side — and the first time the *order of operations* between them is established.
+
+**Also measured, and unexplained — the pedal's Boost ceiling FALLS with drive.** The plateau column:
+pedal **−13.91 → −15.53 dB** (decay_1k) and **−8.90 → −9.39** (decay_220) from G2 to G10, while the
+plugin's is flat to 0.16 dB (it is the rails, and they do not move). Corroborated on a second
+segment — on the hottest steady step (`lvl_-3`, Boost, T5) the pedal's **peak** output falls
+−10.12 → −12.17 dBFS from G2 to G10 with the plugin's constant to 0.14 dB. And its harmonic content
+does *not* rise monotonically: pedal H3/H5 at `lvl_-3` run −20.9/−24.0 (G2), −15.7/−22.8 (G8),
+**−21.2/−30.4 (G10)** — *less* distorted at G10 than at G8 — where the plugin's are flat (−17/−26 at
+every drive, i.e. fully saturated from G2 on). A ceiling that drops and a knee that softens as the
+drive knob rises is the missing half; supply sag is the obvious suspect and is **not** supported by
+the load (Boost leaves pin7 driving ~0.13 mA), so this needs its own measurement before any
+mechanism is proposed. **Do not fit it as a drive-keyed ceiling** — P9's rule, and P6's in reverse.
+
+> **⚠️ Harness caveat established while doing this, and it invalidates one axis of every level
+> measurement in the suite.** Absolute capture levels are comparable across **DRIVE** within a mode
+> — that is what makes the knee table above legitimate — but **NOT across TONE**. The captures carry
+> a flat, capture-side gain that varies with the TONE knob: plugin-minus-pedal broadband error runs
+> **−3.2 / −1.3 / +1.8 dB at T2 / T5 / T8**, the same ±0.2 dB in all three modes and at every drive,
+> and frequency-flat to ±0.5 dB from 100 Hz to 4.7 kHz. **It cannot be the tone stack**: at 100 Hz
+> C6 is effectively open, so the pot is a plain series resistance into the load and LF output *must*
+> rise as TONE rises — the plugin's does (+1.3 dB T2→T8) and the pedal's **falls 3.7 dB**. The two
+> agree on the tilt *span* to 0.01 dB, so the filter matches and only the level differs; a level
+> that moves with a knob but not with frequency is a volume setting, not a filter. It is invisible
+> to the null (best-fit gain per capture) and to the FR tables (shape metric), which is why it
+> survived 44 captures and nine audit items. Recorded in `p9_od_compression.py`'s module docstring.
+> **Do not read a tone-indexed level difference as a plugin defect.**
+
 ### Axes never audited at all
 
 `comprehensive_data.json` carries only `fr`, `thd`, `harmonics`, `h2`. These are in the captures but
@@ -1539,6 +1628,7 @@ python3 analysis/p9_od_compression.py comp          # the dynamics axis — wher
 python3 analysis/p9_od_compression.py orders        # per-order deficit — READ WITH `gain` OR NOT AT ALL
 python3 analysis/p9_od_compression.py tones         # discrete-tone ceiling probe (P9 step 1) — read as a caveat only
 python3 analysis/p9_od_compression.py decay         # decay-envelope ceiling probe (P9 step 1) — THE confirmation
+python3 analysis/p9_od_compression.py knee          # P10 — gain vs ceiling, SEPARATED. Boost rows only
 python3 analysis/p9_od_compression.py gain          # ...the missing unit conversion (~6 min, renders).
 #   NOTE all p9_* views read /tmp/monarch_renders (the dir above). p9_od_compression.py used to
 #   default to its own /tmp/monarch_renders_p9 and so could silently read a different vintage.
