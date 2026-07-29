@@ -247,10 +247,13 @@ void MonarchAudioProcessor::updateOversampling (int numCh)
     // base-rate solve leaves (16 kHz: −2.4 dB @48k → ~0 @192k). At 1x, clipRate == base rate and the
     // per-channel warp-correction shelf compensates instead. One-block gap on factor change is fine.
     const double clipRate = baseSampleRate * (double) (1 << wantLog2);
+    // Tone/Volume run at the BASE rate when postAtBaseRate — they are linear and cannot alias, so
+    // the OS span bought them nothing but warp accuracy (v1.5; see monarch::MonarchChannel::postAtBaseRate).
+    const double postRate = monarch::MonarchChannel::postAtBaseRate ? baseSampleRate : clipRate;
     for (auto& s : strips)
     {
-        s.yellow.prepareLinear (clipRate);
-        s.red.prepareLinear (clipRate);
+        s.yellow.prepareLinear (clipRate, postRate);
+        s.red.prepareLinear (clipRate, postRate);
         s.yellow.prepareClip (clipRate);
         s.red.prepareClip (clipRate);
     }
@@ -314,9 +317,15 @@ void MonarchAudioProcessor::processPedalChannel (juce::AudioBuffer<float>& buf, 
             dry[n] = (double) in[n];
     }
 
-    // 2. WHOLE channel (Stage 1 → clip span → Tone/Volume) at the oversampled rate (factor > 1) or
-    //    direct (1x). Running the linear stages oversampled too removes their bilinear-transform
-    //    top-octave warping; at 1x the per-channel warp-correction shelf compensates. Wet → scratchNodeHC.
+    // 2. Stage 1 → clip span at the oversampled rate (factor > 1) or direct (1x). Running Stage 1
+    //    oversampled too removes its bilinear-transform top-octave warping; at 1x the per-channel
+    //    warp-correction shelf compensates. Wet → scratchNodeHC.
+    //
+    //    Tone/Volume (processPost) run at the BASE rate, AFTER the downsample, when postAtBaseRate:
+    //    they are linear, so oversampling them bought only warp accuracy and never any antialiasing,
+    //    and they were 24 % of the per-sample channel cost. The decimation filter still owns the
+    //    antialiasing — it simply now sees the clip output directly instead of a tone-stack-filtered
+    //    version of it, which is strictly within what its stopband is specified to remove.
     if (os != nullptr)
     {
         juce::dsp::AudioBlock<double> dryBlock (scratchDry.getArrayOfWritePointers(),
@@ -326,16 +335,29 @@ void MonarchAudioProcessor::processPedalChannel (juce::AudioBuffer<float>& buf, 
         for (int ch = 0; ch < numCh; ++ch)
         {
             auto& c = chan ((size_t) ch);
-            for (int i = 0; i < osN; ++i)
-                up.setSample (ch, i, c.processPost (c.processClip (c.processPre (up.getSample (ch, i)))));
+            if (monarch::MonarchChannel::postAtBaseRate)
+                for (int i = 0; i < osN; ++i)
+                    up.setSample (ch, i, c.processClip (c.processPre (up.getSample (ch, i))));
+            else
+                for (int i = 0; i < osN; ++i)
+                    up.setSample (ch, i, c.processPost (c.processClip (c.processPre (up.getSample (ch, i)))));
         }
         juce::dsp::AudioBlock<double> wetBlock (scratchNodeHC.getArrayOfWritePointers(),
                                                 (size_t) numCh, (size_t) numSamples);
         os->processSamplesDown (wetBlock);
         // scratchDry is untouched (processSamplesUp takes a const input block) → still valid below.
+        if (monarch::MonarchChannel::postAtBaseRate)
+            for (int ch = 0; ch < numCh; ++ch)
+            {
+                double* wet = scratchNodeHC.getWritePointer (ch);
+                auto& c = chan ((size_t) ch);
+                for (int n = 0; n < numSamples; ++n)
+                    wet[n] = c.processPost (wet[n]);
+            }
     }
     else
     {
+        // 1x: base rate IS the OS rate, so postAtBaseRate is a no-op here by construction.
         for (int ch = 0; ch < numCh; ++ch)
         {
             const double* dry = scratchDry.getReadPointer (ch);

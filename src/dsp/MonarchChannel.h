@@ -51,6 +51,19 @@ public:
     // ceilings already fitted for IC_B, so this adds physics, not a fit.
     static constexpr bool stage1RailsEnabled = true;
 
+    // ---- Tone/Volume at BASE rate (v1.5, 2026-07-29) ------------------------------------------
+    // `processPost` (the 3-port tone R-type + the volume pot) is LINEAR, so it cannot alias — the
+    // only thing it ever gained from the oversampled span was a smaller bilinear frequency warp, and
+    // warp is correctable with a filter where aliasing is not. `analysis/perf_split_probe.cpp`
+    // measured it at **27 ns/sample of a 111 ns Boost channel (24 %)**, paid ×OS for that one
+    // benefit, so running it once per output sample instead of ×OS is the cheapest real CPU win
+    // available.
+    //
+    // ⚠ It is a VOICING change, not a free optimisation: at 48 kHz the tone stack's own warp
+    // reappears at every OS factor, and the `warp*` shelf was fitted with the tone stack warp-free
+    // at 4x/8x. Judge on the 44-capture null, never on FR alone. Compile-time so the A/B is exact.
+    static constexpr bool postAtBaseRate = true;
+
     // ---- Rail ASYMMETRY (v1.4 P2, 2026-07-28) ------------------------------------------------
     // The op-amp's two output ceilings are NOT equal, for two independent circuit reasons:
     //   • BIAS is not mid-supply. Theseus measured 4.5 V against VCC/2 = 4.575 V (V+ = 9.15 V), so
@@ -605,15 +618,20 @@ public:
 
     explicit MonarchChannel (bool hiGain = false) : stage1 (hiGain), hiGainStage1 (hiGain) {}
 
-    // The WHOLE channel now runs at the OVERSAMPLED rate (PluginProcessor wraps Stage 1, the clip
-    // span, and Tone/Volume in one oversampler), so the linear stages' near-Nyquist bilinear warp
+    // Stage 1 and the clip span run at the OVERSAMPLED rate, so their near-Nyquist bilinear warp
     // shrinks with the OS factor. Both prepareLinear and prepareClip are re-called at the OS rate on
     // factor change. `rate` here is that effective (oversampled) rate; for standalone/1x it == base.
-    void prepareLinear (double rate)
+    //
+    // `postRate` is the rate the Tone/Volume span runs at, which is NOT necessarily `rate` — see
+    // `postAtBaseRate`. It defaults to `rate` so a caller that wants the whole channel at one rate
+    // (the standalone probes in analysis/) needs no change and gets the pre-v1.5 behaviour exactly.
+    void prepareLinear (double rate, double postRate = 0.0)
     {
+        if (postRate <= 0.0)
+            postRate = rate;
         stage1.prepare (rate);
-        tone.prepare (rate);
-        volume.prepare (rate);
+        tone.prepare (postRate);
+        volume.prepare (postRate);
         shBaseRate = rate;
         // Unity pass-through until setDrive() runs. Keyed off bassCutOffDrive rather than a literal
         // 0.5: P7 moved the bell's zero to 0.55, which silently made the old `0.5` a −0.55 dB bell.

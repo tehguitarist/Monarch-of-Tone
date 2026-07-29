@@ -72,10 +72,18 @@ clang-format -i src/**/*.{cpp,h}
     1.7e-07 (null −61…−83 dB, THD identical to 4 dp). `Best` is Wright-Omega and lands in roughly
     one step; `Good` iterates. **Never assume the lower-quality setting is the faster one** —
     measure both, as `FeatureProfile` does, or an "Eco" mode ships that costs more and sounds worse.
-  - **⚠️ Re-measure per release — v1.4 cost ~1.5× overall and ~1.9× in Overdrive (2026-07-29).**
-    Attributed properly: the pre-v1.4 commit (`d15128b`) was rebuilt and benchmarked **on the same
-    machine in the same session**, so this is code, not thermals or hardware. 8x, CPU % of
-    realtime: Boost 18.8 → 29.2, **OD 27.5 → 50.2**, Dist 24.7 → 37.0; render 16.6 → 26.6.
+  - **⚠️⚠️ `PerfBenchmark` IS SENSITIVE TO MACHINE LOAD — never measure right after a build, and
+    never compare two numbers taken at different times.** On an **idle** Mac, three consecutive runs
+    agree to **±2 %**; a run started as a compile finishes reads **15–25 % high**. The first pass of
+    this audit was measured that way and published an 8x OD figure of 50.2 % against a true 35.1,
+    then attributed a v1.4 regression of "~1.9× in OD" that is really ~1.47×. Both were wrong, in
+    the same direction, for the same reason. **Protocol: rebuild both arms, then measure them
+    back-to-back, ≥2 runs each, with nothing else running.** A no-op arm (here: 1x, where the change
+    cannot apply) is the cheap internal control — if it moves, the measurement is contaminated.
+  - **v1.4's real cost, idle-vs-idle (2026-07-29):** 8x Boost 15.8 → 20.4 (**1.29×**), OD 23.9 →
+    35.1 (**1.47×**), Dist 21.2 → 25.8 (**1.22×**), render 13.4 → 18.6 (**1.39×**). Measured by
+    rebuilding `d15128b` in a `git worktree` and benchmarking it in the same session — so this is
+    code, not thermals or hardware.
     - **The shape of the regression localises half of it, MEASURED:** pre-v1.4 OD and Distortion
       were comparable (27.5 vs 24.7) and now OD has pulled far ahead, which is a mode-selective
       cost, and the only mode-selective thing v1.4 added is **`sw1Ceil` + its ADAA** (P9 step 3,
@@ -580,15 +588,35 @@ clang-format -i src/**/*.{cpp,h}
     `processPre` (Stage-1's two one-port solves + four shelves) and `processPost` (the 3-port tone
     R-type + volume) **cannot alias**; they are paid ×OS only to shrink the bilinear warp, which is
     a *filter* problem. Aliasing is the only thing oversampling is irreplaceable for.
-    - **Order of attack, cheapest and safest first: `processPost`.** 24 % of Boost's per-sample
-      cost, and its response is knob-set per block already, so prewarping a tone stack is routine —
-      unlike Stage 1, whose gain peak *sweeps* 2.8–5.0 kHz with DRIVE, which is exactly why the
-      2026-06-29 note rejected a fixed prewarp. That objection no longer transfers automatically:
-      `setDrive` recomputes coefficients per block, so a **drive-dependent** prewarp is available in
-      a way a fixed one was not. Worth re-deriving before assuming the old rejection still holds.
-    - **Don't quote the span split as a plugin-level saving.** The probe times the channel only;
-      the oversampler's own up/downsample FIR cost is unchanged by any of this, so the realisable
-      figure is below the arithmetic. Size it on `PerfBenchmark`, not on this table.
+  - **✅ Step 1 SHIPPED (2026-07-29): `processPost` runs at the BASE rate** —
+    `MonarchChannel::postAtBaseRate`, with `prepareLinear (rate, postRate)` and the tone/volume loop
+    moved after `processSamplesDown` in `processBlock`. **CPU −20 % at 4x/8x** (8x Boost 20.4 → 16.3,
+    OD 35.1 → 27.2, Dist 25.8 → 21.6, render 18.6 → 15.0; 2x −11…−17 %), and **1x is unchanged
+    (4.2 → 4.1), which is the built-in control** — at 1x there is no OS span, so the change *must*
+    be a no-op, and it is.
+    - **And the null got BETTER, which was not the plan: median −23.1 → −23.4 dB, 34 of 44 deeper,
+      0 shallower, worst capture unchanged at −8.6, best −25.6 → −27.0.** All three modes improve
+      (mean Clean −0.54 dB, OD −0.38, Dist −0.17).
+    - **⚠️ But it improved for the WRONG REASON, and that is the load-bearing part.** Per-band, the
+      gain is entirely HF — 2–6 kHz **−0.45 dB (33/40 deeper)** and 6 kHz+ −0.41, with 100–300 Hz and
+      300 Hz–1 k flat (−0.02/−0.03). A base-rate tone stack is *less* faithful to the analog
+      prototype than an oversampled one; it simply droops the top octave, and the plugin was already
+      slightly **hot** up there — which is what `hfTrim` (−1.3 dB @ 4.5 kHz) exists to trim. So this
+      change is silently supplying **the rest of a trim that was under-fitted**, and the null is
+      rewarding it. **Do not read this as "base rate is more accurate".**
+    - **⚠️ Consequence — a double-correction trap is now armed.** `hfTrim` and `warp*` were both fit
+      with the tone stack warp-free at 4x/8x. Anyone re-fitting either one (the rest of v1.5) must
+      re-fit **with this change in place**, or they will correct the same HF excess twice. That is
+      P7's rule for the fifth time: **corrections overlapping in band must be fit in one pass.**
+    - **Left open: `processPre`.** The bigger share (40 ns/sample, all three modes), but it holds
+      Stage 1, whose gain peak *sweeps* 2.8–5.0 kHz with DRIVE — which is exactly why the 2026-06-29
+      note rejected a fixed prewarp. That objection no longer transfers automatically: `setDrive`
+      recomputes coefficients per block, so a **drive-dependent** prewarp is available in a way a
+      fixed one was not. Re-derive before assuming the old rejection still holds.
+    - **Don't quote the span split as a plugin-level saving.** The probe times the channel only; the
+      oversampler's own up/downsample FIR cost is unchanged, so the realisable figure is below the
+      arithmetic — the measured 20 % against a predicted ~24 % is exactly that gap. Size on
+      `PerfBenchmark`, not on the span table.
   - **⚠️ But it CHANGES THE AUDIO and the warp shelf was fitted with the droop in place**, so
     removing it without re-fitting `warp*` will over-brighten 2x/4x. **Order: measure the split
     first** (`OSFidelity` with the early-out, vs without), **then re-fit `warp*`, then judge on the
@@ -607,10 +635,13 @@ preset browser. Supply-voltage mod (9/12/18V) and rail-saturation ADAA are in. L
 engineering: CI/CD (`.github/workflows/`), cross-platform VST3, and per-platform installers
 (`installer/`) — see README.
 
-**Calibration result (Step 11, real-pedal A/B; refreshed v1.4 P9 step 3, 2026-07-29):** the plugin nulls
-against 44 NAM captures (drive G2–G10, tone T2–T8, Clean/OD/Dist) at **median −23.1 dB**, and
-is at **−21.9 dB or better on every capture from G2 to G7** (worst G4 T5 Dist / G6 T5 OD / G7 T5 Dist,
-all −21.9). (Was −6.6 to −23.2,
+**Calibration result (Step 11, real-pedal A/B; refreshed v1.5 step 1, 2026-07-29):** the plugin nulls
+against 44 NAM captures (drive G2–G10, tone T2–T8, Clean/OD/Dist) at **−8.6 to −27.0 dB, median
+−23.4 dB**, and is at **−22.0 dB or better on every capture from G2 to G7** (worst G4 T5 Dist and
+G6 T5 OD, both −22.0). Per-mode at G5 T5: Clean **−23.9**, OD **−24.8**, Dist **−23.1**.
+**v1.5 step 1** (Tone/Volume at base rate) deepened 34 of 44 with **0 shallower** — but the gain is
+entirely HF and is compensating an under-fitted `hfTrim`, not added accuracy; see the v1.5 entry
+before re-fitting anything in that band. (Was −6.6 to −23.2,
 median −16.4→−16.6 after P2/P6. **P7** deepened the mean 2.46 dB and the median 4.9 dB — 24 captures
 deeper by up to 9.1 dB, concentrated at G2–G4 where the double-counted EQ correction lived, 2 shallower
 by ≤0.9 dB, and 18 byte-identical because both refitted instruments are exactly zero at and above drive

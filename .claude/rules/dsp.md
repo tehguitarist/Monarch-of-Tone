@@ -45,14 +45,31 @@ With the passive-port readout the WDF matches the analog circuit's bilinear tran
 expected warp at the gain peak (Stage-1 peak vs analog 3803 Hz: −74 Hz @48k). BUT near Nyquist that
 warp is large: at 48 kHz the **top octave droops** (16 kHz −6.6 dB vs the 192 kHz solve), which A/B
 showed as a real treble deficit vs the captures (NOT capture aliasing — NAM captures null to ~−50 dB
-and are accurate up there). Fix: **the whole channel — linear stages included — now runs at the
-oversampled rate** (`processSamplesUp` wraps `processPre`+`processClip`+`processPost`), so the warp
-shrinks with the OS factor (16 kHz deficit: −2.4 dB @48k → −0.2 @96k → ~0 @192k). Voicing is now
-(correctly) more accurate at higher OS. At **1x** the linear rate == session rate, so the warp
-remains; a per-channel rate-scaled high-shelf (`warp*` in MonarchChannel, `×(48k/rate)^4`) roughly
-compensates the recoverable 8–12 kHz there (16 kHz+ stays deficient at 1x — a first-order shelf
-can't match the near-Nyquist cliff; use 2x+ for full top-octave fidelity). Prewarping was rejected
-earlier (a fixed prewarp freezes the gain peak, but the analog peak sweeps ~2.8–5.0 kHz with DRIVE).
+and are accurate up there). Fix: **Stage 1 — not just the clip span — runs at the oversampled rate**
+(`processSamplesUp` wraps `processPre`+`processClip`), so the warp shrinks with the OS factor (16 kHz
+deficit: −2.4 dB @48k → −0.2 @96k → ~0 @192k). Voicing is now (correctly) more accurate at higher OS.
+At **1x** the linear rate == session rate, so the warp remains; a per-channel rate-scaled high-shelf
+(`warp*` in MonarchChannel, `×(48k/rate)^4`) roughly compensates the recoverable 8–12 kHz there
+(16 kHz+ stays deficient at 1x — a first-order shelf can't match the near-Nyquist cliff; use 2x+ for
+full top-octave fidelity). Prewarping was rejected earlier (a fixed prewarp freezes the gain peak,
+but the analog peak sweeps ~2.8–5.0 kHz with DRIVE — and see `postAtBaseRate` below, which reopens
+that for Stage 1 since `setDrive` now recomputes coefficients per block).
+
+> **⚠️ `processPost` was in this span until v1.5 (2026-07-29) and is NOT any more —
+> `MonarchChannel::postAtBaseRate`.** Tone + Volume are linear, so they cannot alias; the OS span
+> bought them nothing but warp accuracy, at **27 ns/sample of a 111 ns Boost channel (24 %)**, paid
+> ×OS. They now run once per output sample, after `processSamplesDown`. **CPU −20 % at 4x/8x**, and
+> 1x is unchanged to 0.1 % — the built-in control, since at 1x there is no OS span for the change to
+> act on. The decimation filter still owns the antialiasing; it simply now sees the clip output
+> directly rather than a tone-stack-filtered version of it, well inside its specified stopband.
+>
+> **It also deepened the null (median −23.1 → −23.4 dB, 34/44 deeper, 0 shallower) — for the wrong
+> reason, which is the part to remember.** The gain is *entirely* HF (2–6 kHz −0.45 dB, 6 kHz+ −0.41,
+> LF flat at −0.02/−0.03). A base-rate tone stack is **less** faithful to the analog prototype, not
+> more; it droops the top octave, and the plugin was already slightly hot up there — which is exactly
+> what `hfTrim` exists to trim. So this change is quietly supplying the rest of an under-fitted trim.
+> **Consequence: `hfTrim` and `warp*` must be re-fit WITH this in place, or the same HF excess gets
+> corrected twice.** Fifth instance of P7's overlapping-corrections rule.
 
 ### prepareToPlay
 Call `.prepare(sampleRate)` on **every** `CapacitorT` in both channels (missing one → silence /
@@ -118,11 +135,20 @@ Hi-Gain is fixed on Red.
 
 ## Oversampling
 
-- `juce::dsp::Oversampling`, one per channel, now wrapping **the whole channel** (`processSamplesUp`
-  → `processPre`+`processClip`+`processPost` → `processSamplesDown`), not just the clip span. Both
-  `prepareLinear` AND `prepareClip` are re-called at the oversampled rate on factor change. So the OS
-  factor changes anti-aliasing of the clip stages AND removes the linear stages' near-Nyquist
-  bilinear warp (higher OS = more accurate top octave; see "Linear stages run oversampled" above).
+- `juce::dsp::Oversampling`, one per channel, wrapping **Stage 1 + the clip span** (`processSamplesUp`
+  → `processPre`+`processClip` → `processSamplesDown` → `processPost`), i.e. more than the clip span
+  but NOT the whole channel. Both `prepareLinear` AND `prepareClip` are re-called at the oversampled
+  rate on factor change. So the OS factor changes anti-aliasing of the clip stages AND removes Stage
+  1's near-Nyquist bilinear warp (higher OS = more accurate top octave; see above).
+  - **`prepareLinear (rate, postRate = 0)`** — `postRate` is the Tone/Volume rate and defaults to
+    `rate`, so a caller wanting one rate for everything (the standalone probes in `analysis/`) needs
+    no change and gets the pre-v1.5 behaviour exactly. `PluginProcessor` passes the base rate when
+    `MonarchChannel::postAtBaseRate`.
+  - **The rule this establishes: oversample what can ALIAS, not what is merely inaccurate.** A linear
+    stage's error under bilinear mapping is frequency warp, which a filter can correct; a
+    nonlinearity's error is aliasing, which nothing downstream can undo. Paying ×OS for the first
+    kind is the expensive way to buy something cheap. `analysis/perf_split_probe.cpp` is the tool
+    that tells the two apart — it times `processPre`/`processClip`/`processPost` separately.
 - Two APVTS settings, both `AudioParameterChoice` "1x"/"2x"/"4x"/"8x":
   `oversampling_realtime` (live, default **2x**) and `oversampling_render` (default **4x**,
   selected when `isNonRealtime()`). **IIR low-latency live, FIR max-quality render.**
@@ -603,7 +629,8 @@ No tone-shaping in the trims. Chain: input trim → VU → **Red** → **Yellow*
    (Hi-Gain is fixed at construction — no per-block Stage 1 swap.)
 3. Read APVTS (cached atomic pointers, once/block). Tapers applied inside each stage.
 4. Apply supply voltage + params to both channels. Input trim (× cal, smoothed). Input meters.
-5. channelRed.process() first  — bypassed → copy in→out, skip DSP+oversampler; else up→WDF→down.
+5. channelRed.process() first  — bypassed → copy in→out, skip DSP+oversampler; else
+   up→processPre+processClip→down→processPost (Tone/Volume at base rate — postAtBaseRate).
 6. channelYellow.process()      — same.
 7. Output trim (÷ cal, smoothed). Output meters.
 ```

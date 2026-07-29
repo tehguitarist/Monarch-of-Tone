@@ -78,11 +78,16 @@ sample; the "skip DSP when bypassed" CPU optimisation is in the oversampling pat
 
 ## Oversampling
 
-One `juce::dsp::Oversampling` per channel, wrapping the **whole channel** (linear stages + clip
-span) so the linear WDF's near-Nyquist bilinear warp shrinks with the OS factor (see dsp.md
+One `juce::dsp::Oversampling` per channel, wrapping **Stage 1 + the clip span** (linear Stage 1 + clip
+span) so Stage 1's near-Nyquist bilinear warp shrinks with the OS factor (see dsp.md
 "Linear stages run oversampled"). Factor change → reinit both oversamplers + re-`prepareLinear`/
 `prepareClip` at the OS rate, at next block start (one-block gap acceptable).
 `oversampler.initProcessing(samplesPerBlock)` in prepareToPlay.
+
+**Tone/Volume (`processPost`) run at the BASE rate, after the downsample** (v1.5,
+`MonarchChannel::postAtBaseRate`) — they are linear and cannot alias, so the OS span bought them only
+warp accuracy for 24 % of the per-sample channel cost. CPU −20 % at 4x/8x, 1x unchanged by
+construction. `prepareLinear (clipRate, baseSampleRate)` carries the split. See dsp.md.
 
 ## prepareToPlay Responsibilities
 

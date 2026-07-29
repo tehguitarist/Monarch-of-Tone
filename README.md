@@ -60,17 +60,17 @@ Wave Digital Filters, in double precision, with absolute circuit voltages (not n
 All of this was checked, not assumed: every component value was cross-referenced across two
 independent schematic sources, and the stock circuit was directly A/B'd against NAM captures
 of a real King of Tone. After sub-sample time alignment and per-mode level matching, the
-plugin **nulls against the real pedal by −8.6 to −25.6 dB (median −23.1 dB)** across a
+plugin **nulls against the real pedal by −8.6 to −27.0 dB (median −23.4 dB)** across a
 44-capture sweep spanning all three clipping modes, the full drive range, and tone settings.
-The match is deepest through the most-used low/mid-gain range — **−21.9 dB or better on every
+The match is deepest through the most-used low/mid-gain range — **−22.0 dB or better on every
 capture from drive 2 through drive 7** — and shallower only at extreme drive. At a representative
 mid-gain setting (drive 5), the deepest achievable null per mode is:
 
 | Mode | Best null vs. the real pedal (drive 5) |
 |------|----------------------------------------|
-| Clean / Boost | **−23.3 dB** |
-| Overdrive | **−24.4 dB** |
-| Distortion | **−22.7 dB** |
+| Clean / Boost | **−23.9 dB** |
+| Overdrive | **−24.8 dB** |
+| Distortion | **−23.1 dB** |
 
 These are at the labelled knob settings — an active drive/tone/level search confirmed the
 nominal calibration is already optimal (tuning one part of the signal deeper only trades it
@@ -96,16 +96,17 @@ bypassed:
 
 | Oversampling | CPU (≈ % of one core) | Added latency | Best for |
 |---|---|---|---|
-| **1×** | ~3–6% | 0 samples | Tracking / low-latency live use; highs are slightly soft |
-| **2×** *(live default)* | ~7–13% | 6 samples | Everyday playing — the recommended balance |
-| **4×** | ~15–25% | 9 samples | Higher-fidelity highs when CPU allows |
-| **8×** | ~29–50% | 10 samples | Maximum fidelity |
-| **Render** *(auto, offline bounce)* | ~27% | 119 samples | Engages automatically when your DAW exports |
+| **1×** | ~2–4% | 0 samples | Tracking / low-latency live use; highs are slightly soft |
+| **2×** *(live default)* | ~4–7% | 6 samples | Everyday playing — the recommended balance |
+| **4×** | ~8–14% | 9 samples | Higher-fidelity highs when CPU allows |
+| **8×** | ~16–27% | 10 samples | Maximum fidelity |
+| **Render** *(auto, offline bounce)* | ~15% | 119 samples | Engages automatically when your DAW exports |
 
 Each range spans the three clipping modes: **Boost is the cheapest and Overdrive the most
-expensive** (roughly 1.7× Boost), because Overdrive's soft clipper is a genuine nonlinear solve —
-Newton–Raphson to convergence on the diode network, every sample, at the oversampled rate.
-Distortion sits between them.
+expensive** (roughly 1.7× Boost), because Overdrive's soft clipper is a genuine nonlinear solve on
+the diode network, every sample, at the oversampled rate. Distortion sits between them. Only the
+parts of the circuit that can actually alias are oversampled — the tone stack and volume pot are
+linear, so they run once per output sample, which is worth about 20% of the total at 4× and 8×.
 
 The Live and Render oversampling amounts are set independently, so you can play at 2× and still
 bounce at full quality automatically. Higher oversampling mainly improves the **top octave**
