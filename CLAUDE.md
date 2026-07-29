@@ -558,8 +558,11 @@ clang-format -i src/**/*.{cpp,h}
     so quiet orders can be trusted — NAM renders have no measurement noise, ≈−140 dBc).
     **Every `p9_*` view reads `/tmp/monarch_renders`** — the shared dir all the other harnesses use;
     `p9_od_compression.py` had its own and silently read a stale vintage (fixed in P9 step 3).
-- **v1.5 — the ADAA identity-region droop (OPEN, found 2026-07-29 during the v1.4 perf re-measure).
-  Not yet validated on the arbiter — do that before changing a line of DSP.**
+- **v1.5 — CPU pass + the ADAA identity-region droop (OPEN). → `analysis/CPU_AUDIT.md`** — the span
+  split, every lever's measured cost, the two rejected levers with their evidence, the measurement
+  protocol and the ordered plan live there; don't re-derive them here. Steps 1–2 are shipped; the
+  next item is the **early-out, then a joint `warp*` + `hfTrim` refit, then the null** (§6.1 there).
+  **The droop is not yet validated on the arbiter — do that before changing a line of DSP.**
   - **What is CERTAIN, because it is arithmetic.** First-order ADAA of the *identity* map is not the
     identity. Below the knee `railAntideriv` returns `½x²`, so the difference quotient is
     `½(x² − x₋₁²)/(x − x₋₁)` = **`(x + x₋₁)/2`** — a midpoint average, i.e. a half-sample delay and a
@@ -983,6 +986,12 @@ linear WDF now runs at the OS rate too (relevant to the v1.1 perf pass).
 - **Bands that are NOT trustworthy:** FR above ~8 kHz (±18 dB capture-side spread) and THD above
   ~5 kHz (Farina is H2-only there; the discrete-tone fallback aliases onto the fundamental at 6 and
   8 kHz — the captures read up to 291% THD). Don't fit anything to them. See FR_THD_AUDIT.md §4.
+- **CPU harnesses → `analysis/CPU_AUDIT.md` §8.** `perf_split_probe.cpp` (per-sample cost by SPAN, the
+  tool that tells an aliasing cost from a merely-inaccurate one) and **`byte_identity_probe.cpp`** —
+  full-precision dumps over every mode × drive × tone × channel **plus mid-stream mode changes**,
+  compared with `cmp`, so a "byte-identical" claim is verified rather than asserted. Use it for every
+  such claim: v1.5 step 2's whole 38 MB dump differed in **one byte**, the first sample after a
+  Boost→OD switch, because the branch being skipped also maintained state OD reads.
 - `tools/PedalRender` renders a WAV through the real processor (Yellow-only) for A/B:
   `PedalRender in.wav out.wav drive tone vol pres clip`.
 
