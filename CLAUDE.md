@@ -338,8 +338,9 @@ clang-format -i src/**/*.{cpp,h}
         (`/tmp/monarch_renders_p9`) while everything else uses `/tmp/monarch_renders`, so it
         **reported step 3 as "no change"** on the first run. Now shared. Same class as P8's
         two-naming-conventions trap: **never give a harness its own render dir.**
-    - **P10: the G8→G10 discontinuity — ⚠️ MEASURED at last (step 1 done 2026-07-29), and the fix
-      is BLOCKED BY P9's, not by the gain law.** The original "+4.9 dB tilt, clean sweep, 3/3 tones"
+    - **P10: the G8→G10 discontinuity — ⚠️ MEASURED (steps 1–2 done 2026-07-29): ONE defect, a
+      ~5.0–5.3 dB G10 gain shortfall, and the fix is BLOCKED BY P9's clipper, not by the gain law.
+      Step 2 withdrew the second defect step 1 thought it had found.** The original "+4.9 dB tilt, clean sweep, 3/3 tones"
       premise stays withdrawn (P7: that sweep carries 10–15 % THD). The replacement instrument is
       **`p9_od_compression.py knee`** — the decay segments read against the *known input envelope*
       instead of self-anchored, which separates **gain into the clipper** (the knee's *input* level)
@@ -364,16 +365,57 @@ clang-format -i src/**/*.{cpp,h}
         masking a clip-path error at G10** — and the order of operations is now established: **fix
         the G10 clip behaviour first, then reinstate the gain shape** (candidate 2 is the shape).
         Same single defect as P6's cap and P9's G8–G10 remainder, seen from a fourth side.
-      - **Open, and the likely next lead:** the pedal's **Boost ceiling falls with drive** — plateau
-        −13.91 → −15.53 dB (decay_1k) G2→G10 against a plugin flat to 0.16 dB; `lvl_-3` **peak**
-        output −10.12 → −12.17 dBFS against a plugin flat to 0.14; and the pedal's H3/H5 at `lvl_-3`
-        go −20.9/−24.0 (G2) → −15.7/−22.8 (G8) → **−21.2/−30.4 (G10)**, i.e. *less* distorted at
-        G10, where the plugin is fully saturated from G2 on. A ceiling that drops **and** softens as
-        the knob rises is the missing half. Supply sag is the obvious suspect and the load refutes
-        it (Boost leaves pin7 driving ~0.13 mA), so this needs its own measurement first. **Do not
-        fit it as a drive-keyed ceiling.**
-    - **⚠️ Capture-axis caveat (2026-07-29) — absolute levels are comparable across DRIVE within a
-      mode, but NOT across TONE.** The captures carry a flat, capture-side gain that varies with the
+      - **Step 2 done (2026-07-29) — ⚠️ the "missing half" is WITHDRAWN. There is no falling
+        ceiling, and the plateau was never independent evidence for one.** Step 1 had filed the
+        pedal's Boost plateau falling −13.91 → −15.53 dB (decay_1k, G2→G10) against a plugin flat to
+        0.16 as a second, unexplained defect. Harnesses: `p9_od_compression.py split` + `char`.
+        - **The plateau is the other two readings added together.** With `G` = the plugin's gain
+          deficit, `Δ` = the ceiling difference and `c` = a flat per-capture level offset: the linear
+          **tail** (new in step 2) gives −G−c, the **knee** gives +G+Δ, and the **plateau** gives
+          −c+Δ ≡ knee + tail. Confirmed on the data to **≤0.29 dB on every row**. So the observables
+          have **rank 2 in three unknowns** — a ceiling error and a per-capture level offset are
+          **algebraically inseparable** here, and compression depth measures `G+Δ` too.
+        - **And the G10 ceiling number was read off a void row.** Both ends of a decay curve need a
+          guard and neither had one: a plateau is only a plateau where the **top is flat** (at low
+          drive `max(y[:3])` reads a shoulder — 2.83 dB spread at G2), and a tail only measures gain
+          where its **slope is ≈1** (at G10/decay_1k the pedal's is **0.37** — 21 dB more gain, so
+          the whole 34 dB envelope stays compressed and nothing anchors the plateau). **The two decay
+          frequencies are two instruments with complementary valid windows** — decay_1k G2–G8,
+          decay_220 G6–G10 — not one table with two columns.
+        - **Result:** on the single properly-conditioned G10 row, **dPlat = +0.12 dB — the ceilings
+          agree** (and −0.24/−0.20/−0.05/+0.12 across decay_220's whole valid G6–G10 span). Step 1's
+          `dKnee` +6.21 at G10 is void as well; the valid figure is **+5.28 against a tail reading of
+          −4.96**, two quantities from opposite ends of the same curve, which is the independent
+          confirmation step 1 wanted. **G10's Boost gain shortfall is ~5.0–5.3 dB, confirmed twice.**
+        - **What the G10 anomaly actually is — a knee SHAPE, which no ceiling can produce.** dBc is
+          immune to both `c` and `Δ`. Boost `lvl_-3`: pedal H3/H5/H7 −15.7/−22.8/−27.2 (G8) →
+          **−21.2/−30.4/−41.6** (G10) against a plugin flat at −16.7/−25.2/−30.9 — **order-
+          progressive** (5.5/7.6/14.4 dB, a rounding signature), fading at `lvl_-6/-9`, present in
+          **Distortion** above G6 and **absent in Overdrive**, i.e. tracking how *square* the
+          waveform is rather than the mode. Not noise: the captures are **NAM model renders**, so
+          there is no measurement noise at all (interstitial floor −126…−148 dBc). **Leading
+          hypothesis (not closable from here): per-model fit error at the squarest target in the
+          set** — no circuit mechanism low-passes more as DRIVE rises (tone stack is knob-fixed;
+          1 kHz at ±3.3 V is orders of magnitude inside the 4580's slew/GBW), and H7 spreads 10 dB
+          across TONE at fixed drive, which has no physical reading either.
+        - **Consequences:** supply sag needs no further consideration (there was never a symptom);
+          the **G10 × hottest-level corner has a target-side floor — do not fit a mechanism to it**;
+          and step 1's order of operations stands unchanged (clip path first, then candidate 2's
+          hyperbolic gain shape).
+        - **Rules it adds:** *guard both ends of a curve before reading anything off it* (a plateau
+          needs a flat top, a tail needs unit slope — nine audit items read these segments without
+          either check; same failure class as P4's cross-tab and P7's instrument-validity rule, one
+          level down). And *count observables against unknowns before naming a defect*: P9 step 3
+          required a nonlinearity be proved **admissible** before fitting; this adds that a defect
+          must be proved **identifiable** before it is named.
+    - **⚠️ Capture-axis caveat (2026-07-29, widened by P10 step 2) — absolute levels are a
+      PER-CAPTURE property on EVERY axis; hold both knobs fixed when comparing them.** Each of the
+      44 captures is an independently trained NAM model, so no two share an absolute-level
+      calibration and nothing would make an offset knob-*selective*. Only x-axis quantities (the
+      clip knee), self-anchored shapes and dBc ratios cross captures. TONE is merely where it was
+      caught: the original reading below said "comparable across DRIVE, but NOT across TONE", and
+      reading a drive-indexed level difference as a *ceiling* is exactly the error P10 step 1 then
+      made. The captures carry a flat, capture-side gain that varies with the
       TONE knob: plugin-minus-pedal broadband error runs **−3.2 / −1.3 / +1.8 dB at T2 / T5 / T8**,
       the same ±0.2 dB in **all three modes at every drive**, frequency-flat to ±0.5 dB over
       100 Hz–4.7 kHz. It **cannot** be the tone stack — at 100 Hz C6 is effectively open, so the pot
@@ -411,6 +453,13 @@ clang-format -i src/**/*.{cpp,h}
     is an **input** level and needs no normalisation. **Boost rows only** — in OD the output keeps
     climbing above the clamp so the "plateau" is a slope and the metric prints artifacts, in Dist it
     never falls 3 dB inside the segment above G6).
+    **`analysis/p9_od_compression.py split`** (P10 step 2 — run this BEFORE trusting `knee`: it adds
+    the curve's linear **tail**, proves `dPlat ≡ dKnee + dGlin` so the plateau is not independent
+    evidence, states the rank-2 degeneracy that makes a ceiling error and a per-capture level offset
+    inseparable, and **guards both ends of the curve** — plateau flatness and unit tail slope — which
+    is what shows `knee`'s G10/decay_1k column to be void) and **`char`** (the dBc knee-shape view,
+    the only evidence class immune to both level offsets and ceilings; prints the interstitial floor
+    so quiet orders can be trusted — NAM renders have no measurement noise, ≈−140 dBc).
     **Every `p9_*` view reads `/tmp/monarch_renders`** — the shared dir all the other harnesses use;
     `p9_od_compression.py` had its own and silently read a stale vintage (fixed in P9 step 3).
 
@@ -687,12 +736,16 @@ linear WDF now runs at the OS rate too (relevant to the v1.1 perf pass).
 - `p31_harm_floor.py` measures the **capture chain's harmonic noise floor** by gating the Farina IR
   at fractional orders (between the harmonic impulses). Run it before fitting any quiet harmonic —
   it is what proved the H4/H6 targets were real signal (39 dB median margin) and not noise.
-- **Absolute levels are comparable across DRIVE within a mode, NOT across TONE** (2026-07-29): the
-  captures carry a flat capture-side gain that varies ~5 dB with the TONE knob (−3.2/−1.3/+1.8 dB
-  at T2/T5/T8, identical in all three modes, frequency-flat). Proven not to be the tone stack —
-  at 100 Hz the pot is a plain series R into the load, so LF *must* rise with TONE and the pedal's
-  falls. Invisible to the null and to the FR shape tables. Hold TONE fixed when comparing levels;
-  never read a tone-indexed level difference as a plugin defect. See FR_THD_AUDIT.md P10 step 1.
+- **Absolute levels are a PER-CAPTURE property on EVERY axis** (2026-07-29, widened by P10 step 2):
+  each of the 44 captures is an independently trained NAM model, so no two share an absolute-level
+  calibration and nothing makes an offset knob-*selective*. Hold **both** knobs fixed when comparing
+  levels; only x-axis quantities (the clip knee), self-anchored shapes and dBc ratios cross captures.
+  The visible instance is a flat capture-side gain varying ~5 dB with the TONE knob (−3.2/−1.3/+1.8 dB
+  at T2/T5/T8, identical in all three modes, frequency-flat) — proven not to be the tone stack, since
+  at 100 Hz the pot is a plain series R into the load so LF *must* rise with TONE and the pedal's
+  falls. Invisible to the null and to the FR shape tables. **Never read a knob-indexed level
+  difference as a plugin defect** — P10 step 1 read a drive-indexed one as a falling ceiling and
+  step 2 withdrew it. See FR_THD_AUDIT.md P10 steps 1–2.
 - **Bands that are NOT trustworthy:** FR above ~8 kHz (±18 dB capture-side spread) and THD above
   ~5 kHz (Farina is H2-only there; the discrete-tone fallback aliases onto the fundamental at 6 and
   8 kHz — the captures read up to 291% THD). Don't fit anything to them. See FR_THD_AUDIT.md §4.

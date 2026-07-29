@@ -49,17 +49,36 @@ WHAT THE VIEWS ARE FOR.
            here reports mixed together -- gain into the clipper (the knee's INPUT level, an x-axis
            quantity that no normalisation can touch) from the ceiling (the plateau, y-axis). Read
            the BOOST rows only; see view_knee's docstring for why OD/Dist are structurally invalid.
+           ⚠ It reports every drive as if every drive were measurable. Run `split` first.
+
+  `split`  P10 step 2 (added 2026-07-29): `knee`'s two numbers plus the third the same curve
+           carries -- the LINEAR TAIL -- which is enough to prove the plateau is NOT independent
+           evidence (dPlat == dKnee + dGlin identically) and that a ceiling error is algebraically
+           inseparable from a per-capture level offset. Also GUARDS both ends of the curve, which
+           nothing did before: it is what shows `knee`'s G10/decay_1k column to be void.
+
+  `char`   P10 step 2: the saturation CHARACTER (Hn/H1 in dBc) on the hot steady tones. dBc is the
+           one evidence class immune BOTH to a per-capture level offset and to a ceiling change, so
+           it is what decides what KIND of thing an anomaly is. Prints the interstitial floor
+           alongside, because the argument rests on quiet orders being real.
 
 CAPTURE-AXIS CAVEAT (established 2026-07-29, applies to every view here and to the whole harness).
-Absolute levels are comparable across DRIVE within a mode, but NOT across TONE: the captures carry
-a flat, capture-side gain that varies with the TONE knob by about 5 dB from T2 to T8 (plugin-minus-
-pedal broadband error runs -3.2 / -1.3 / +1.8 dB at T2 / T5 / T8, the SAME +-0.2 dB in all three
-modes and at every drive, and frequency-flat to +-0.5 dB from 100 Hz to 4.7 kHz). It cannot be the
-tone stack: with C6 open at 100 Hz the pot is a plain series resistance into the load, so LF output
-MUST rise as TONE rises -- the plugin's does (+1.3 dB T2->T8) and the pedal's FALLS 3.7 dB. The two
-agree on the tilt SPAN to 0.01 dB, so the filter matches and only the level differs. It is invisible
-to the null (best-fit gain per capture) and to the FR audit (shape metric), which is why it survived
-this long. Compare across DRIVE freely; hold TONE fixed when comparing levels.
+**Absolute levels are a PER-CAPTURE property on every axis. Hold BOTH knobs fixed when comparing
+levels; only x-axis (knee) and self-anchored or dBc quantities cross captures at all.** Each of the
+44 captures is an INDEPENDENTLY TRAINED NAM model, so there is no shared absolute-level calibration
+between any two of them, and no mechanism that would make an offset knob-selective.
+  The visible instance, and how this was found: a flat, capture-side gain varying with the TONE knob
+by about 5 dB from T2 to T8 (plugin-minus-pedal broadband error -3.2 / -1.3 / +1.8 dB at T2 / T5 /
+T8, the SAME +-0.2 dB in all three modes and at every drive, frequency-flat to +-0.5 dB from 100 Hz
+to 4.7 kHz). It cannot be the tone stack: with C6 open at 100 Hz the pot is a plain series resistance
+into the load, so LF output MUST rise as TONE rises -- the plugin's does (+1.3 dB T2->T8) and the
+pedal's FALLS 3.7 dB. The two agree on the tilt SPAN to 0.01 dB, so the filter matches and only the
+level differs. It is invisible to the null (best-fit gain per capture) and to the FR audit (shape
+metric), which is why it survived this long.
+  ⚠ This caveat was FIRST WRITTEN as "comparable across DRIVE, but NOT across TONE" -- i.e. as a
+property of the TONE axis, because TONE is where it was caught. P10 step 2 withdrew that: the DRIVE
+axis has the same exposure, and reading a drive-indexed level difference as a ceiling is exactly the
+mistake step 1 made.
 
 WHAT THIS SCRIPT FOUND (2026-07-29) -- read before re-running any of it:
 
@@ -84,12 +103,24 @@ WHAT THIS SCRIPT FOUND (2026-07-29) -- read before re-running any of it:
     at G2-G8. That's the discrete/level-stepped instrument P10 was waiting for; see FR_THD_AUDIT.md
     P10. Distortion's decay delta is negative at low-mid drive (opposite sign to OD) and OD's own
     G10 row doesn't converge cleanly on decay_1k -- both unexplained, noted for later.
+  * P10 STEP 2 DONE (2026-07-29): "the pedal's Boost ceiling FALLS with drive" is WITHDRAWN, and
+    `knee` alone could never have established it. `split` shows dPlat == dKnee + dGlin identically
+    (residual <=0.29 dB), so the plateau is not a second finding; and the observables have rank 2 in
+    three unknowns, so a ceiling error and a per-capture level offset cannot be told apart at all.
+    The claim was also read off a VOID row: with both ends of the curve guarded, decay_1k is valid
+    only G2-G8 (at G10 the pedal's tail slope is 0.37 -- 21 dB more gain, so the whole 34 dB envelope
+    stays compressed) and decay_220 only G6-G10 (below G6 the top is not flat -- 2.83 dB spread at
+    G2). THE TWO DECAY FREQUENCIES ARE TWO INSTRUMENTS WITH COMPLEMENTARY VALID WINDOWS, not one
+    table with two columns. On the single row where G10 is properly conditioned, dPlat = +0.12 dB:
+    the ceilings agree. `char` then shows what the G10 anomaly actually is -- an order-progressive
+    collapse of the pedal's harmonics at the hottest level only (Boost H3/H5/H7 -15.7/-22.8/-27.2 at
+    G8 -> -21.2/-30.4/-41.6 at G10, plugin flat), which a ceiling cannot produce at all.
 
 LEVEL IS NOT SHAPE, and the arbiter is still the null. This script measures; it decides nothing.
 
 Usage:
   p9_od_compression.py tilt|thd                             # JSON only, <1 s
-  p9_od_compression.py orders|valid|comp|tones|decay|knee [--render-dir DIR]
+  p9_od_compression.py orders|valid|comp|tones|decay|knee|split|char [--render-dir DIR]
   p9_od_compression.py gain [--in-gain 0 2 4]               # renders; slow
   p9_od_compression.py all
 """
@@ -508,6 +539,151 @@ def view_knee(render_dir, out=sys.stdout, n_windows=16, drop_db=3.0):
                       + f"{v[3] - v[1]:+9.2f}", file=out)
 
 
+# Guards on the decay curve's two ends. A plateau that is not flat under-reads its own ceiling; a
+# tail that is not linear measures no gain. Both are properties of the CURVE, not of the fit, and
+# both were unchecked until P10 step 2 — which is how "the pedal's ceiling falls with drive" got
+# read off rows where one end or the other was void.
+FLAT_MAX_DB = 0.5
+TAIL_SLOPE_MIN = 0.90
+
+
+def view_split(render_dir, out=sys.stdout, n_windows=16, drop_db=3.0, n_tail=4):
+    """P10 step 2: is there a CEILING error at G10 at all? Decompose the Boost decay curve.
+
+    `knee` (step 1) reads the plateau and the knee and reports them as two findings — a gain
+    shortfall and, separately, "the pedal's Boost ceiling FALLS with drive". This view adds the
+    third quantity the same curve carries, the LINEAR TAIL (the quietest windows, where neither
+    pedal nor plugin is anywhere near its ceiling), and that is enough to show the two are the
+    same number read on two axes.
+
+    Write the curve as `y = ceiling ⊖ (x + gain)` and let
+
+        G = the plugin's gain deficit          (plugin has G dB less gain into the clipper)
+        Δ = plugin ceiling − pedal ceiling     (the thing step 1 claimed moves with drive)
+        c = a flat level offset on the capture (per-capture, frequency-independent)
+
+    then the three measurable deltas (plugin − pedal) are
+
+        dGlin  (linear tail)  = −G − c
+        dKnee  (x-axis)       = +G + Δ
+        dPlat  (y-axis)       = −c + Δ         ==  dKnee + dGlin,  IDENTICALLY
+
+    so **dPlat is not an independent measurement** — it is the other two added together, and the
+    `resid` column here is that identity checked against the data (it comes out ≤0.2 dB). Worse,
+    the observables have rank 2 in three unknowns: only `G + Δ` and `G + c` are visible, so **a
+    ceiling difference and a per-capture level offset are ALGEBRAICALLY INSEPARABLE here.** No
+    amount of re-reading this segment decides between them. Compression depth doesn't help — it
+    measures `G + Δ` as well.
+
+    Which matters because the tie-breaker step 1 leaned on is not available: each of the 44
+    captures is an INDEPENDENTLY TRAINED NAM model, so absolute level is a per-model property on
+    every axis, not just the TONE axis where step 1 happened to catch it. See the module docstring.
+
+    What IS solid, and it is the point of running this: the tail is a direct measurement of the
+    linear-regime gain difference, on a part of the curve no ceiling touches. It confirms step 1's
+    knee reading from the opposite end of the same curve — G10 dGlin −4.96 dB against dKnee +5.28.
+
+    ⚠ BOTH ENDS OF THE CURVE NEED A GUARD, and neither was checked before this view existed. The
+    plateau is only a plateau where the top is FLAT (at low drive the curve hasn't saturated, so
+    `max(y[:3])` reads a shoulder and under-reads that curve's ceiling — which is most of the
+    apparent drive-trend in dPlat), and the tail is only a gain reading where its slope is ≈1 (at
+    G10/1 kHz the pedal has ~21 dB more gain than at G2 and the segment's whole 34 dB envelope
+    stays compressed — slope 0.37, nothing anchors the plateau at all). Rows failing either are
+    marked `void`: read only the clean ones. On decay_220 at G10, where both guards pass, the
+    plateau difference is +0.12 dB.
+
+    T5 only, deliberately: dGlin and dPlat are level quantities, and the module docstring's caveat
+    forbids medianing those across TONE. Boost only — see `view_knee` for why OD/Dist have no
+    measurable plateau.
+    """
+    orig, items = _pairs(render_dir)
+    print("\n=== P10 step 2 — GAIN vs CEILING, decomposed (Boost, T5) ===", file=out)
+    print("  dGlin = linear-tail delta (plugin − pedal), the gain difference where nothing clips.\n"
+          "  dKnee = step 1's x-axis reading.  dPlat = plateau delta.  resid = dPlat − (dKnee +\n"
+          "  dGlin), which is ZERO by construction — the plateau carries no new information, and a\n"
+          "  ceiling error cannot be told from a per-capture level offset on any of these three.\n"
+          "  GUARDS: flat = spread of the top 3 windows (a plateau must be flat, else that curve's\n"
+          "  ceiling is under-read); slope = tail slope (must be ≈1, else the tail is not linear\n"
+          "  and measures no gain). Worse of pedal/plugin shown. Rows failing either are `void`.",
+          file=out)
+    for name, _f0 in (("decay_220", 220.0), ("decay_1k", 1000.0)):
+        xin = _win_levels(orig, name, n_windows)
+        print(f"\n-- {name}   (input {xin[0]:.1f} .. {xin[-1]:.1f} dBFS)", file=out)
+        print(f"{'drive':<7}{'dGlin':>8}{'dKnee':>8}{'dPlat':>8}{'resid':>8}"
+              f"{'flat':>7}{'slope':>7}   {'verdict'}", file=out)
+        sel = sorted([it for it in items if it["mode"] == "Boost"
+                      and it["label"].split("_")[1] == "T5"], key=lambda it: it["drive"])
+        for it in sel:
+            pe, pl = (_win_levels(it[k], name, n_windows) for k in ("cap", "ren"))
+            dglin = float(np.median(pl[-n_tail:] - pe[-n_tail:]))
+            dplat, dknee = (b - a for a, b in zip(_knee(xin, pe, drop_db),
+                                                  _knee(xin, pl, drop_db)))
+            flat = max(float(np.ptp(y[:3])) for y in (pe, pl))
+            slope = min(float((y[-1] - y[-n_tail]) / (xin[-1] - xin[-n_tail])) for y in (pe, pl))
+            bad = [w for w, ok in (("not-flat", flat <= FLAT_MAX_DB),
+                                   ("tail-nonlinear", slope >= TAIL_SLOPE_MIN),
+                                   ("no-knee", np.isfinite(dknee))) if not ok]
+            print(f"G{it['drive'] * 10:<6.0f}{dglin:>+8.2f}{dknee:>+8.2f}{dplat:>+8.2f}"
+                  f"{dplat - dknee - dglin:>+8.2f}{flat:>7.2f}{slope:>7.2f}   "
+                  + ("void: " + ", ".join(bad) if bad else "ok"), file=out)
+
+
+# The one class of evidence a per-capture level offset CANNOT touch: harmonic ratios. If the pedal's
+# Boost ceiling really fell with drive, dBc would not move at all (a lower ceiling on the same
+# clipper is the same waveform, quieter). So this is the view that decides what KIND of thing the
+# G10 anomaly is — and the interstitial floor is printed alongside because the whole argument rests
+# on quiet harmonics being real. They are: the "captures" are NAM MODEL renders, not recordings, so
+# there is no measurement noise at all (floor lands near −140 dBc). Whatever these numbers are, they
+# are what the models actually produce.
+CHAR_ORDERS = (3, 5, 7)
+
+
+def view_char(render_dir, out=sys.stdout, f0=1000.0, levels=("-3", "-6", "-9")):
+    """P10 step 2: the saturation CHARACTER at the hot steady tones — immune to any level offset.
+
+    Reports the pedal's and plugin's Hn/H1 in dBc per drive per input level, plus the pedal's own
+    interstitial floor at (n±0.5)·f0 as the reality check on the quiet orders. Read Boost first,
+    then compare Distortion (also a hard-clipped near-square) and Overdrive (soft, least square).
+    """
+    _orig, items = _pairs(render_dir)
+    print(f"\n=== P10 step 2 — SATURATION CHARACTER, {f0:.0f} Hz steady tones, T5 ===", file=out)
+    print("  Hn/H1 in dBc, pedal vs plugin. dBc is immune to a per-capture level offset AND to a\n"
+          "  ceiling change, so this measures the KNEE SHAPE. flr = the pedal's interstitial floor\n"
+          "  at (n±0.5)f0, the check that the quiet orders are signal (NAM renders: ≈−140 dBc).",
+          file=out)
+    for lvl in levels:
+        print(f"\n-- lvl_{lvl}", file=out)
+        for mode in MODES:
+            sel = sorted([it for it in items if it["mode"] == mode
+                          and it["label"].split("_")[1] == "T5"], key=lambda it: it["drive"])
+            if not sel:
+                continue
+            print(f"   {mode:<12}" + "".join(f"{f'pedH{n}':>8}{f'plgH{n}':>8}" for n in CHAR_ORDERS)
+                  + f"{'flr':>8}", file=out)
+            for it in sel:
+                pe = _tone_orders(it["cap"], f"lvl_{lvl}", f0)
+                pl = _tone_orders(it["ren"], f"lvl_{lvl}", f0)
+                print(f"   G{it['drive'] * 10:<11.0f}"
+                      + "".join(f"{pe[n]:8.1f}{pl[n]:8.1f}" for n in CHAR_ORDERS)
+                      + f"{pe['flr']:8.0f}", file=out)
+
+
+def _tone_orders(x, name, f0):
+    """{n: Hn/H1 dBc} for the odd orders + 'flr', the worst interstitial level at (n±0.5)f0."""
+    s = A.seg_of(x, name)
+    w = np.hanning(len(s))
+    X = np.abs(np.fft.rfft(s * w))
+    res = A.FS / len(s)
+
+    def mag(fc):
+        k = int(round(fc / res))
+        return float(np.sqrt(np.sum(X[max(0, k - 3):min(len(X), k + 4)] ** 2)))
+    h1 = mag(f0) + 1e-30
+    out = {n: A.db(mag(n * f0) / h1) for n in CHAR_ORDERS}
+    out["flr"] = max(A.db(mag((n + s2) * f0) / h1) for n in CHAR_ORDERS for s2 in (-0.5, 0.5))
+    return out
+
+
 def _win_levels(x, name, n_windows):
     """Per-window rms (dBFS) of one segment — the same windowing for input, capture and render."""
     s = A.seg(x, name, guard=0.02)
@@ -531,7 +707,7 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("view", nargs="?", default="all",
                     choices=["tilt", "thd", "orders", "valid", "comp", "tones", "decay", "knee",
-                             "gain", "all"])
+                             "split", "char", "gain", "all"])
     ap.add_argument("--render-dir", default=DEFAULT_RENDERS)
     ap.add_argument("--sweep", default="sweep_drv_-6")
     ap.add_argument("--bin", default="build/PedalRender_artefacts/Release/PedalRender")
@@ -561,6 +737,10 @@ def main():
         view_decay(a.render_dir)
     if a.view in ("knee", "all"):
         view_knee(a.render_dir)
+    if a.view in ("split", "all"):
+        view_split(a.render_dir)
+    if a.view in ("char", "all"):
+        view_char(a.render_dir)
 
 
 if __name__ == "__main__":

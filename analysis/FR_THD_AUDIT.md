@@ -1551,6 +1551,11 @@ drive knob rises is the missing half; supply sag is the obvious suspect and is *
 the load (Boost leaves pin7 driving ~0.13 mA), so this needs its own measurement before any
 mechanism is proposed. **Do not fit it as a drive-keyed ceiling** — P9's rule, and P6's in reverse.
 
+> **⚠️ WITHDRAWN by step 2 (below). There is no falling ceiling, and the plateau was never
+> independent evidence for one.** The sentence "a ceiling that drops … is the missing half" is
+> retired. Read step 2 before acting on this paragraph — the `lvl_-3` harmonic reading in it is the
+> part that survives, and it is not a ceiling.
+
 > **⚠️ Harness caveat established while doing this, and it invalidates one axis of every level
 > measurement in the suite.** Absolute capture levels are comparable across **DRIVE** within a mode
 > — that is what makes the knee table above legitimate — but **NOT across TONE**. The captures carry
@@ -1564,6 +1569,117 @@ mechanism is proposed. **Do not fit it as a drive-keyed ceiling** — P9's rule,
 > to the null (best-fit gain per capture) and to the FR tables (shape metric), which is why it
 > survived 44 captures and nine audit items. Recorded in `p9_od_compression.py`'s module docstring.
 > **Do not read a tone-indexed level difference as a plugin defect.**
+>
+> **⚠️ Step 2 widened this: it is not a TONE-axis caveat, it is a PER-CAPTURE caveat.** The clause
+> "comparable across DRIVE within a mode — that is what makes the knee table above legitimate" is
+> **withdrawn**. Each of the 44 captures is an independently trained NAM model, so there is no shared
+> absolute-level calibration between any two of them and no mechanism that would make a per-model
+> offset knob-*selective*; TONE is simply where it was caught first. Hold **both** knobs fixed when
+> comparing levels. Only x-axis quantities (the knee), self-anchored shapes, and dBc ratios cross
+> captures at all. Reading a drive-indexed level difference as a ceiling is precisely the mistake
+> step 1 made in the paragraph above.
+
+#### P10 step 2 — there is no falling ceiling (2026-07-29): the plateau was never independent evidence, and step 1's G10 ceiling row was void
+
+Step 1 ended with two findings — a 5.3–6.2 dB gain shortfall at G10, and "the pedal's Boost ceiling
+FALLS with drive" as the unexplained missing half. **The second one does not survive its own
+instrument.** Harness: `p9_od_compression.py split` (the level algebra) and `char` (the character).
+
+**1. The plateau is not a second measurement — it is the first one added to a third.** Write the
+curve as `y = ceiling ⊖ (x + gain)` and let `G` = the plugin's gain deficit, `Δ` = plugin ceiling
+minus pedal ceiling, `c` = a flat per-capture level offset. Then the three deltas the decay segment
+can yield are
+
+| observable | equals |
+|---|---|
+| `dGlin` — the LINEAR TAIL, where neither curve is near its ceiling (new in step 2) | −G − c |
+| `dKnee` — step 1's x-axis reading | +G + Δ |
+| `dPlat` — step 1's y-axis reading | −c + Δ **= dKnee + dGlin, identically** |
+
+The identity is confirmed on the data to **≤0.29 dB on every row** (`resid` column). So the plateau
+carries no information the other two don't. Worse: **the observables have rank 2 in three unknowns.**
+Only `G + Δ` and `G + c` are visible, so **a ceiling difference and a per-capture level offset are
+algebraically inseparable here** — no amount of re-reading this segment decides between them, and
+compression depth doesn't help (it measures `G + Δ` too). Given the caveat immediately above, `c` is
+the reading that needs no new physics.
+
+**2. And the specific G10 ceiling number was read off a void row.** Both ends of the decay curve need
+a guard and neither had one. A plateau is only a plateau where the **top is flat** — at low drive the
+curve hasn't saturated, so `max(y[:3])` reads a shoulder and under-reads that curve's ceiling. A tail
+only measures gain where its **slope is ≈1**. With both enforced:
+
+| valid window | decay_220 | decay_1k |
+|---|---|---|
+| G2–G5 | **void** — top not flat (2.83 dB spread at G2) | ok |
+| G6–G8 | ok | ok |
+| G10 | ok (flat 0.12, slope 0.98) | **void** — pedal tail slope **0.37** |
+
+**The two decay frequencies are two instruments with complementary valid windows, not one table with
+two columns.** 1 kHz sees more Stage-1 gain than 220 Hz, so it saturates at lower drive (usable
+G2–G8) and by G10 the segment's whole 34 dB envelope stays compressed — nothing anchors its plateau.
+220 Hz is the reverse. Step 1 read both columns as valid everywhere, and its headline "−13.91 →
+−15.53 dB (decay_1k)" spans a valid G2 to a **void** G10.
+
+On the one row where G10 is properly conditioned, **`dPlat` = +0.12 dB — the ceilings agree.** Over
+decay_220's whole valid span it is −0.24 / −0.20 / −0.05 / +0.12 at G6/G7/G8/G10: flat. Step 1's
+`dKnee` = **+6.21 dB at G10 (decay_1k)** is void too; the valid G10 gain shortfall is **`dKnee`
++5.28 against `dGlin` −4.96** — and *those* two agreeing from opposite ends of the same curve, one an
+x-axis quantity and one a direct linear-regime level reading, is the independent confirmation step 1
+actually wanted. **G10's Boost gain shortfall is ~5.0–5.3 dB, confirmed twice.**
+
+What is left on the 1 kHz column is a **+1.4 dB monotone drift in `dPlat` over its valid G2–G8 span**,
+which is real but is not a ceiling either: 220 Hz reads 0.5–0.7 dB different at the same drives, and
+neither `Δ` (rail voltages) nor `c` (a flat gain) can be frequency-dependent. That is post-clip
+spectral shaping of a clipped waveform — driveShelf/EQ-residual territory, not a new mechanism.
+
+**3. The one evidence class immune to all of this says the G10 anomaly is a KNEE SHAPE, and a ceiling
+cannot produce it at all.** dBc ratios are immune to `c` *and* to `Δ` (a lower ceiling on the same
+clipper is the same waveform, quieter). `char`, Boost, `lvl_-3`:
+
+| pedal, dBc | G2 | G5 | G8 | **G10** | plugin (flat, every drive) |
+|---|---|---|---|---|---|
+| H3 | −20.9 | −17.0 | −15.7 | **−21.2** | −16.7 |
+| H5 | −24.0 | −26.1 | −22.8 | **−30.4** | −25.2 |
+| H7 | −34.2 | −34.2 | −27.2 | **−41.6** | −30.9 |
+
+The G8→G10 drop is **order-progressive** (5.5 / 7.6 / 14.4 dB) — a rounding/low-pass signature, not a
+level one. It **fades with input level** (H3 −21.2 at `lvl_-3`, −19.4 at `-6`, −18.6 at `-9`). The
+same order-progressive depression appears in **Distortion** above G6 (H7 −33.6 → −40.9) and **not in
+Overdrive** — i.e. it tracks how *square* the waveform is, not the mode. And it is not noise: these
+"captures" are **NAM model renders, not recordings**, so there is no measurement noise to hide in —
+the interstitial floor at (n±0.5)·f₀ lands at **−126…−148 dBc**. These numbers are exactly what the
+models produce.
+
+**Leading explanation, stated as a hypothesis because it cannot be closed from here:** per-model fit
+error at the most extreme waveform in the whole set — highest gain × hottest input × hardest clip is
+the squarest target any of the 44 models was trained on, and Boost/Distortion are the two modes that
+get there. No circuit mechanism low-passes *more* as the DRIVE knob rises: the tone stack is
+knob-fixed, and 1 kHz at ±3.3 V is four orders of magnitude inside the JRC4580's slew and GBW limits,
+so the H7 spread of 10 dB across TONE at fixed drive (T2 −31.1 vs T5 −41.6 at G10) has no physical
+reading either. Separating real pedal behaviour from model error here needs a re-capture.
+
+> **P10 step 2's conclusions.**
+> 1. **Retire "a ceiling that drops and a knee that softens is the missing half."** There is no
+>    falling ceiling. Supply sag needs no further consideration — there was never a symptom.
+> 2. **P10's actionable defect is unchanged and now doubly confirmed:** the ~5.0–5.3 dB G10 gain
+>    shortfall, blocked by the clip path. Step 1's order of operations stands — fix G10 clip
+>    behaviour first, then reinstate candidate 2's hyperbolic gain shape.
+> 3. **The G10 × hottest-level corner has a target-side floor. Do not fit a mechanism to it**, and
+>    do not expect the G10 nulls to reach the rest of the set.
+> 4. **Rule this adds — guard both ends of a curve before reading anything off it.** A plateau needs
+>    a flat top; a tail needs unit slope. Nine audit items read these decay segments without either
+>    check. It is the same failure class as P4's cross-tab and P7's instrument-validity rule, one
+>    level down: *check that the part of the instrument you are reading is in range*, not just that
+>    the instrument is.
+> 5. **Corollary on rank.** Before fitting a clip-path quantity, count the observables against the
+>    unknowns. P9 step 3 established that a nonlinearity must be proved *admissible* before it is
+>    fitted; this adds that a defect must be proved *identifiable* before it is named.
+>
+> **Harness fix made along the way:** `offline_null_probe.load_pairs`' mixed-vintage warning had a
+> 120 s bar, but a full 44-capture render pass legitimately spans ~3 min, so it fired on every clean
+> run — a guard that cries wolf is a guard nobody reads. Raised to 600 s on the *selected* files
+> (newest per label), which still catches the real failure it was added for in P8 (some labels coming
+> from an older run entirely land tens of minutes from the fresh ones).
 
 ### Axes never audited at all
 
@@ -1629,6 +1745,8 @@ python3 analysis/p9_od_compression.py orders        # per-order deficit — READ
 python3 analysis/p9_od_compression.py tones         # discrete-tone ceiling probe (P9 step 1) — read as a caveat only
 python3 analysis/p9_od_compression.py decay         # decay-envelope ceiling probe (P9 step 1) — THE confirmation
 python3 analysis/p9_od_compression.py knee          # P10 — gain vs ceiling, SEPARATED. Boost rows only
+python3 analysis/p9_od_compression.py split         # P10 step 2 — the rank-2 algebra + BOTH curve guards
+python3 analysis/p9_od_compression.py char          # P10 step 2 — dBc knee shape; immune to level offsets
 python3 analysis/p9_od_compression.py gain          # ...the missing unit conversion (~6 min, renders).
 #   NOTE all p9_* views read /tmp/monarch_renders (the dir above). p9_od_compression.py used to
 #   default to its own /tmp/monarch_renders_p9 and so could silently read a different vintage.

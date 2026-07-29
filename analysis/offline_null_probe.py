@@ -103,8 +103,13 @@ def load_pairs(render_dir, orig):
             found[lab] = path
     if not found:
         return []
+    # A full 44-capture render pass legitimately spans ~3 min, so the original 120 s bar fired on
+    # every clean run (v1.4 P10 step 2) — a guard that cries wolf is a guard nobody reads. The bar
+    # is on the SELECTED files (newest per label), so a genuine stale mix still shows: it means some
+    # labels came from an older run entirely, which puts them tens of minutes from the fresh ones.
+    VINTAGE_SPREAD_MAX_S = 600
     mt = [os.path.getmtime(p) for p in found.values()]
-    if max(mt) - min(mt) > 120:
+    if max(mt) - min(mt) > VINTAGE_SPREAD_MAX_S:
         sys.stderr.write(f"  ! renders in {render_dir} span {(max(mt) - min(mt)) / 60:.0f} min — "
                          f"MIXED VINTAGE, re-run comprehensive_report.py --keep-renders\n")
     items = []
