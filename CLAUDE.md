@@ -570,9 +570,25 @@ clang-format -i src/**/*.{cpp,h}
     overlapping in band AND in keying, fit as one.** The tone-safety note in circuit.md ("in OD the
     rails never engage → no tone change, verified byte-for-byte") is true of the *saturation* and
     false of the *ADAA wrapper*.
-  - **The fix is also the CPU win, which is why it is the next item.** An early-out returning `x`
+  - **The fix is also a CPU win, which is why it is the next item.** An early-out returning `x`
     when both `x` and `x₋₁` are below the knee removes a per-sample transcendental-free-but-not-free
     map from the hot path in every mode — the same maps the perf regression above is charged to.
+  - **⚠️ But it is NOT the big CPU win — that is the oversampled LINEAR spans, measured
+    2026-07-29 by `analysis/perf_split_probe.cpp`** (header-only, ~1 s compile, times each span
+    separately at 8x, drive 0.7). ns/sample: **Boost pre 40.1 / clip 43.9 / post 27.3**, OD
+    40.6/95.1/26.9, Dist 40.4/69.9/27.1 → the **linear share (pre+post) is 60.6 % / 41.5 / 49.2**.
+    `processPre` (Stage-1's two one-port solves + four shelves) and `processPost` (the 3-port tone
+    R-type + volume) **cannot alias**; they are paid ×OS only to shrink the bilinear warp, which is
+    a *filter* problem. Aliasing is the only thing oversampling is irreplaceable for.
+    - **Order of attack, cheapest and safest first: `processPost`.** 24 % of Boost's per-sample
+      cost, and its response is knob-set per block already, so prewarping a tone stack is routine —
+      unlike Stage 1, whose gain peak *sweeps* 2.8–5.0 kHz with DRIVE, which is exactly why the
+      2026-06-29 note rejected a fixed prewarp. That objection no longer transfers automatically:
+      `setDrive` recomputes coefficients per block, so a **drive-dependent** prewarp is available in
+      a way a fixed one was not. Worth re-deriving before assuming the old rejection still holds.
+    - **Don't quote the span split as a plugin-level saving.** The probe times the channel only;
+      the oversampler's own up/downsample FIR cost is unchanged by any of this, so the realisable
+      figure is below the arithmetic. Size it on `PerfBenchmark`, not on this table.
   - **⚠️ But it CHANGES THE AUDIO and the warp shelf was fitted with the droop in place**, so
     removing it without re-fitting `warp*` will over-brighten 2x/4x. **Order: measure the split
     first** (`OSFidelity` with the early-out, vs without), **then re-fit `warp*`, then judge on the

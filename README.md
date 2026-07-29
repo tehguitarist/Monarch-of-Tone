@@ -7,7 +7,7 @@ Monarch of Tone isn't a vibe-matched approximation: every gain stage, filter pol
 pair is solved as a Wave Digital Filter from real component values, then calibrated against
 NAM captures of a real unit until the plugin's output nulls against the hardware's.
 
-**[⬇ Download the latest release](https://github.com/tehguitarist/MoT/releases/latest)** — AU
+**[⬇ Download the latest release](https://github.com/tehguitarist/Monarch-of-Tone/releases/latest)** — AU
 (macOS), VST3 (macOS/Windows/Linux), zip or guided installer. See
 [Installing a release build](#installing-a-release-build) below.
 
@@ -119,8 +119,8 @@ own machine (see below).
 Standalone on Windows and Linux (see [Known limitations](#known-limitations)).
 
 ```bash
-git clone https://github.com/tehguitarist/MoT.git
-cd MoT
+git clone https://github.com/tehguitarist/Monarch-of-Tone.git
+cd Monarch-of-Tone
 
 # Pull in dependencies (JUCE 8, chowdsp_wdf, xsimd)
 git submodule update --init --recursive
@@ -183,7 +183,7 @@ analysis/     Real-pedal NAM captures, the test signal that drives them, and the
 
 ## Installing a release build
 
-Each [Release](https://github.com/tehguitarist/MoT/releases) ships two ways to install per
+Each [Release](https://github.com/tehguitarist/Monarch-of-Tone/releases) ships two ways to install per
 platform — a plain zip of the plugin files (for anyone who'd rather drop them in manually) and a
 guided installer. Six files total:
 
