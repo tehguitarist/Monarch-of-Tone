@@ -49,9 +49,11 @@ and are accurate up there). Fix: **Stage 1 — not just the clip span — runs a
 (`processSamplesUp` wraps `processPre`+`processClip`), so the warp shrinks with the OS factor (16 kHz
 deficit: −2.4 dB @48k → −0.2 @96k → ~0 @192k). Voicing is now (correctly) more accurate at higher OS.
 At **1x** the linear rate == session rate, so the warp remains; a per-channel rate-scaled high-shelf
-(`warp*` in MonarchChannel, `×(48k/rate)^4`) roughly compensates the recoverable 8–12 kHz there
-(16 kHz+ stays deficient at 1x — a first-order shelf can't match the near-Nyquist cliff; use 2x+ for
-full top-octave fidelity). Prewarping was rejected earlier (a fixed prewarp freezes the gain peak,
+(`warp*` in MonarchChannel, `×(48k/rate)^warpExp`) compensates it. **Since v1.5 step 3 that shelf is
+small and 1x is no longer the "approximate top" mode** — with the ADAA droop removed at source the
+true residual warp is ≤3.1 dB at 1x/16 kHz and ~nothing below 12 kHz, and the refit lands 1x within
+0.75 dB of 8x everywhere (2x within 0.14). 1x remains the low-CPU choice, but not on fidelity grounds
+any more. Prewarping was rejected earlier (a fixed prewarp freezes the gain peak,
 but the analog peak sweeps ~2.8–5.0 kHz with DRIVE — and see `postAtBaseRate` below, which reopens
 that for Stage 1 since `setDrive` now recomputes coefficients per block).
 
@@ -193,7 +195,24 @@ far past the OS Nyquist. dsp.md's "in addition to oversampling" was right and is
 > point** must be the alias-prone one. This is a safety mechanism; sizing it at moderate drive would
 > have understated it.
 
-### The identity-region droop — measured, and it is mostly what `warp*` has been correcting
+### The identity-region droop — REMOVED AT SOURCE (v1.5 step 3, 2026-07-30)
+
+`MonarchChannel::adaaIdentityEarlyOut`: when the whole interval [x₋₁, x] lies inside the linear
+region, return `x`. All three maps (`railSaturateADAA` ×2, `sw1CeilADAA`). The state pair is still
+maintained (F = ½x² there — no transcendental), so the first sample crossing the knee still gets an
+exact difference quotient and **nothing above the knee changes**: all 33–46 dB of the alias
+suppression tabled above is kept. `OSFidelity` (c2) now reads **0.00 dB in every cell** — in the
+identity region ADAA-on is bit-identical to ADAA-off.
+
+CPU **−5.5 / −4.9 / −4.4 ns per channel** (Boost/OD/Dist, −2.8…−5.9 %), which is **half** the −12/−13/
+−11 the audit predicted: that estimate assumed the early-out fires every sample, and at a hot
+operating point it does not. Below the knee the ADAA path was never expensive anyway (½x², no
+transcendental) — what is removed is a divide and two branches. **An early-out's saving is a property
+of the signal, not of the code it skips.**
+
+The measured droop it removes, and why the numbers below still matter (they are the refit budget):
+
+### The droop, as measured before the early-out — and mostly what `warp*` was correcting
 
 Below the knee `railAntideriv` returns `½x²`, so the difference quotient is **`(x + x₋₁)/2`** — a
 half-sample delay and a `|cos(πf/fs_os)|` rolloff. Per stage at 16 kHz: 6.02 dB at 1x, 1.25 at 2x,
@@ -211,14 +230,17 @@ never engage and the droop is all that is left), ADAA-off minus ADAA-on:
 and 4 is the stage count: **2 op-amp ceilings × 2 series pedal channels** (Boost has no `sw1Ceil`;
 in OD it is 6). The arithmetic is confirmed, not merely plausible.
 
-> **⚠️ This CORRECTS the bilinear-warp attribution below.** At 1x the total small-signal deficit vs
-> 8x is −3.61/−13.12/−32.52 dB at 8/12/16 kHz — and **12.04 of the 13.12 at 12 kHz, and 24.08 of the
-> 32.52 at 16 kHz, is ADAA droop, not warp.** `warp*` was fitted to that combined deficit, so it has
-> been mostly compensating the ADAA midpoint filter. **At 2x the droop (5.00 dB at 16 kHz) is LARGER
-> than the net 2x-vs-8x deviation (−3.51 dB)**, i.e. `warp*` is actively over-correcting to cover it.
-> Consequence for the identity-region early-out (v1.5 step 2): removing the droop at 2x without
-> refitting `warp*` over-brightens 16 kHz by ~5 dB. The refit budget is now known per rate — that is
-> the number the roadmap was waiting for.
+> **⚠️ This CORRECTED the bilinear-warp attribution below, and step 3 then went further.** At 1x the
+> total small-signal deficit vs 8x was −3.61/−13.12/−32.52 dB at 8/12/16 kHz — of which **12.04 of the
+> 13.12 at 12 kHz and 24.08 of the 32.52 at 16 kHz is ADAA droop, not warp.** `warp*` was fitted to
+> the combined deficit, so it was mostly compensating the ADAA midpoint filter; at 2x the droop
+> (5.00 dB at 16 kHz) *exceeded* the net 2x-vs-8x deviation (−3.51), i.e. it was over-correcting.
+> **Both are now fixed** — the droop at source (above) and `warp*` refit against it (below).
+>
+> ⚠️ These per-stage figures are only readable at a level where **every stage is inside its linear
+> region**. `OSFidelity` (c2) runs at 5e-4 for that reason: at its previous 0.01 FS, pin7 reached the
+> rail knee at 4 and 8 kHz and those two cells read +0.09/+2.14 against an arithmetic 1.21/5.00 —
+> invalid cells that looked like data. Same defect was then found in (a). See CPU_AUDIT.md §5b.
 
 **Diode-stage ADAA is deferred:** those stages are WDF nonlinear *roots* (not memoryless `y=f(x)`
 maps) and chowdsp has no ADAA support for that case — true ADAA there is the research-grade
@@ -553,15 +575,38 @@ each unity by the G4–G5 crossover:
   2026-07-04): eases the slightly-hot top end so the plugin matches the captures within ~0.3 dB across
   2–4.5 kHz (where the captures are reliable; above that they roll off/alias erratically — 6 kHz shows a
   spurious −15 dB dip — so this is a conservative, by-ear-confirmable cut, NOT fit to those artifacts).
-- **Warp high-shelf** (`warpPivotHz` 6.5k / `warpScaleDb`/`warpExp`, rate-scaled `×(48k/rate)^warpExp`,
-  capped `warpMaxDb`, then **DC-normalized**): compensates the finite-rate bilinear top-octave droop.
-  Recalibrated 06-30 — it was previously self-disabled by 2x (`^4`), which left the live default (2x)
-  ~2–3 dB darker on top than the render path (4x/8x); now FIT to the warp-free-baseline-vs-8x deficit
-  so **2x and 4x match 8x** through the audible top (DC–8 kHz ≤0.2 dB, 12 kHz ~0.4 dB, only the 16 kHz
-  edge ~1.8 dB short at 2x — a first-order shelf can't reach Nyquist without over-brightening the
-  6–8 kHz presence band, so the moderate pivot is deliberate). The DC-normalization (divide by H(z=1))
-  keeps low/mid at exact unity at every rate — without it the near-Nyquist prewarp droops the whole
-  spectrum (several dB at 1x). 1x stays the low-CPU/approximate-top mode (warpMaxDb cap).
+- **Warp high-shelf** (`warpPivotHz` **17k** / `warpScaleDb` **1.0** / `warpExp` **1.80**, rate-scaled
+  `×(48k/rate)^warpExp`, capped `warpMaxDb` **1.0**, then **DC-normalized**): compensates the
+  finite-rate bilinear top-octave droop. The DC-normalization (divide by H(z=1)) keeps low/mid at
+  exact unity at every rate — without it the near-Nyquist prewarp droops the whole spectrum.
+  > **⚠️ REFIT v1.5 step 3 (2026-07-30) and the base lift fell 10.6 → 1.0 dB — ~90 % of what this
+  > shelf was correcting was never bilinear warp.** Two errors, both in the instrument: the **ADAA
+  > identity-region droop** (see the ADAA section — 24 of the 32.5 dB at 1x/16 kHz), and
+  > `OSFidelity` (a) being **measured at 0.01 FS in Overdrive**, where Stage 1's ~4 kHz gain peak puts
+  > pin7 past the 0.5 V `sw1Ceil` knee, so the "small-signal FR" ran through the soft clipper in
+  > exactly the presence band this pivot serves. With the droop gone and (a) at a linear 5e-4, the
+  > residual warp is **−0.14/−0.86/−3.08 dB at 8/12/16 kHz at 1x and ≤0.44 at 2x** — nothing below
+  > 12 kHz at any rate. Refit (`analysis/v15_warp_refit.py`, weighted to the presence band,
+  > constrained to vanish at 8x so the reference is not moved): **1x within +0.28/−0.75 dB, 2x within
+  > 0.14, 4x within 0.02**, against a before of 1x −32.6, 2x +1.02/−3.51, 4x +0.14/−0.75 at
+  > 8/16 kHz. So the live default (2x) and the render path now share the whole audible top. The
+  > 44-capture null is **neutral** (median −23.45 unchanged, 10 deeper / 11 shallower / 23 unchanged)
+  > — as it must be, since the null renders at 4x and below 8 kHz that path moved ≤0.17 dB.
+  >
+  > **The old moderate 6.5 k pivot was right for the deficit it was fitted to and wrong for the real
+  > one.** The ADAA droop is a `|cos|` and starts low; genuine bilinear warp is confined to the top
+  > octave. A high pivot needs the guard: `shelfCoeffs` prewarps the pole to `pivot·√ghi`, which at
+  > 17 kHz crosses π/2 at 1x on a 32 kHz session and returns an **unstable** filter. `prepareLinear`
+  > slides the pivot down with the rate (`warpPoleMaxFrac` = 0.42) — inert at 44.1/48 kHz, binding at
+  > 32 kHz (17.0 → 12.7 kHz); verified finite over {22.05…96} kHz × {1,2,4,8}x. `warpMaxDb` = 1.0 is
+  > load-bearing for the same reason: at 44.1 kHz 1x the uncapped law asks 1.17 dB and would move the
+  > pole off the fit.
+  >
+  > **`hfTrim` was put on the bench in the SAME pass** (P7's rule — the two overlap in band) and
+  > deliberately left at −1.3 dB: the clean sweep says the plugin is ~0.4 dB dark (wants less trim),
+  > the arbiter says −0.3 dB of HF is 0.023 dB *better* (wants more), and both are inside what either
+  > instrument resolves. The null's preference here is the known driven-sweep dulling bias. See
+  > CPU_AUDIT.md §5b.
 
 ## DRIVE make-up gain (`MonarchChannel::driveMakeup`) — v1.4 P6, 2026-07-28
 

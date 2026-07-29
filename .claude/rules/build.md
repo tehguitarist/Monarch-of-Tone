@@ -75,5 +75,5 @@ don't proceed on FAIL). All gates currently **PASS** (auval PASS). Each has a de
 | Trim Lock | `TrimLock` | editor-level: ±18 dB range on both trims, `trim_lock` defaults on, delta-linked mirroring (incl. no-snap-on-enable + rail clamp) matches the acceptance table |
 
 **Calibration / null validation** (Step 11, real-pedal A/B): see CLAUDE.md. The plugin nulls
-against 44 NAM captures at **−8.6 to −27.0 dB (median −23.4, v1.5 step 1)**. Harness: `analysis/null_test.py`,
+against 44 NAM captures at **−8.6 to −26.9 dB (median −23.4, v1.5 step 3)**. Harness: `analysis/null_test.py`,
 `run_validation.py` (writes `analysis/VALIDATION_REPORT.md`), `internal_checks.py`.

@@ -108,7 +108,17 @@ int main()
     // ---------------------------------------------------------------------------------------
     setP (apvts, "clipping_mode_yellow", 1.0f); setP (apvts, "clipping_mode_red", 1.0f);
     setP (apvts, "drive_yellow", 0.5f); setP (apvts, "drive_red", 0.5f);
-    const double vSmall = 0.01; // tiny → linear (no clipping, no rail-sat)
+    // ⚠ 0.01 is NOT small enough here and this table was wrong at 4–8 kHz for years (found
+    // 2026-07-30, v1.5 step 3). Stage 1's gain peaks near 4 kHz, so at 0.01 FS pin7 already
+    // reaches ~0.7 V — past `sw1CeilKneeV` (0.5 V) in the Overdrive mode this section runs in —
+    // and the "small-signal FR" is then being read through the soft clipper, in exactly the
+    // presence band the warp shelf is pivoted for. The tell was that a candidate shelf's measured
+    // contribution matched its analytic response to 0.01 dB at 4x and 0.17 at 2x but was off by
+    // 1.64 dB at 1x/8 kHz, NON-monotonically in frequency — a filter-model error cannot do that.
+    // At 5e-4 the whole chain is linear and the analytic model reproduces every cell.
+    // Third instance in this file of the same rule ((b)'s floor-limited metric, (c2)'s level):
+    // check the instrument is valid across the axis you are sweeping before reading it.
+    const double vSmall = 5.0e-4;
     const double freqs[] = { 100, 250, 500, 1000, 2000, 4000, 8000, 12000, 16000 };
     const int nF = (int) (sizeof (freqs) / sizeof (freqs[0]));
     const int Nfr = (int) fs; // 1 s → 1 Hz bins, integer cycles for integer freqs
@@ -236,6 +246,16 @@ int main()
                  "    Sanity check on the metric itself: 'alias on' must fall steeply with OS.)\n");
 
     const double hfFreqs[] = { 4000, 8000, 12000, 16000 };
+    // ⚠ Level matters here, and `vSmall` (0.01) is NOT small enough at the drive 0.85 (c1) leaves
+    // set: Stage 1's gain peaks in the low kHz, so at 4 and 8 kHz pin7 still reaches the 2.4/3.6 V
+    // rail knee and the cell stops being an identity-region measurement at all. That is why the
+    // pre-early-out table read +0.09 / +2.14 at 4 / 8 kHz against an arithmetic 1.21 / 5.00 while
+    // matching 12.04 / 24.08 exactly at 12 / 16 kHz, where Stage 1's response has fallen away —
+    // two invalid cells that looked like data. At 5e-4 every stage is inside the linear region at
+    // every frequency, and the whole table then agrees with the arithmetic to 0.01 dB.
+    // Same rule as (b)'s floor-limited alias metric one section up: check the instrument is valid
+    // across the axis you are sweeping before reading a number off it.
+    const double vTiny = 5.0e-4;
     const int nHf = (int) (sizeof (hfFreqs) / sizeof (hfFreqs[0]));
     std::printf ("\n== OSFidelity (c2): ADAA on vs off — small-signal FR, off MINUS on (dB) ==\n");
     std::printf ("   %-6s", "Hz");
@@ -247,9 +267,9 @@ int main()
         for (int f = 0; f < nHf; ++f)
         {
             prep (proc, osFactors[o]); proc.setAdaaEnabled (true);
-            auto yOn = renderSine (proc, hfFreqs[f], vSmall, Nfr);
+            auto yOn = renderSine (proc, hfFreqs[f], vTiny, Nfr);
             prep (proc, osFactors[o]); proc.setAdaaEnabled (false);
-            auto yOff = renderSine (proc, hfFreqs[f], vSmall, Nfr);
+            auto yOff = renderSine (proc, hfFreqs[f], vTiny, Nfr);
             checkFinite (yOn); checkFinite (yOff);
             const double mOn = mag (yOn, hfFreqs[f], settle), mOff = mag (yOff, hfFreqs[f], settle);
             const double dB = (mOn > 1e-15 && mOff > 1e-15) ? 20.0 * std::log10 (mOff / mOn) : 0.0;

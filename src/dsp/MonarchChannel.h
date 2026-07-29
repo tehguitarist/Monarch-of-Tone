@@ -64,6 +64,26 @@ public:
     // at 4x/8x. Judge on the 44-capture null, never on FR alone. Compile-time so the A/B is exact.
     static constexpr bool postAtBaseRate = true;
 
+    // ---- ADAA identity-region early-out (v1.5 step 3, 2026-07-30) -----------------------------
+    // First-order ADAA of the IDENTITY map is not the identity — it is a half-sample delay plus a
+    // one-zero rolloff, and that is arithmetic, not a hypothesis. Below the knee `railAntideriv`
+    // returns ½x², so the difference quotient is ½(x² − x₋₁²)/(x − x₋₁) = **(x + x₋₁)/2**, whose
+    // magnitude response is |cos(π f / fs_os)|: per stage at 16 kHz, 6.02 dB at 1x, 1.25 at 2x,
+    // 0.30 at 4x, 0.07 at 8x. Measured on the real processor (`OSFidelity` (c2)) it comes out at
+    // exactly 4.00× that at every rate — 4 = 2 op-amp ceilings × 2 series pedal channels — so the
+    // mechanism is confirmed. The identity cannot alias, so there is nothing there for ADAA to
+    // suppress; every dB of the 33–46 dB of alias suppression ADAA is worth (CPU_AUDIT.md §4)
+    // happens ABOVE the knee and is untouched by this.
+    //
+    // So: when the WHOLE interval [x₋₁, x] lies inside the linear region, return x. The state pair
+    // is still maintained (F = ½x² there, no transcendental), so the first sample that crosses the
+    // knee gets an exact difference quotient — the early-out changes nothing above the knee.
+    //
+    // ⚠ It is a VOICING change: `warp*` was fitted to a combined "1x/2x vs 8x" deficit of which
+    // this droop was the larger part, so it has been compensating ADAA more than bilinear warp.
+    // `warp*` AND `hfTrim` must be re-fitted in ONE pass with this in place — see CPU_AUDIT.md §5.
+    static constexpr bool adaaIdentityEarlyOut = true;
+
     // ---- Rail ASYMMETRY (v1.4 P2, 2026-07-28) ------------------------------------------------
     // The op-amp's two output ceilings are NOT equal, for two independent circuit reasons:
     //   • BIAS is not mid-supply. Theseus measured 4.5 V against VCC/2 = 4.575 V (V+ = 9.15 V), so
@@ -495,17 +515,36 @@ public:
     // warpScaleDb·(48k/rate)^warpExp at warpPivotHz, capped at warpMaxDb, then DC-NORMALIZED (see
     // prepareLinear) so the low/mid stay at unity at every rate. (scale,exp) were FIT (exact
     // prewarped-bilinear, per OS rate) to the warp-free-baseline-vs-8x deficit at 6/8/12/16 kHz.
-    // A MODERATE pivot (6.5 k) is chosen on purpose over a higher one: a first-order shelf can't be
-    // flat at 8 k AND steep at 16 k, and matching the 6–8 kHz PRESENCE band (where the guitar has
-    // energy) to 8x matters far more than the 16 kHz edge (which carries no musical content). Result
-    // vs 8x: DC–8 kHz within ~0.2 dB, 12 kHz ~0.4 dB, 16 kHz ~1.8 dB short at 2x (≈0.35 dB at 4x).
-    // The low warpMaxDb cap holds 1x sane (a first-order shelf can't match 1x's near-Nyquist cliff —
-    // 1x stays the low-CPU/approximate-top mode); 2x+ is full fidelity and live(2x)↔render(4x/8x)
-    // now share the audible top octave. The DC-normalization is what lets the cap stay clean at 1x.
-    static constexpr double warpPivotHz = 6500.0; // warp-correction high-shelf centre (Hz)
-    static constexpr double warpScaleDb = 10.6;   // base HF lift at 48k; ×(48k/rate)^warpExp
-    static constexpr double warpExp = 2.20;       // rate falloff from the fitted ghi₂ₓ/ghi₄ₓ ratio
-    static constexpr double warpMaxDb = 3.0;      // cap (1x; kept low so the prewarped shelf holds unity DC)
+    //
+    // ⚠⚠ REFITTED 2026-07-30 (v1.5 step 3), and the base lift fell 10.6 → 1.0 dB — a 10× cut,
+    // because MOST OF WHAT THIS SHELF WAS CORRECTING WAS NEVER BILINEAR WARP. Two errors, both in
+    // the instrument, both now fixed in `tests/OSFidelity` (a):
+    //   1. The ADAA identity-region droop (see adaaIdentityEarlyOut / CPU_AUDIT.md §5) supplied
+    //      12.04 of the 13.12 dB at 12 kHz and 24.08 of the 32.52 at 16 kHz that the 06-30 fit
+    //      read as "warp". The early-out removes it at source.
+    //   2. (a) itself was measured at 0.01 FS in Overdrive, where Stage 1's ~4 kHz gain peak puts
+    //      pin7 past the 0.5 V sw1Ceil knee — so the "small-signal FR" ran through the soft
+    //      clipper in exactly the presence band this pivot serves. Measured at a genuinely linear
+    //      5e-4, the analytic shelf model reproduces a candidate's contribution to 0.01 dB at
+    //      every rate; against the contaminated baseline it was off 1.64 dB at 1x/8 kHz.
+    // With both fixed, the residual warp is −0.14 / −0.86 / −3.08 dB at 8 / 12 / 16 kHz at 1x and
+    // ≤0.44 dB at 2x — i.e. essentially nothing below 12 kHz at any rate. Refit
+    // (analysis/v15_warp_refit.py, weighted to the presence band, constrained to VANISH at 8x so
+    // the accuracy reference is not moved): 1x lands within +0.27 / −0.74 dB, 2x within 0.14, 4x
+    // within 0.02. Weighted rms 0.415 (no shelf) → 0.155.
+    //
+    // The pivot moved 6.5 k → 17 k with it. That is not a taste change: the old moderate pivot
+    // existed because the deficit it was fitted to started in the presence band, and the real
+    // residual does not — it is confined to the top octave, which is what a high pivot fits. But
+    // a pivot that high needs the guard in prepareLinear: shelfCoeffs prewarps the POLE to
+    // pivot·√ghi, so at 1x on a low session rate (32 kHz) tan() would cross Nyquist and the
+    // filter would be unstable. warpMaxDb = 1.0 is load-bearing for the same reason — at 44.1 kHz
+    // 1x the uncapped law asks for 1.17 dB, and the cap is what keeps the pole where it was fit.
+    static constexpr double warpPivotHz = 17000.0; // warp-correction high-shelf centre (Hz)
+    static constexpr double warpScaleDb = 1.0;    // base HF lift at 48k; ×(48k/rate)^warpExp
+    static constexpr double warpExp = 1.80;       // rate falloff, refit 2026-07-30 (was 2.20)
+    static constexpr double warpMaxDb = 1.0;      // cap — also the Nyquist-safety bound, see above
+    static constexpr double warpPoleMaxFrac = 0.42; // prewarped pole ≤ this × the design rate
 
     // ---- Overdrive clip-depth-gated low-mid restoration (2026-07-04) --------------------------
     // Farina linear-TF audit vs the captures (analysis/mid_eq_audit.py) shows the Overdrive channel
@@ -641,7 +680,14 @@ public:
         // Bilinear-warp top-octave correction: rate-only, tracks the measured 1x/2x/4x→8x deficit
         // so the live (2x) and render (4x/8x) paths share the same top octave (see warp* consts).
         const double warpDb = std::min (warpMaxDb, warpScaleDb * std::pow (48000.0 / shBaseRate, warpExp));
-        shelfCoeffs (1.0, std::pow (10.0, warpDb / 20.0), warpPivotHz, wsB0, wsB1, wsA1);
+        // Nyquist guard on the PIVOT (v1.5 step 3). shelfCoeffs prewarps the pole to pivot·√ghi;
+        // at 17 kHz that clears Nyquist comfortably at 44.1/48 kHz but NOT at a 32 kHz session
+        // running 1x, where tan() would cross π/2, flip sign and hand back an unstable filter.
+        // Slide the pivot down with the rate instead: inert at every rate this was fitted at
+        // (48 k needs 19.0 kHz of headroom, 44.1 k needs 17.5), graceful below them.
+        const double warpGhi = std::pow (10.0, warpDb / 20.0);
+        const double warpPivot = std::min (warpPivotHz, warpPoleMaxFrac * shBaseRate / std::sqrt (warpGhi));
+        shelfCoeffs (1.0, warpGhi, warpPivot, wsB0, wsB1, wsA1);
         // DC-normalize the warp shelf: a prewarped first-order high-shelf with a pivot up near the
         // (oversampled) Nyquist loses unity DC gain — the whole spectrum droops a few tenths of a dB
         // (and several dB at 1x), an audible broadband tone/level shift. Dividing by the measured DC
@@ -913,6 +959,18 @@ private:
             xPrev = x;
             return railSaturate (x);
         }
+        // Identity region: the map is exactly y=x on [−railKneeNeg, +railKneePos], so if BOTH ends
+        // of the interval are inside it there is no nonlinearity to antialias and the difference
+        // quotient would be the midpoint average (x+x₋₁)/2 — see adaaIdentityEarlyOut.
+        if constexpr (adaaIdentityEarlyOut)
+        {
+            if (x <= railKneePos && x >= -railKneeNeg && xPrev <= railKneePos && xPrev >= -railKneeNeg)
+            {
+                xPrev = x;
+                fPrev = 0.5 * x * x; // == railAntideriv(x) below the knee; keeps the next sample exact
+                return x;
+            }
+        }
         const double Fx = railAntideriv (x);
         const double dx = x - xPrev;
         double y;
@@ -972,6 +1030,17 @@ private:
         {
             sw1CeilXprev = x;
             return sw1Ceil (x);
+        }
+        // Identity region — see adaaIdentityEarlyOut. In OD this is very nearly the whole signal:
+        // the feedback clipper holds |pin7| ≤ 1.64 V, so above the 0.5 V knee is the exception.
+        if constexpr (adaaIdentityEarlyOut)
+        {
+            if (std::abs (x) <= sw1CeilKneeV && std::abs (sw1CeilXprev) <= sw1CeilKneeV)
+            {
+                sw1CeilXprev = x;
+                sw1CeilFprev = 0.5 * x * x;
+                return x;
+            }
         }
         const double Fx = sw1CeilAntideriv (x);
         const double dx = x - sw1CeilXprev;

@@ -559,10 +559,10 @@ clang-format -i src/**/*.{cpp,h}
     **Every `p9_*` view reads `/tmp/monarch_renders`** — the shared dir all the other harnesses use;
     `p9_od_compression.py` had its own and silently read a stale vintage (fixed in P9 step 3).
 - **v1.5 — CPU pass + the ADAA identity-region droop (OPEN). → `analysis/CPU_AUDIT.md`** — the span
-  split, every lever's measured cost, the two rejected levers with their evidence, the measurement
-  protocol and the ordered plan live there; don't re-derive them here. Steps 1–2 are shipped; the
-  next item is the **early-out, then a joint `warp*` + `hfTrim` refit, then the null** (§6.1 there).
-  **The droop is not yet validated on the arbiter — do that before changing a line of DSP.**
+  split, every lever's measured cost, the rejected levers with their evidence, the measurement
+  protocol and the ordered plan live there; don't re-derive them here. **Steps 1–3 are shipped.** The
+  remaining levers are both *judged* changes, not free ones: a rational `fastTanh` (§6.2) and
+  `processPre` → base rate (§6.3).
   - **What is CERTAIN, because it is arithmetic.** First-order ADAA of the *identity* map is not the
     identity. Below the knee `railAntideriv` returns `½x²`, so the difference quotient is
     `½(x² − x₋₁²)/(x − x₋₁)` = **`(x + x₋₁)/2`** — a midpoint average, i.e. a half-sample delay and a
@@ -581,9 +581,9 @@ clang-format -i src/**/*.{cpp,h}
     overlapping in band AND in keying, fit as one.** The tone-safety note in circuit.md ("in OD the
     rails never engage → no tone change, verified byte-for-byte") is true of the *saturation* and
     false of the *ADAA wrapper*.
-  - **The fix is also a CPU win, which is why it is the next item.** An early-out returning `x`
-    when both `x` and `x₋₁` are below the knee removes a per-sample transcendental-free-but-not-free
-    map from the hot path in every mode — the same maps the perf regression above is charged to.
+  - **✅ Both halves of that were SHIPPED as step 3 — see the step 3 entry below.** The early-out
+    removes the droop at source; `warp*` was then refit and its base lift fell **10.6 → 1.0 dB**,
+    confirming the collision above was not just real but the *majority* of what the shelf did.
   - **⚠️ But it is NOT the big CPU win — that is the oversampled LINEAR spans, measured
     2026-07-29 by `analysis/perf_split_probe.cpp`** (header-only, ~1 s compile, times each span
     separately at 8x, drive 0.7). ns/sample: **Boost pre 40.1 / clip 43.9 / post 27.3**, OD
@@ -620,11 +620,9 @@ clang-format -i src/**/*.{cpp,h}
       oversampler's own up/downsample FIR cost is unchanged, so the realisable figure is below the
       arithmetic — the measured 20 % against a predicted ~24 % is exactly that gap. Size on
       `PerfBenchmark`, not on the span table.
-  - **⚠️ But it CHANGES THE AUDIO and the warp shelf was fitted with the droop in place**, so
-    removing it without re-fitting `warp*` will over-brighten 2x/4x. **Order: measure the split
-    first** (`OSFidelity` with the early-out, vs without), **then re-fit `warp*`, then judge on the
-    44-capture null** — not on FR, per the standing rule that FR generates the hypothesis and the
-    null decides. Do not ship the early-out as "just an optimisation": it is a voicing change.
+  - **⚠️ It CHANGES THE AUDIO and the warp shelf was fitted with the droop in place** — that ordering
+    (early-out → refit `warp*` → judge on the null, never on FR alone) was followed in step 3 and the
+    prediction held: shipping the early-out alone left 2x **+1.76/+2.44/+2.10 dB hot** at 8/12/16 kHz.
   - **✅ Step 2 MEASURED (2026-07-30). Where the per-sample CPU actually is, one lever shipped free,
     and the biggest-looking lever KILLED on measurement.** Method: `analysis/perf_split_probe.cpp`
     built against patched-header variants (the `p9_ceiling_fit` pattern — ~1 s per arm), run
@@ -691,6 +689,60 @@ clang-format -i src/**/*.{cpp,h}
       lever; step 2 rejects the ADAA lever. What is left is either free (shipped above), a voicing
       decision to be judged on the null (not a user control), or the OS factor — which is already two
       controls. The one thing that changed: 4x/8x are not overpaying for antialiasing after all.
+  - **✅ Step 3 SHIPPED (2026-07-30): the ADAA identity-region early-out + the `warp*` refit it forced.
+    The headline is not the CPU — it is that `warp*`'s base lift falls 10.6 → 1.0 dB, because ~90 % of
+    what that shelf corrected was never bilinear warp.** `MonarchChannel::adaaIdentityEarlyOut`:
+    return `x` when the whole interval [x₋₁, x] is inside the linear region, on all three maps. State
+    is still maintained (F = ½x², no transcendental), so the first sample crossing the knee is still
+    exact and **nothing above the knee changes** — all 33–46 dB of step 2's alias suppression is kept.
+    `OSFidelity` (c2) now reads **0.00 in every cell**. Nine per-stage gates + six ctest gates PASS.
+    - **⚠️⚠️ TWO MORE INVALID INSTRUMENTS, and this is the transferable part — `OSFidelity` (a) and
+      (c2) were both measured ABOVE the clip knee.** Both ran at 0.01 FS; Stage 1's gain peaks near
+      4 kHz, so pin7 sat at ~0.7 V, past `sw1CeilKneeV` = 0.5 V. So the "small-signal FR" was being
+      read **through the soft clipper, in exactly the presence band `warpPivotHz` serves**. The tell
+      in (c2) was arithmetic: the shipped table read +0.09/+2.14 at 4/8 kHz against a predicted
+      1.21/5.00 while matching 12.04/24.08 at 12/16 kHz — two cells that looked like data. The tell in
+      (a) was a disagreement **no filter-model error can produce**: a candidate shelf's measured
+      contribution matched its analytic response to **0.01 dB at 4x and 0.17 at 2x but was off 1.64 dB
+      at 1x/8 kHz, NON-monotonically in frequency**. Both fixed at 5e-4, where the analytic models
+      reproduce every cell. **Three of `OSFidelity`'s four sections have now been caught reading an
+      invalid instrument** ((b) floor-limited, (a) and (c2) above the knee) — the family that started
+      with P4's marginalisation trap, but one level lower: not the wrong aggregation of a good
+      instrument, the wrong **operating point**.
+    - **What the residual warp actually is, once both errors are gone:** −0.14/−0.86/**−3.08** dB at
+      8/12/16 kHz at 1x, ≤0.44 at 2x, ≤0.08 at 4x — i.e. **nothing below 12 kHz at any rate.** Refit
+      (`analysis/v15_warp_refit.py`; weighted to the presence band, constrained to **vanish at 8x** so
+      the accuracy reference is not moved, and constrained so the prewarped pole stays inside
+      Nyquist): scale **10.6 → 1.0**, exp **2.20 → 1.80**, pivot **6500 → 17000**, cap **3.0 → 1.0**.
+      Before → after vs 8x: **1x** −3.46/−13.21/−32.59 → **+0.28/+0.22/−0.75**; **2x**
+      +1.02/−0.47/−3.51 → **+0.08/+0.05/−0.14**; **4x** +0.14/−0.17/−0.75 → **+0.02/+0.01/−0.02**.
+      2x is the LIVE default and 4x the RENDER default, so live playback and bounce now share the
+      whole audible top — the thing the 06-30 recalibration was aiming at and half achieved.
+    - **The pivot move needed a guard the old one never did.** `shelfCoeffs` prewarps the pole to
+      `pivot·√ghi`; at 17 kHz that crosses π/2 at 1x on a **32 kHz** session and returns an
+      **unstable** filter. `prepareLinear` now slides the pivot down with the rate
+      (`warpPoleMaxFrac` = 0.42) — inert at 44.1/48 kHz, binding at 32 kHz (17.0 → 12.7 kHz); verified
+      finite and bounded over {22.05, 32, 44.1, 48, 88.2, 96} kHz × {1,2,4,8}x. `warpMaxDb` = 1.0 is
+      load-bearing for the same reason (at 44.1 kHz 1x the uncapped law asks 1.17 dB).
+    - **Arbiter: NEUTRAL, as predicted.** 44 captures: median **−23.45 → −23.45**, mean +0.01 dB,
+      10 deeper / 11 shallower / 23 unchanged, largest move ±0.3 dB. The null renders at 4x and below
+      8 kHz that path moved ≤0.17 dB; everything the change did lives at 1x/2x or above 8 kHz, where
+      the captures carry ±18 dB of spread. **A null-neutral result is the correct outcome for a change
+      to an internal-consistency axis** — had it moved the null much, the refit would have been
+      absorbing a capture-accuracy error it has no business touching.
+    - **`hfTrim` was benched in the SAME pass (P7's rule) and deliberately NOT moved.** The two
+      instruments disagree in sign and both effects are below what either resolves: the clean sweep
+      says the plugin is ~0.4 dB **dark** (wants less trim), the arbiter says −0.3 dB of HF is 0.023 dB
+      **better** (wants more). The null's preference is `offline_null_probe`'s own documented
+      driven-sweep dulling bias, so neither is actionable. Stays at −1.3 dB @ 4.5 kHz.
+    - **CPU −5.5 / −4.9 / −4.4 ns per channel (−2.8…−5.9 %), which is HALF what §6.1 predicted.**
+      That −12/−13/−11 came from the *total ADAA overhead*, i.e. what you would save if the early-out
+      fired every sample; at a hot operating point it does not, and below the knee the ADAA path was
+      never expensive (½x², no transcendental) — what is removed is a divide and two branches.
+      **Rule: an early-out's saving is a property of the SIGNAL, not of the code it skips.** At plugin
+      level this is inside `PerfBenchmark`'s ±2 %, so **no plugin-level figure is claimed and the
+      README table is unchanged** — §0 rule 2 forbids quoting a single-arm reading against a
+      remembered one.
 
 ---
 
@@ -704,13 +756,17 @@ preset browser. Supply-voltage mod (9/12/18V) and rail-saturation ADAA are in. L
 engineering: CI/CD (`.github/workflows/`), cross-platform VST3, and per-platform installers
 (`installer/`) — see README.
 
-**Calibration result (Step 11, real-pedal A/B; refreshed v1.5 step 1, 2026-07-29):** the plugin nulls
-against 44 NAM captures (drive G2–G10, tone T2–T8, Clean/OD/Dist) at **−8.6 to −27.0 dB, median
-−23.4 dB**, and is at **−22.0 dB or better on every capture from G2 to G7** (worst G4 T5 Dist and
-G6 T5 OD, both −22.0). Per-mode at G5 T5: Clean **−23.9**, OD **−24.8**, Dist **−23.1**.
+**Calibration result (Step 11, real-pedal A/B; refreshed v1.5 step 3, 2026-07-30):** the plugin nulls
+against 44 NAM captures (drive G2–G10, tone T2–T8, Clean/OD/Dist) at **−8.6 to −26.9 dB, median
+−23.4 dB**, and is at **−22.0 dB or better on every capture from G2 to G7**. Per-mode at G5 T5:
+Clean **−23.9**, OD **−24.8**, Dist **−23.1**.
 **v1.5 step 1** (Tone/Volume at base rate) deepened 34 of 44 with **0 shallower** — but the gain is
 entirely HF and is compensating an under-fitted `hfTrim`, not added accuracy; see the v1.5 entry
-before re-fitting anything in that band. (Was −6.6 to −23.2,
+before re-fitting anything in that band. **v1.5 step 3** (ADAA early-out + `warp*` refit) is
+**null-neutral** (median unchanged, 10 deeper / 11 shallower / 23 unchanged, ≤±0.3 dB) *by design* —
+it fixes the agreement between OS factors, an axis the 4x-rendered null cannot see. Its `hfTrim`
+verdict supersedes step 1's note above: measured on both instruments, the trim is inside the noise
+in both directions and stays at −1.3 dB. (Was −6.6 to −23.2,
 median −16.4→−16.6 after P2/P6. **P7** deepened the mean 2.46 dB and the median 4.9 dB — 24 captures
 deeper by up to 9.1 dB, concentrated at G2–G4 where the double-counted EQ correction lived, 2 shallower
 by ≤0.9 dB, and 18 byte-identical because both refitted instruments are exactly zero at and above drive
@@ -886,9 +942,21 @@ warp-free-baseline-vs-8x deficit so **2x and 4x match 8x** through the audible t
 12 kHz ~0.4 dB; only the 16 kHz edge is ~1.8 dB short at 2x — a first-order shelf can't reach Nyquist
 without over-brightening the 6–8 kHz presence band, so the moderate 6.5 k pivot is deliberate). The
 DC-normalization (divide by H(z=1)) holds low/mid at exact unity at every rate (without it the
-near-Nyquist prewarp droops the whole spectrum, several dB at 1x). **1x** stays the low-CPU/
-approximate-top mode (its 16 kHz is still deficient — use 2x+ for full fidelity). CPU cost: the
+near-Nyquist prewarp droops the whole spectrum, several dB at 1x). CPU cost: the
 linear WDF now runs at the OS rate too (relevant to the v1.1 perf pass).
+
+> **⚠️⚠️ MOSTLY WRONG, corrected by v1.5 step 3 (2026-07-30) — this whole section's headline number
+> was not bilinear warp.** Two errors compounded: **(1)** the ADAA identity-region droop supplied
+> 24 of the 32.5 dB of the 1x/16 kHz deficit (dsp.md's ADAA section), and **(2)** the instrument that
+> measured the deficit, `OSFidelity` (a), ran at 0.01 FS in Overdrive — where Stage 1's ~4 kHz gain
+> peak puts pin7 past the 0.5 V `sw1Ceil` knee, so it was reading the **soft clipper**, not a linear
+> FR, in exactly the presence band the 6.5 k pivot was chosen for. Fix the droop at source and the
+> level, and the **true residual warp is −0.14/−0.86/−3.08 dB at 8/12/16 kHz at 1x and ≤0.44 at 2x —
+> nothing below 12 kHz at any rate.** `warp*`'s base lift refit 10.6 → **1.0 dB**, pivot 6.5 k →
+> **17 k**; 1x now lands within 0.75 dB of 8x and 2x within **0.14**, so **1x is no longer the
+> "approximate-top" mode** (it is still the low-CPU one). What survives from the paragraph above:
+> running the linear stages oversampled is right, and the DC normalization is load-bearing. See
+> CPU_AUDIT.md §5b.
 
 ### Accepted residuals (un-modeled second-order device physics, per user pref for circuit accuracy)
 - **Sub-32 Hz shortfall (~2 dB at 20 Hz, near-constant across drive)** and the **LF THD gap it

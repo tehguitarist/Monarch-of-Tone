@@ -190,31 +190,139 @@ overlapping in band *and* in keying, fitted as one).
 `warp*` is actively over-correcting to cover it. So an early-out that removes the droop at 2x, shipped
 without a refit, over-brightens 16 kHz by ~5 dB.
 
-**That per-rate table is the refit budget the early-out was blocked on.**
+**That per-rate table is the refit budget the early-out was blocked on.** Spent in §5b — and it turned
+out to be an *under*-estimate of how much of `warp*` was ADAA, because (a) was itself mis-measured.
+
+---
+
+## 5b. Step 3 — SHIPPED: the ADAA identity-region early-out, and the `warp*` refit it forced
+
+`MonarchChannel::adaaIdentityEarlyOut`. When the WHOLE interval [x₋₁, x] lies inside the linear
+region, return `x` — on all three maps (`railSaturateADAA` ×2 op-amps, `sw1CeilADAA`). The state pair
+is still maintained (F = ½x² there, no transcendental), so the first sample that crosses the knee gets
+an exact difference quotient and **nothing above the knee changes** — every dB of §4's alias
+suppression is kept, because all of it happens above the knee.
+
+`OSFidelity` (c2) now reads **0.00 dB in every cell**: in the identity region ADAA-on is bit-identical
+to ADAA-off, which is the whole claim, verified rather than argued.
+
+### The CPU saving is real but HALF what §6.1 predicted — because it is signal-dependent
+
+Measured with the variant-header method, 5 alternating passes, medians (ns/sample/channel at 8x):
+
+| | pre | clip | post | **total** |
+|---|---|---|---|---|
+| Boost off → on | 29.7 → 23.2 | 37.4 → 38.0 | 27.0 → 26.9 | **93.8 → 88.3 (−5.5, −5.9 %)** |
+| Overdrive | 28.6 → 25.0 | 120.8 → 118.8 | 27.0 → 26.9 | **175.9 → 171.1 (−4.9, −2.8 %)** |
+| Distortion | 27.4 → 24.4 | 68.4 → 67.4 | 27.0 → 26.9 | **122.8 → 118.4 (−4.4, −3.6 %)** |
+
+§6.1's **−12 / −13 / −11 ns was an over-estimate**, and the reason is worth keeping: it was derived
+from the *total ADAA overhead* figures in §1, which is what you would save if the early-out fired on
+every sample. At the probe's operating point (drive 0.7, 0.45 V pk — deliberately hot) it does not:
+|nodeG| passes the 2.4 V knee from ~G7 up and pin7 passes `sw1CeilKneeV` = 0.5 V routinely. And below
+the knee the ADAA path was never expensive anyway — `railAntideriv` returns ½x² there, with **no
+transcendental**, so what the early-out actually removes is a divide and two branches.
+
+**Rule: an early-out's saving is a property of the SIGNAL, not of the code it skips.** Size it at the
+operating point, never from the cost of the block it bypasses.
+
+Below plugin level this is ~2–4 %, inside `PerfBenchmark`'s ±2 % reproducibility, so **no
+plugin-level figure is claimed for step 3** and the README table is left alone. §0 rule 2 forbids
+quoting a single-arm reading against a remembered one.
+
+### The real payoff: `warp*` was 90 % ADAA compensation, and two instruments were invalid
+
+Refit harness: **`analysis/v15_warp_refit.py`** (models `shelfCoeffs` exactly — including the DC
+normalization, the ×2 for two series pedal channels, and the fact that the 8x *reference* carries the
+shelf too, so the residual is `deficit + 2(S(rate) − S(8x))`).
+
+Two instrument defects had to be fixed before any fit was meaningful, both in `tests/OSFidelity`:
+
+1. **(c2)'s level.** At 0.01 FS with (c1)'s drive 0.85 left set, pin7 still reaches the rail knee at
+   4 and 8 kHz, so those two cells were not identity-region measurements at all — which is exactly
+   why the shipped table read +0.09 / +2.14 there against an arithmetic 1.21 / 5.00 while matching
+   12.04 / 24.08 at 12 / 16 kHz. At 5e-4 the **whole table matches the arithmetic to 0.01 dB**.
+2. **(a)'s level, same defect, bigger consequence.** (a) ran at 0.01 FS in Overdrive, and Stage 1's
+   gain peaks near 4 kHz, so pin7 sat at ~0.7 V — past `sw1CeilKneeV` — in precisely the presence
+   band `warpPivotHz` serves. **The tell was a model/measurement disagreement that no filter-model
+   error can produce:** a candidate shelf's measured contribution matched its analytic response to
+   **0.01 dB at 4x and 0.17 at 2x, but was off by 1.64 dB at 1x/8 kHz, NON-monotonically in
+   frequency.** At 5e-4 the model reproduces every cell.
+
+With the droop removed *and* the instrument linear, the **residual bilinear warp is nearly nothing**:
+
+| (a), no shelf | 4 kHz | 8 kHz | 12 kHz | 16 kHz |
+|---|---|---|---|---|
+| 1x | +0.12 | −0.14 | −0.86 | **−3.08** |
+| 2x | +0.03 | −0.03 | −0.16 | −0.44 |
+| 4x | +0.01 | −0.01 | −0.03 | −0.08 |
+
+So the shelf that was correcting a 32 dB deficit at 1x/16 kHz has ~3 dB left to do, and **nothing at
+all below 12 kHz at any rate**. Refit (weighted to the presence band; constrained to vanish at 8x so
+the accuracy reference is not moved; constrained so the prewarped pole stays inside Nyquist):
+
+`warpScaleDb` **10.6 → 1.0**, `warpExp` **2.20 → 1.80**, `warpPivotHz` **6500 → 17000**,
+`warpMaxDb` **3.0 → 1.0**, plus a new `warpPoleMaxFrac` guard.
+
+Before → after, both measured at the corrected level (dB vs 8x):
+
+| | 4 kHz | 8 kHz | 12 kHz | 16 kHz |
+|---|---|---|---|---|
+| 1x before | +0.05 | −3.46 | −13.21 | −32.59 |
+| **1x after** | +0.21 | +0.28 | +0.22 | **−0.75** |
+| 2x before | +0.84 | +1.02 | −0.47 | −3.51 |
+| **2x after** | +0.06 | +0.08 | +0.05 | **−0.14** |
+| 4x before | +0.14 | +0.14 | −0.17 | −0.75 |
+| **4x after** | +0.01 | +0.02 | +0.01 | **−0.02** |
+
+**2x is the LIVE default and 4x the RENDER default**, so this is the live-vs-bounce agreement the
+06-30 recalibration was aiming at and only half achieved: 2x went from ~1 dB hot through the presence
+band and 3.5 dB short at 16 kHz to **within 0.14 dB everywhere**.
+
+The pivot move is not taste. The old moderate 6.5 kHz pivot existed because the deficit it was fitted
+to *started* in the presence band — and that part of the deficit was the ADAA droop, whose `|cos|`
+shape does start low. Real bilinear warp is confined to the top octave, which is what a high pivot
+fits. The price is a Nyquist hazard the old pivot never had: `shelfCoeffs` prewarps the pole to
+`pivot·√ghi`, which at 17 kHz would cross π/2 at 1x on a 32 kHz session and hand back an **unstable**
+filter. Guarded by sliding the pivot down with the rate (`warpPoleMaxFrac` = 0.42) — inert at 44.1 and
+48 kHz, binding at 32 kHz (17.0 → 12.7 kHz). Verified finite and bounded over
+{22.05, 32, 44.1, 48, 88.2, 96} kHz × {1,2,4,8}x.
+
+### The arbiter: NEUTRAL, and that was the prediction
+
+44 captures: median **−23.45 → −23.45**, mean +0.01 dB, **10 deeper / 11 shallower / 23 unchanged**,
+largest move ±0.3 dB, range −27.0…−8.6 → −26.9…−8.6. FR rms median 2.21 → 2.29.
+
+This is the expected result, not a disappointment: the null is rendered at 4x, and below 8 kHz the 4x
+path moved by ≤0.17 dB — everything the change did lives at 1x/2x, or above 8 kHz where the captures
+carry ±18 dB of spread and are not fit-worthy. **A null-neutral result is what a change to an
+internal-consistency axis should look like**; if it had moved the null much, that would have meant the
+refit was absorbing a capture-accuracy error it had no business touching.
+
+### `hfTrim` was measured in the same pass and DELIBERATELY left at −1.3 dB
+
+§2 armed this: fit either of `hfTrim` / `warp*` alone and the same HF excess gets corrected twice. So
+both were put on the bench together. The two instruments **disagree in sign**, and both effects are
+smaller than either resolves:
+
+* Clean-sweep tilt (`shape_audit.py clean`, the least-nonlinear instrument, valid G2–G6): Boost reads
+  −0.76 / −0.66 / −0.13 / −0.36 / −0.08 dB across 80–5120 Hz — the plugin is ~0.4 dB **dark**, i.e.
+  wants *less* trim.
+* The arbiter (`offline_null_probe null`, all 176 rows): +0.3 dB of HF is **+0.046 dB worse**, +0.6 dB
+  is +0.115 worse, and −0.3 dB is 0.023 dB *better* — the null wants *more* trim.
+
+That is `offline_null_probe`'s own standing caveat 2 (**driven-sweep nulls reward dulling** — the null
+is partly matching distortion products, so an HF cut flatters it), and the standing rule is that when
+the null and the clean sweep disagree about HF, the clean sweep is believed. Believing the clean sweep
+here would buy ~0.4 dB of tilt at G2 while the arbiter says it costs 0.05 dB; believing the null would
+be fitting a known bias. **Both are inside the noise, so neither moves, and the reason is recorded so
+the next pass does not re-derive it.** `hfTrim` = −1.3 dB @ 4.5 kHz, unchanged since 2026-07-04.
 
 ---
 
 ## 6. Open levers, in order
 
 The gate on all of them: **FR generates the hypothesis, the 44-capture null decides.**
-
-### 6.1 ADAA identity-region early-out — NEXT, and now unblocked
-
-Return `x` when both `x` and `x₋₁` are below the knee, on all three maps (`railSaturateADAA` ×2,
-`sw1CeilADAA`). Measured cost saving: **−12 / −13 / −11 ns** (Boost/OD/Dist totals 114 → 102, 166 →
-153, 140 → 127), ~−8…−11 %.
-
-It keeps every dB of §4's alias suppression, because that all occurs **above** the knee, and removes
-only the droop, which occurs **below** it. In OD it is close to unconditional: the feedback clipper
-holds |pin7| ≤ 1.64 V against knees of 2.4/3.6 V, so `railSaturateADAA` there is *only ever* the
-midpoint filter.
-
-**It is a voicing change, not an optimisation.** Order, unchanged:
-1. Ship the early-out.
-2. Re-fit **`warp*` AND `hfTrim` in ONE pass** — §5 for the per-rate budget, §2 for why `hfTrim` is
-   under-fitted. Fitting either alone re-creates the double-correction.
-3. Judge on the 44-capture null. Expect `OSFidelity` (c2) to go to ~0 by construction; that is a
-   check, not the verdict.
 
 ### 6.2 Rational `fastTanh` in `injectEvenHarmonic` / `odLowShelf`
 
@@ -299,6 +407,19 @@ Usage in its header comment. Locate a differing byte with `sample = (byte − 1)
 8x, (b) harmonic-vs-alias *(⚠️ floor-limited — see §4)*, **(c1) ADAA alias A/B at named fold bins**,
 **(c2) ADAA small-signal droop A/B**. ctest gate is finite-only; the dB figures are reported, never
 asserted against absolutes.
+
+> ⚠️ **Three of this file's four sections have now been caught reading an invalid instrument, each in
+> a different way — (b) floor-limited (§4), (c2) and (a) both measured above the clip knee (§5b). The
+> level in (a) and (c2) is 5e-4 and it is load-bearing: raise it and the "small-signal FR" is being
+> read through the soft clipper.** Before believing any number here, check the section responds to the
+> axis it claims to measure — (c1) self-validates (alias-on must fall ~37 dB across the OS range),
+> (a)/(c2) validate against the analytic shelf/`|cos|` models, which they now match to 0.01 dB.
+
+**`analysis/v15_warp_refit.py`** — the `warp*` fit (§5b). Models `shelfCoeffs` exactly, including the
+DC normalization, the ×2 for two series pedal channels, and the 8x reference carrying the shelf too.
+Feed it a fresh `warpScaleDb = 0` run of (a) and it grid-searches (scale, exp, pivot, cap) under two
+constraints that are not optional: the shelf must **vanish at 8x** (or it moves the accuracy
+reference), and the prewarped pole must stay inside Nyquist at the lowest session rate.
 
 **`tests/PerfBenchmark`** (JUCE) — the only plugin-level CPU figure, and the source of the README
 Performance table. Load-sensitive: §0 rule 2 applies in full.
