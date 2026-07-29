@@ -564,6 +564,29 @@ public:
     // too: it halves the G10 damage but loses on both the fit window and the headline null.
     static constexpr double sw1CeilV = 1.6;     // ceiling on pin7 in OD (V); 0 disables
     static constexpr double sw1CeilKneeV = 0.5; // level (V) below which the map is exactly identity
+    // v1.4 P10 step 3 — the ceiling gets a RESIDUAL SLOPE, so it never stops rising.
+    //
+    // WHY (`p9_ceiling_fit.py need`, the table that raised it): the extra compression the pedal
+    // requires is nearly drive-INDEPENDENT — mean 3.11 dB, spread 1.71 across G2–G10 — while a
+    // ceiling *voltage* must supply more at higher drive, because pin7 is higher there, and does:
+    // mean 3.20 dB, spread 3.06. The MEAN was right all along; the distribution across the knob was
+    // not. That is why the G10 penalty was identical at every knee (P9 saw the symptom and read it
+    // as untunable) and why raising the ceiling could only trade one end of the axis for the other.
+    //
+    // A pure fixed-ratio power law was built and scored first and is NOT what this is: it beats the
+    // tanh over G2–G10 (0.946 → 0.714 dB rms) but gives up the validated window (0.315 → 0.486) and
+    // re-levels Overdrive ~1 dB, because a ratio compresses the quiet end too. This form CONTAINS
+    // the shipped map at `sw1CeilSlope = 0`, so the fit window can be held rather than traded.
+    // ⚠️ It is SHIPPED AT 0, i.e. the P9 ceiling unchanged, and the reason is the target and not the
+    // instrument: `p9_ceiling_fit.py floor` shows the pedal's own G10 Overdrive comp curve varies
+    // 1.19 dB across the TONE knob, a quantity the circuit makes tone-INDEPENDENT (the tone stack is
+    // post-clip and linear; the plugin's spread is 0.00). That is about half the G10 residual a slope
+    // would be fitted to. Every slope that helps G10 also costs the G2–G7 window and re-levels the
+    // mode, so the trade would be bought inside the target's own noise. Kept because it is three
+    // lines, costs nothing at 0 (the `if constexpr` below compiles to exactly the old expression),
+    // and is the shape to reach for FIRST if the captures are ever re-taken at more tone settings.
+    static constexpr double sw1CeilSlope = 0.0; // asymptotic slope above the knee; 0 = P9's ceiling
+    static constexpr bool sw1CeilSloped = (sw1CeilSlope > 0.0);
     static constexpr bool sw1CeilEnabled = (sw1CeilV > 0.0 && sw1CeilKneeV < sw1CeilV);
     // RESULT (all 44 captures; Boost + Distortion byte-identical by construction, verified):
     // comp-curve rms error over the fit window **1.33 → 0.40 dB**, bias +0.87 → −0.25, worst cell
@@ -862,13 +885,25 @@ private:
     // ---- SW-1 output ceiling: same map/antiderivative form as railSaturate, own parameters -----
     // See the sw1Ceil* constants. Symmetric, so this map IS odd and its antiderivative even —
     // simpler than the rails' asymmetric pair.
+    // Above the knee: y = K + ω·tanh(u/ω) + m·u, with u = |x| − K, m = sw1CeilSlope and
+    // ω = (1 − m)·(ceiling − K). The (1 − m) factor is what keeps the slope at the knee exactly 1
+    // (tanh contributes 1 − m there, the linear term m), so the map stays C1 for every m — and at
+    // m = 0 both expressions reduce to P9's ceiling identically, which is the point of this form.
+    static constexpr double sw1CeilOmega()
+    {
+        return (1.0 - sw1CeilSlope) * (sw1CeilV - sw1CeilKneeV);
+    }
+
     inline double sw1Ceil (double v) const noexcept
     {
         const double a = std::abs (v);
         if (a <= sw1CeilKneeV)
             return v;
-        const double w = sw1CeilV - sw1CeilKneeV;
-        return std::copysign (sw1CeilKneeV + w * std::tanh ((a - sw1CeilKneeV) / w), v);
+        const double u = a - sw1CeilKneeV;
+        constexpr double om = sw1CeilOmega(); // == sw1CeilV - sw1CeilKneeV when the slope is 0
+        if constexpr (sw1CeilSloped)
+            return std::copysign (sw1CeilKneeV + om * std::tanh (u / om) + sw1CeilSlope * u, v);
+        return std::copysign (sw1CeilKneeV + om * std::tanh (u / om), v);
     }
 
     inline double sw1CeilAntideriv (double v) const noexcept
@@ -876,9 +911,13 @@ private:
         const double a = std::abs (v);
         if (a <= sw1CeilKneeV)
             return 0.5 * a * a;
-        const double w = sw1CeilV - sw1CeilKneeV;
         const double u = a - sw1CeilKneeV;
-        return 0.5 * sw1CeilKneeV * sw1CeilKneeV + sw1CeilKneeV * u + w * w * logCosh (u / w);
+        constexpr double om = sw1CeilOmega();
+        const double base = 0.5 * sw1CeilKneeV * sw1CeilKneeV + sw1CeilKneeV * u
+                            + om * om * logCosh (u / om);
+        if constexpr (sw1CeilSloped)
+            return base + 0.5 * sw1CeilSlope * u * u;
+        return base;
     }
 
     // First-order ADAA on the ceiling. It is a NEW nonlinearity in the OD path, so it aliases like

@@ -302,6 +302,7 @@ and Distortion are byte-identical by construction (same discipline as `odLowShel
 
 ```
 sw1CeilV = 1.6 V (ceiling) | sw1CeilKneeV = 0.5 V (identity below this) | sw1CeilEnabled derived
+sw1CeilSlope = 0.0 (asymptotic slope above the knee; 0 = this ceiling — see P10 step 3 below)
 ```
 
 Identity below the knee, then a tanh approach to the ceiling — the **same map as `railSaturate`**, so
@@ -350,6 +351,37 @@ G5 T5 OD **−23.2 → −24.4**, worst G2–G7 capture −19.6 → −21.9; 13 
 > second knob-keyed instrument in the clip path (P6's rule in reverse). It is the same G8–G10
 > drive-keyed residual as `driveMakeup`'s 6.0 dB cap. IMD moves OD-only and both ways (SMPTE worst
 > +1.64 dB at G10 T8, CCIF −1.07…+2.17), median 0.00.
+
+### The G10 cost was investigated and is NOT worth fixing — `sw1CeilSlope` (v1.4 P10 step 3, 2026-07-29)
+
+`sw1CeilSlope` generalises the map to `y = K + ω·tanh(u/ω) + m·u` with `ω = (1−m)(ceiling−K)`, i.e. a
+ceiling that keeps rising with asymptotic slope `m`. It **ships at 0**, which is the P9 ceiling exactly
+(bit-identical, verified by diffing the probe's full-precision pin7 output against the previous commit
+over all 8 drives × 10 levels; the `if constexpr` makes the emitted expression the same).
+
+Three things came out of trying, and they revise the note above:
+- **The cause of the "identical at every knee" penalty is now known.** `p9_ceiling_fit.py need`: the
+  extra compression the pedal requires is nearly drive-INDEPENDENT (mean 3.11 dB, spread 1.71 over
+  G2–G10) while a ceiling *voltage* must supply more where pin7 is higher, and does (mean 3.20, spread
+  3.06). The **mean was always right**; only its distribution across the knob was wrong.
+- **But the G10 error is in the MIDDLE of the level range, not at the top**, so an asymptote is the
+  wrong lever: at m = 0.30 the −3 dBFS cell goes −2.40 → −0.41 dB while −12 dBFS goes −3.36 → −3.03,
+  and G10's rms only 2.26 → 1.83. A pure fixed-ratio power law was built too — better over G2–G10
+  (0.946 → 0.714) but it gives up the validated window (0.315 → 0.486) and re-levels OD ~1 dB.
+- **And ~half the G10 residual is target-side.** `p9_ceiling_fit.py floor` uses TONE as a floor probe —
+  the tone stack is post-clip and linear, so a self-anchored compression curve must be tone-independent
+  (the plugin's spread is 0.00–0.08 dB) and any pedal spread is capture-side. Pedal OD: **0.16 dB at
+  G2, 0.12 at G5, 1.19 at G10.** Every slope that helps G10 also costs G2–G7, so the trade would be
+  bought inside the target's own noise. **Do not fit this cell finer than ~1.2 dB.**
+- The Stage-1 rails were ruled out as the cause (comp rms 0.946 with them on or off, identical to three
+  decimals — which also re-confirms their "inert" verdict on a second metric), and the pedal's apparent
+  G10 *turnover* (output falling 0.38 dB at the hottest step, which no monotone memoryless map can
+  produce) is inside the floor and present in Clean and Distortion too, so it is not a dynamic
+  mechanism either.
+
+**Consequence beyond this section:** P10's "fix the G10 clip path first, then reinstate the gain shape"
+is withdrawn as a *precondition* — the clip path is fixable only down to the target's floor, so nothing
+can be gated on it. See FR_THD_AUDIT.md P10 step 3.
 
 ## OD clip-depth-gated low-mid restoration (`MonarchChannel::odLowShelf`)
 

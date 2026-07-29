@@ -398,6 +398,50 @@ clang-format -i src/**/*.{cpp,h}
           set** — no circuit mechanism low-passes more as DRIVE rises (tone stack is knob-fixed;
           1 kHz at ±3.3 V is orders of magnitude inside the 4580's slew/GBW), and H7 spreads 10 dB
           across TONE at fixed drive, which has no physical reading either.
+      - **Step 3 done (2026-07-29) — ⚠️ the PRECONDITION is withdrawn. The G10 clip path is fixable
+        only down to the target's own floor, and that floor is now measured.** Nothing shipped; the one
+        DSP change (`sw1CeilSlope`) is a generalisation left switched off and verified bit-identical.
+        - **The gain error was NOT what made the ceiling inadmissible at G8–G10.** P9 step 3 read the
+          residual-grows-with-drive-gap signature as `driveMakeup`'s cap mixed in. Removing the
+          measured error first (`static --gain-fix`; the probe gained an optional per-drive pre-clip
+          gain, applied between `processPre` and `processClip`, which is exactly equivalent to raising
+          `driveMakeup` since a scalar commutes with `driveShelf`'s linear filters) moves the
+          all-drives residual only **0.59 → 0.54 dB** (worst 1.37 → 1.42). The reason is geometric:
+          **pin7 is a near-saturated coordinate at G10** — above the clamp pin7 ≈ `Vf + i_in·R11`, so
+          5.28 dB of extra pre-clip level moves it just **1.13 dB** at the quiet end and **0.41** at
+          the hot end. P9's inference was reasonable and is falsified. (The fix's size is now doubly
+          sourced: **+5.28 dB measured** vs **+5.30** from candidate 2's own hyperbolic shape.)
+        - **`need` explains the "identical at every knee" penalty.** The extra compression the pedal
+          requires is nearly drive-INDEPENDENT (mean **3.11 dB**, spread 1.71) while a ceiling
+          *voltage* must supply more where pin7 is higher, and does (mean **3.20**, spread **3.06**).
+          The mean was always right; only the distribution across the knob was wrong.
+        - **Two shapes built, neither shipped.** A **fixed-ratio power law** wins the axis (0.946 →
+          0.714 dB rms) but gives up the validated window (0.315 → **0.486**) and re-levels OD ~1 dB.
+          A **ceiling with residual slope** `m` (contains the shipped map at m=0, so the window can be
+          held) gives 1.6/0.3/0.10 → all 0.842, fit 0.318, dG −0.17 — better on every column. It still
+          did not ship, because **the G10 error is in the MIDDLE of the level range, not the top**: at
+          m=0.30 the −3 dBFS cell goes −2.40 → −0.41 dB while −12 dBFS goes −3.36 → −3.03. **The
+          aggregate rms hid that** — fourth marginalisation instance, first caught by decomposing an
+          aggregate this harness had just built.
+        - **The reason to stop, and the transferable artifact: the compression instrument now has a
+          TARGET-SIDE FLOOR** (`p9_ceiling_fit.py floor`). TONE is the probe *because the circuit makes
+          it provably irrelevant* — the tone stack is post-clip and linear, so a self-anchored comp
+          curve must be tone-independent, and the plugin's spread is 0.00–0.08 dB. The pedal's OD
+          spread is **0.16 dB at G2, 0.12 at G5, 1.19 at G10** — about **half** of G10's 2.4 dB
+          residual is the target disagreeing with itself. Also ruled out along the way: the **Stage-1
+          rails** (comp rms 0.946 with them on or off, identical to 3 dp — re-confirming their "inert"
+          verdict on a second metric), and the pedal's G10 **turnover** (output falls 0.38 dB at the
+          hottest step, which no monotone memoryless map can produce — but it is inside the floor and
+          appears in Clean and Dist too, so not a dynamic mechanism).
+        - **Consequence: candidate 2 reverts from "blocked" to "a decision".** Its cost is a mode trade
+          at G10 and nothing else (Boost 1.7–2.5 dB deeper, OD 1.0–1.6 shallower, Dist ~0.8, mean ≈ 0,
+          worst capture −8.6 → −7.0) and **no measurement is left that would settle it**. Left
+          rejected on the standing rule that the worst capture should not get worse.
+        - **Rule it adds — measure the target's floor on the INSTRUMENT you are about to fit, not just
+          on the signal.** P9 required *admissible*, step 2 added *identifiable*, this adds
+          **resolvable**. Look for a knob the circuit makes irrelevant to the quantity being measured:
+          variation along it is instrument error, for free. Corollary: an aggregate rms is a screen, not
+          a verdict — decompose it along the axis you mean to fix before believing an improvement.
         - **Consequences:** supply sag needs no further consideration (there was never a symptom);
           the **G10 × hottest-level corner has a target-side floor — do not fit a mechanism to it**;
           and step 1's order of operations stands unchanged (clip path first, then candidate 2's
@@ -448,6 +492,16 @@ clang-format -i src/**/*.{cpp,h}
     headers ONLY, so a candidate is a **~1 s** recompile of the real `processClip` instead of a
     plugin rebuild + 44-capture render; watch its `dG` column, because a self-anchored objective
     cannot see a candidate re-levelling the whole mode).
+    **`analysis/p9_ceiling_fit.py`'s THREE GATES** (P10 step 3 added two) — different questions, run
+    all three before fitting anything in the clip path: `static` = **admissible** (can one memoryless
+    map explain every cell? `--gain-fix` removes the gain path's measured error first, because the test
+    absorbs only a *vertical* offset and a wrong pre-clip level displaces a drive along the *x* axis);
+    `floor` = **resolvable** (the target's own noise on this instrument, probed via TONE, which the
+    circuit makes provably irrelevant to a self-anchored comp curve — worst cell OD G10 at 1.19 dB);
+    `need` = **right shape** (requirement vs supply per drive — what showed the requirement to be
+    drive-independent while a ceiling voltage must ramp). `ratio` sweeps `sw1CeilSlope`. ⚠ `probe`
+    leaves its candidate in the header on purpose — **never `git checkout` that file to restore it**
+    while other DSP work is uncommitted (it silently discards it; copy the file aside instead).
     **`analysis/p9_od_compression.py knee`** (P10 — the ONE view that separates *gain into the
     clipper* from *ceiling*: the decay segments read against the known input envelope, so the knee
     is an **input** level and needs no normalisation. **Boost rows only** — in OD the output keeps
@@ -672,6 +726,11 @@ linear WDF now runs at the OS rate too (relevant to the v1.1 perf pass).
   over G2–G7 1.33 → 0.40 dB, better at every drive G2–G8. The "tilt at every drive" and the THD
   roll-off once filed here were the **same defect seen through FR** (both measured on OD's clean
   sweep, which carries 1.4–6 % THD and is not a linear instrument) — so they are gone too.
+  **⚠️ The G8–G10 remainder was investigated by P10 step 3 (2026-07-29) and is now an ACCEPTED
+  residual, not an open lead.** About half of G10's 2.4 dB comp error is target-side (the pedal's own
+  OD curve varies 1.19 dB across TONE, a knob that cannot affect it), the error sits in the middle of
+  the level range where no ceiling asymptote reaches, and both alternative shapes tried buy G10 by
+  giving up G2–G7. Do not re-open it without re-captured references at more tone settings.
   **What remains is G8–G10, where the ceiling now OVER-corrects** (G10 comp error +2.25 → −2.83 dB,
   driven-sweep nulls 1.0–2.0 dB shallower, G10 T2 OD the set's worst at −8.6): the pedal's own OD
   compresses *less* at G10 than at G7 while a level-keyed ceiling bites *more* there, so it is

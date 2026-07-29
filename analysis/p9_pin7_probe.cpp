@@ -11,13 +11,43 @@
 // even-harmonic injection. Its rise per drive is what p9_ceiling_fit.py scores against the pedal's;
 // the `probe-render` column of `static` is the check that this stands in for a real render (OD's
 // chain after pin7 is linear at 1 kHz, so the two rises must agree — measured within 0.33 dB).
+// P10 step 3 addition — an OPTIONAL per-drive pre-clip gain, `P9_PRE_GAIN_DB="0.8:0,1.0:5.28"`.
+// It exists so the admissibility test can ask its question with the gain path's KNOWN error removed:
+// P10 measured the plugin ~5.3 dB short into the clipper at G10, which displaces that drive's curve
+// along the pin7 axis, and `static` removes only a VERTICAL offset per drive. Applied here between
+// processPre and processClip rather than by patching `driveMakeup`, which is exactly equivalent: a
+// scalar commutes with `driveShelf`'s linear filters, and the Stage-1 rails sit before `driveMakeup`
+// either way, so nothing about the physical order changes.
 #include "src/dsp/MonarchChannel.h"
 
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <map>
+#include <string>
+
+static std::map<double, double> preGainDb()
+{
+    std::map<double, double> m;
+    const char* s = std::getenv ("P9_PRE_GAIN_DB");
+    if (s == nullptr)
+        return m;
+    std::string t { s };
+    size_t i = 0;
+    while (i < t.size())
+    {
+        const size_t comma = std::min (t.find (',', i), t.size());
+        const size_t colon = t.find (':', i);
+        if (colon < comma)
+            m[std::stod (t.substr (i, colon - i))] = std::stod (t.substr (colon + 1, comma - colon - 1));
+        i = comma + 1;
+    }
+    return m;
+}
 
 int main()
 {
+    const auto extra = preGainDb();
     constexpr double fs = 384000.0; // 8x of 48k — the render path's rate
     const double drives[] = { 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 1.0 };
     const double levelsDb[] = { -30.0, -27.0, -24.0, -21.0, -18.0, -15.0, -12.0, -9.0, -6.0, -3.0 };
@@ -36,6 +66,11 @@ int main()
         ch.setPresence (0.0);
         ch.setSupplyVoltage (9.0);
 
+        double pre = 1.0;
+        for (const auto& kv : extra)
+            if (std::abs (kv.first - d) < 1.0e-9)
+                pre = std::pow (10.0, kv.second / 20.0);
+
         for (double ldb : levelsDb)
         {
             ch.reset();
@@ -46,7 +81,7 @@ int main()
             for (int n = 0; n < N; ++n)
             {
                 const double x = amp * std::sin (2.0 * M_PI * 1000.0 * (double) n / fs);
-                const double g = ch.processPre (x);
+                const double g = pre * ch.processPre (x);
                 const double hc = ch.processClip (g);
                 if (n > settle)
                 {
