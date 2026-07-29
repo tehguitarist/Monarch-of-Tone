@@ -560,9 +560,11 @@ clang-format -i src/**/*.{cpp,h}
     `p9_od_compression.py` had its own and silently read a stale vintage (fixed in P9 step 3).
 - **v1.5 — CPU pass + the ADAA identity-region droop (OPEN). → `analysis/CPU_AUDIT.md`** — the span
   split, every lever's measured cost, the rejected levers with their evidence, the measurement
-  protocol and the ordered plan live there; don't re-derive them here. **Steps 1–3 are shipped.** The
-  remaining levers are both *judged* changes, not free ones: a rational `fastTanh` (§6.2) and
-  `processPre` → base rate (§6.3).
+  protocol and the ordered plan live there; don't re-derive them here. **Steps 1–4 are shipped.**
+  **Step 4 (2026-07-30):** `MonarchChannel::fastTanh`, a Padé [7/6] rational replacing `std::tanh`
+  in `injectEvenHarmonic`/`odLowShelf`'s four calls — CPU −10.0/−31.4/−10.5 ns of the clip span
+  (Boost/OD/Dist), 44-capture null and H2/H4/H6 table **identical to 0.1 dB** before/after (CPU_AUDIT
+  §5c). Only `processPre` → base rate (§6.3) remains, and it's a *judged* change, not a free one.
   - **What is CERTAIN, because it is arithmetic.** First-order ADAA of the *identity* map is not the
     identity. Below the knee `railAntideriv` returns `½x²`, so the difference quotient is
     `½(x² − x₋₁²)/(x − x₋₁)` = **`(x + x₋₁)/2`** — a midpoint average, i.e. a half-sample delay and a
@@ -679,12 +681,12 @@ clang-format -i src/**/*.{cpp,h}
       early-out is now unblocked and the order stands: early-out → refit `warp*` **and** `hfTrim`
       together (v1.5 step 1 under-cut `hfTrim`; P7's rule, sixth instance) → judge on the 44-capture
       null.
-    - **Still open, both judged changes rather than free ones:** a rational `fastTanh` in
-      `injectEvenHarmonic`/`odLowShelf` (measured **−15 / −16 / −14 ns**, i.e. −10…−13 %, on a fitted
-      −40 dBc empirical term — decide on the null), and `processPre` → base rate (18 ns ×OS, needs the
-      drive-dependent prewarp). **Do NOT expect a plugin-level saving equal to the span arithmetic** —
-      the oversampler's own FIR is unchanged, which is why v1.5 step 1 delivered 20 % against a
-      predicted 24 %. Size on `PerfBenchmark`, idle, both arms.
+    - **Still open at this point, both judged changes rather than free ones:** a rational `fastTanh`
+      in `injectEvenHarmonic`/`odLowShelf` (estimated −15/−16/−14 ns here — **shipped as step 4,
+      see below, at the actually-measured −10.0/−31.4/−10.5 ns**), and `processPre` → base rate
+      (18 ns ×OS, needs the drive-dependent prewarp — still open). **Do NOT expect a plugin-level
+      saving equal to the span arithmetic** — the oversampler's own FIR is unchanged, which is why
+      v1.5 step 1 delivered 20 % against a predicted 24 %. Size on `PerfBenchmark`, idle, both arms.
     - **No HQ/Eco button, and the measurements now say so twice.** v1.1 rejected the diode-quality
       lever; step 2 rejects the ADAA lever. What is left is either free (shipped above), a voicing
       decision to be judged on the null (not a user control), or the OS factor — which is already two
@@ -743,6 +745,31 @@ clang-format -i src/**/*.{cpp,h}
       level this is inside `PerfBenchmark`'s ±2 %, so **no plugin-level figure is claimed and the
       README table is unchanged** — §0 rule 2 forbids quoting a single-arm reading against a
       remembered one.
+  - **✅ Step 4 SHIPPED (2026-07-30): rational `fastTanh` in `injectEvenHarmonic`/`odLowShelf`.**
+    `MonarchChannel::fastTanh` — a Padé [7/6] rational, clamped to exactly ±1 beyond |x| ≥ 4.97 (the
+    raw polynomial diverges unbounded past there; several of these calls saturate hard, e.g.
+    `odGateScale·clipEnv` can exceed 40). Matches `std::tanh` to **<1.2e-5 abs error over [0,4]**,
+    <1e-4 near the clamp — far tighter than the ~1 % (−40 dBc) precision the fitted empirical terms
+    it feeds were tuned to. Swapped into all **four** `std::tanh` calls (`soft`, the mid-band gate's
+    `k`, `softLow`, `odLowShelf`'s `gate`); `railSaturate`/`sw1Ceil` keep exact `std::tanh` (their
+    ADAA antiderivative is `log(cosh)`, not this approximation).
+    - **Measured with the same before/after protocol as step 3** (git-stash the header, rebuild
+      `perf_split_probe` + `PedalRender` per arm, idle, back-to-back, ≥2 runs; `pre`/`post` spans
+      unchanged between arms, confirming isolation to `clip`). CPU **−10.0 / −31.4 / −10.5 ns** of
+      the clip span (Boost/Overdrive/Distortion) — **bigger and less even than the original
+      CPU_AUDIT estimate of −15/−16/−14 ns**, because the call count is mode-gated: Boost hits 2 of
+      the 4 `tanh` calls, Distortion 3, Overdrive all 4 (`asymOD`/`sw1On` both live) — the uniform
+      prior estimate didn't account for that. **Confirmed at plugin level with `PerfBenchmark`**
+      (idle, both arms, ≥2 runs, latencies unchanged) — every OS×mode cell dropped: 8x Boost 15.6 →
+      13.6 %, OD 27.8 → 23.45 %, Dist 21.1 → 18.95 %, render 15.45 → 13.3 %, well outside the ±2 %
+      noise floor at every factor. **README's Performance table updated** (2x ~4–7 → ~4–6 %, 4x
+      ~8–14 → ~7–12 %, 8x ~16–27 → ~14–23 %, render ~15 → ~13 %).
+    - **Arbiter: identical at reported precision, not merely neutral.** The 44-capture null
+      (`run_validation.py`) reads **every one of the 44 captures the same to 0.1 dB**, median
+      unchanged at −23.4. The even-harmonic series (`fr_thd_audit.py evens` — the H2/H4/H6 rms/bias
+      table P3/P3.1 fitted through these exact calls) is **identical to 0.1 dB in all three modes**,
+      silent-cell count unchanged. Nine per-stage gates + six ctest gates + auval PASS.
+    - See `CPU_AUDIT.md` §5c for the full write-up.
 
 ---
 

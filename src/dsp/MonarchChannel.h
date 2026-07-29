@@ -877,7 +877,7 @@ public:
         const double shelfed = olB0 * x + olB1 * olX1 - olA1 * olY1;
         olX1 = x;
         olY1 = shelfed;
-        const double gate = sw1On ? std::tanh (odGateScale * clipEnv) : 0.0;
+        const double gate = sw1On ? fastTanh (odGateScale * clipEnv) : 0.0;
         return x + gate * (shelfed - x);
     }
 
@@ -893,6 +893,23 @@ public:
     bool isHiGain() const { return hiGainStage1; }
 
 private:
+    // Padé [7/6] rational tanh, for the empirical even-harmonic terms only (injectEvenHarmonic /
+    // odLowShelf) — NOT railSaturate/sw1Ceil, whose ADAA antiderivative is fitted to std::tanh's
+    // exact log(cosh) form. Matches std::tanh to <1.2e-5 abs error over [0,4] and <1e-4 near the
+    // clamp (v1.5 CPU pass; those terms are fitted to ~1% / −40 dBc precision, so this is far
+    // tighter than needed). The raw polynomial diverges unbounded past ~5 (denominator degree <
+    // numerator degree), so clamp at 4.97 where it still agrees with std::tanh to 9e-5 — several of
+    // these calls saturate hard (e.g. odGateScale·clipEnv can exceed 40).
+    static inline double fastTanh (double x) noexcept
+    {
+        if (x >= 4.97) return 1.0;
+        if (x <= -4.97) return -1.0;
+        const double x2 = x * x;
+        const double num = x * (135135.0 + x2 * (17325.0 + x2 * (378.0 + x2)));
+        const double den = 135135.0 + x2 * (62370.0 + x2 * (3150.0 + x2 * 28.0));
+        return num / den;
+    }
+
     // Soft op-amp rail saturation: linear below the knee, gentle tanh knee approaching the ceiling.
     // Below the knee the signal passes UNCHANGED, so it never colours the feedback soft-clip's
     // sub-3 V output at normal drive. It clamps only swings the real op-amp would also clamp:
@@ -1196,13 +1213,13 @@ private:
         // coherence and is a judged change, not a free one. Same reasoning keeps the gHp high-pass
         // above unconditional (it is a signal-history filter — cf. odLowShelf's always-running shelf).
         const double kMid = sw1On ? asymOD : (sw2On ? asymDist : asymBoost);
-        const double soft = std::tanh (asymDriveScale * gHp);
+        const double soft = fastTanh (asymDriveScale * gHp);
         meanSq = meanCoeff * meanSq + (1.0 - meanCoeff) * soft * soft;
 
         double out = x;
         if (kMid != 0.0)
         {
-            const double k = kMid * std::tanh (4.0 * clipEnv);
+            const double k = kMid * fastTanh (4.0 * clipEnv);
             out = x + k * (soft * soft - meanSq); // mid/high band — DC-free 2f injection
         }
 
@@ -1215,7 +1232,7 @@ private:
         // the pedal's even-series SHAPE as well as its level (see asymLowDriveScale).
         xLp = lpLowCoeff * xLp + (1.0 - lpLowCoeff) * x;
         const double clampRef = sw1On ? asymClampOD : (sw2On ? asymClampDist : railV);
-        const double softLow = std::tanh (asymLowDriveScale * xLp / clampRef);
+        const double softLow = fastTanh (asymLowDriveScale * xLp / clampRef);
         meanLow = meanCoeff * meanLow + (1.0 - meanCoeff) * softLow * softLow;
 
         // ...and wash it out with drive. This path cannot do that on its own (x is CLAMPED, so its

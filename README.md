@@ -97,10 +97,10 @@ bypassed:
 | Oversampling | CPU (≈ % of one core) | Added latency | Best for |
 |---|---|---|---|
 | **1×** | ~2–4% | 0 samples | Tracking / low-latency live use; highs are slightly soft |
-| **2×** *(live default)* | ~4–7% | 6 samples | Everyday playing — the recommended balance |
-| **4×** | ~8–14% | 9 samples | Higher-fidelity highs when CPU allows |
-| **8×** | ~16–27% | 10 samples | Maximum fidelity |
-| **Render** *(auto, offline bounce)* | ~15% | 119 samples | Engages automatically when your DAW exports |
+| **2×** *(live default)* | ~4–6% | 6 samples | Everyday playing — the recommended balance |
+| **4×** | ~7–12% | 9 samples | Higher-fidelity highs when CPU allows |
+| **8×** | ~14–23% | 10 samples | Maximum fidelity |
+| **Render** *(auto, offline bounce)* | ~13% | 119 samples | Engages automatically when your DAW exports |
 
 Each range spans the three clipping modes: **Boost is the cheapest and Overdrive the most
 expensive** (roughly 1.7× Boost), because Overdrive's soft clipper is a genuine nonlinear solve on

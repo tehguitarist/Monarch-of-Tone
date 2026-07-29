@@ -320,19 +320,69 @@ the next pass does not re-derive it.** `hfTrim` = −1.3 dB @ 4.5 kHz, unchanged
 
 ---
 
+## 5c. Step 4 — SHIPPED: rational `fastTanh` in `injectEvenHarmonic` / `odLowShelf` (2026-07-30)
+
+`MonarchChannel::fastTanh` — a Padé [7/6] rational (`x(135135+x²(17325+x²(378+x²))) /
+(135135+x²(62370+x²(3150+28x²)))`), clamped to exactly ±1 beyond |x| ≥ 4.97 (the raw polynomial's
+denominator has lower degree than its numerator, so past ~5 it diverges unbounded rather than
+saturating). Matches `std::tanh` to **<1.2e-5 abs error over [0,4]** and **<1e-4 near the clamp** —
+several orders of magnitude tighter than the ~1 % (−40 dBc) precision the terms it feeds were fitted
+to. Swapped into all **four** `std::tanh` calls in `injectEvenHarmonic` (`soft`, the mid-band gate's
+`k`, `softLow`) and `odLowShelf` (`gate`) — the fitted empirical even-harmonic injection and the
+OD clip-depth gate. **Not** used in `railSaturate` or `sw1Ceil`, whose ADAA antiderivative is the
+exact closed-form `log(cosh)` of `std::tanh` and would need re-deriving to match an approximation.
+
+**Measured with the same before/after protocol as §5b** (git-stash the header, rebuild
+`perf_split_probe` and `PedalRender` for each arm, idle machine, back-to-back, ≥2 runs). `pre`/`post`
+spans are the built-in control — both unchanged between arms, confirming the change is isolated to
+`clip`, where it lives:
+
+| mode | clip before | clip after | Δ clip | channel total Δ |
+|------|------------|-----------|--------|-----------------|
+| Boost | 37.6 ns | 27.6 ns | **−10.0 ns** | −9.9 ns (−11 %) |
+| Overdrive | 118.0 ns | 86.6 ns | **−31.4 ns** | −29.5 ns (−17 %) |
+| Distortion | 67.1 ns | 56.6 ns | **−10.5 ns** | −9.9 ns (−8 %) |
+
+**Bigger than the original −15/−16/−14 ns estimate, and unevenly so — because the call count is
+mode-gated, not fixed.** `soft`/`softLow` run in every mode (2 calls); Distortion's `k` gate adds a
+third (`kMid = asymDist ≠ 0`); Overdrive adds both `k` (`asymOD ≠ 0`) and the `odLowShelf` gate
+(`sw1On`), for four. That ranks Overdrive > Distortion ≈ Boost, which is what was measured — the
+uniform prior estimate didn't account for the per-mode branch pattern §3 already established.
+
+**Confirmed at plugin level with `PerfBenchmark`** (idle, both arms rebuilt, back-to-back, 2 runs
+each, latencies unchanged — the same protocol as §2). Every OS×mode cell dropped, well outside the
+±2 % noise floor:
+
+| OS | Boost before→after | Overdrive before→after | Distortion before→after |
+|----|--------------------|-------------------------|--------------------------|
+| 1x | 2.5 → 2.25 % | 3.8 → 3.65 % | 3.0 → 2.7 % |
+| 2x | 4.2 → 3.75 % | 7.25 → 6.25 % | 5.55 → 5.05 % |
+| 4x | 8.05 → 7.1 % | 14.15 → 12.05 % | 10.8 → 9.7 % |
+| 8x | 15.6 → 13.6 % | 27.8 → 23.45 % | 21.1 → 18.95 % |
+| render | — | — | 15.45 → 13.3 % |
+
+README's Performance table updated to match (1x unchanged, 2x ~4–6 %, 4x ~7–12 %, 8x ~14–23 %,
+render ~13 %).
+
+### The arbiter: BIT-IDENTICAL at reported precision, not merely neutral
+
+Two checks, both against the same before/after `PedalRender` rebuild used for the CPU measurement:
+
+* **44-capture null** (`run_validation.py`): median **−23.4 → −23.4 dB**, range −26.9…−8.6 →
+  −26.9…−8.6, **every one of the 44 captures identical to 0.1 dB**.
+* **Even-harmonic series** (`fr_thd_audit.py evens`, the table P3/P3.1 fitted through these exact
+  `tanh` calls): H2/H4/H6 rms and bias identical to 0.1 dB in all three modes, silent-cell count
+  unchanged (0 in all nine rows).
+
+Expected, given the error budget above sits ~40+ dB below what either instrument resolves — but
+worth stating plainly: this is not "small enough to accept," the two 44-capture renders are
+indistinguishable by the project's own arbiters.
+
+---
+
 ## 6. Open levers, in order
 
 The gate on all of them: **FR generates the hypothesis, the 44-capture null decides.**
-
-### 6.2 Rational `fastTanh` in `injectEvenHarmonic` / `odLowShelf`
-
-Measured **−15 / −16 / −14 ns** (−10…−13 %) with a Padé-7/6 rational clamped at |x| > 4. The terms it
-serves are a *fitted empirical* H2 injection at ~−40 dBc and a clip-depth gate, so ~1e-6 of shaper
-error is far below anything the fit itself resolves — but it changes the audio, so it is a null
-decision. Cheapest remaining win per unit of risk.
-
-Note the two overlap: with `fastTanh` in place the §3 branch skip is worth much less, so measure them
-together, not additively.
 
 ### 6.3 `processPre` → base rate
 
@@ -359,8 +409,8 @@ could run at the base rate *before* the upsampler. Only 3.4 ns, and it changes t
 ## 7. No HQ / Eco button — and the measurements now say so twice
 
 A user-facing quality-vs-CPU control has been proposed twice and rejected twice on measurement: v1.1 on
-diode quality (§6.4), v1.5 step 2 on ADAA (§4). What is left is either **free** (shipped in §2/§3), a
-**voicing decision to be judged on the null** rather than exposed (§6.1, §6.2), or **the oversampling
+diode quality (§6.4), v1.5 step 2 on ADAA (§4). What is left is either **free** (shipped in §2/§3/§5c),
+a **voicing decision to be judged on the null** rather than exposed (§6.3), or **the oversampling
 factor** — which is already two controls (`oversampling_realtime`, `oversampling_render`) and is the
 only setting that measurably changes the sound.
 

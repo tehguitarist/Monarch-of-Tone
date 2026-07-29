@@ -319,6 +319,15 @@ exactly. Applied per block to both channels/strips.
 
 ## Even-Harmonic Injection (`MonarchChannel::injectEvenHarmonic`) — all three modes
 
+> **All `std::tanh` calls in this function (and in `odLowShelf`'s gate) now use
+> `MonarchChannel::fastTanh`** — a Padé [7/6] rational, clamped to ±1 beyond |x| ≥ 4.97 (v1.5 step 4,
+> 2026-07-30). Matches `std::tanh` to <1.2e-5 abs error, far tighter than the ~1% (−40 dBc) precision
+> these empirical terms are fitted to. CPU **−10.0/−31.4/−10.5 ns** of the clip span (Boost/OD/Dist —
+> uneven because the call count is mode-gated: 2/4/3 `tanh` calls respectively). The 44-capture null
+> and the H2/H4/H6 rms/bias table are **identical to 0.1 dB** before/after. `railSaturate`/`sw1Ceil`
+> still use exact `std::tanh` — their ADAA antiderivative is `log(cosh)`, the closed form of the real
+> function, not this one. See CPU_AUDIT.md §5c.
+
 > **Boost's mid/high path stays retired, but its LOW path is live** (v1.4 P2 → P3.2). P2 moved
 > Boost's evens to the asymmetric rails and retired `asymBoost` to 0, and above the rail knee that
 > is right. But the rails are knee-*triggered*, so below the knee the plugin was an exactly
