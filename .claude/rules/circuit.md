@@ -80,6 +80,10 @@ Single **9V** supply (verified both schematics + Theseus measured pins: V+ ≈9.
 ≈4.5V). **No charge pump / voltage doubler anywhere.** BIAS = VCC/2 = 4.5V = DSP signal ground
 (0V in the bipolar model). All supply/bias components excluded from the WDF model.
 
+**The ceiling applies to BOTH op-amps.** IC_A's output (NodeG) is rail-limited exactly as IC_B's
+(pin7) is — same package, same supply. The model only did IC_B until v1.4 P9 (2026-07-29); NodeG was
+unbounded and reached 5.93 V at G10 on the captures' hot sweep. See dsp.md "Both op-amps have it".
+
 **Op-amp output ceiling ≈ 3.3V around bias, and ASYMMETRIC** (JRC4580 saturates ~1.3–1.5V from
 each rail; soft, gradual knee — not a hard comparator). The two ceilings differ by `railAsymV` =
 0.60V (→ +3.9 / −2.7V), which is what produces Boost's even harmonics — see dsp.md "Asymmetric

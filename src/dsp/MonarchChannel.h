@@ -42,6 +42,15 @@ public:
     static constexpr double railV9V = 3.3;
     static constexpr double railKneeMargin = 0.3; // knee sits this far below the ceiling
 
+    // ---- IC_A's ceiling (v1.4 P9, 2026-07-29) -------------------------------------------------
+    // The rail saturation above was only ever applied to IC_B (pin7). IC_A is the same op-amp in
+    // the same package on the same supply, and NodeG is its output pin — it has the same ceiling,
+    // and the model let NodeG swing straight past it. Measured at the captures' hot-sweep input
+    // level (0.436 V peak), peak |NodeG| is 2.36 V at G6, 3.12 at G7, 4.06 at G8 and 5.93 at G10,
+    // against a +3.9 / −2.7 V ceiling: unbounded from G7 up. No free parameter — it reuses the
+    // ceilings already fitted for IC_B, so this adds physics, not a fit.
+    static constexpr bool stage1RailsEnabled = true;
+
     // ---- Rail ASYMMETRY (v1.4 P2, 2026-07-28) ------------------------------------------------
     // The op-amp's two output ceilings are NOT equal, for two independent circuit reasons:
     //   • BIAS is not mid-supply. Theseus measured 4.5 V against VCC/2 = 4.575 V (V+ = 9.15 V), so
@@ -564,6 +573,8 @@ public:
         gHpY1 = 0.0;
         railXprev = 0.0; // F(0)=0 for any rails
         railFprev = 0.0;
+        s1RailXprev = 0.0;
+        s1RailFprev = 0.0;
         railMean = 0.0;
     }
 
@@ -583,6 +594,8 @@ public:
         volume.reset();
         railXprev = 0.0;
         railFprev = 0.0;
+        s1RailXprev = 0.0;
+        s1RailFprev = 0.0;
         railMean = 0.0;
         hsX1 = hsY1 = lsX1 = lsY1 = wsX1 = wsY1 = olX1 = olY1 = htX1 = htY1 = bcX1 = bcX2 = bcY1 = bcY2 = leX1 = leY1 = 0.0;
     }
@@ -644,7 +657,14 @@ public:
     // level presented to the clip stages, which is exactly what the measurement says is short.
     inline double processPre (double x) noexcept
     {
-        return driveShelf (driveMakeup * stage1.processSample (x));
+        double nodeG = stage1.processSample (x);
+        // IC_A has the SAME output ceiling as IC_B and the model never applied it (v1.4 P9).
+        // It sits here, BEFORE driveMakeup, because that is the physical order: NodeG is IC_A's
+        // output pin, and the DRIVE pot's second action (which driveMakeup stands in for) is a
+        // divider hung off that pin — it can only attenuate what IC_A already produced.
+        if (stage1RailsEnabled)
+            nodeG = railSaturateADAA (nodeG, s1RailXprev, s1RailFprev);
+        return driveShelf (driveMakeup * nodeG);
     }
 
     // Oversampled nonlinear span: Stage2 (or SW1 soft clip) → op-amp rail-sat → SW2 (or pass)
@@ -738,15 +758,22 @@ private:
     // This is in ADDITION to oversampling: the clip span (incl. this) already runs oversampled.
     inline double railSaturateADAA (double x) noexcept
     {
+        return railSaturateADAA (x, railXprev, railFprev);
+    }
+
+    // Same map, caller-supplied ADAA state — IC_A and IC_B are two op-amps in the same package
+    // with the same ceilings but their own signals, so they need their own (x₋₁, F(x₋₁)) pair.
+    inline double railSaturateADAA (double x, double& xPrev, double& fPrev) const noexcept
+    {
         const double Fx = railAntideriv (x);
-        const double dx = x - railXprev;
+        const double dx = x - xPrev;
         double y;
         if (std::abs (dx) < 1.0e-6)
-            y = railSaturate (0.5 * (x + railXprev));
+            y = railSaturate (0.5 * (x + xPrev));
         else
-            y = (Fx - railFprev) / dx;
-        railXprev = x;
-        railFprev = Fx;
+            y = (Fx - fPrev) / dx;
+        xPrev = x;
+        fPrev = Fx;
         return y;
     }
 
@@ -762,7 +789,8 @@ private:
         railVNeg = railV - asym;
         railKneePos = railVPos - railKneeMargin;
         railKneeNeg = railVNeg - railKneeMargin;
-        railFprev = railAntideriv (railXprev); // keep the ADAA antiderivative consistent with new rails
+        railFprev = railAntideriv (railXprev);     // keep the ADAA antiderivative consistent with new rails
+        s1RailFprev = railAntideriv (s1RailXprev); // ditto for IC_A's own ADAA state
     }
 
     // Remove the DC an asymmetric rail-sat rectifies out of the signal (see railDcTauSeconds).
@@ -928,6 +956,8 @@ private:
     double railKneeNeg { railV9V - railAsymV - railKneeMargin };
     double railXprev { 0.0 };                       // ADAA state: previous rail-sat input
     double railFprev { 0.0 };                       // ADAA state: F(railXprev) (F(0)=0)
+    double s1RailXprev { 0.0 };                     // ADAA state for IC_A's ceiling (see processPre)
+    double s1RailFprev { 0.0 };
     double railMean { 0.0 };                        // running mean removed by railDcBlock
     double railDcCoeff { 0.0 };                     // railDcBlock one-pole coeff (set in prepareClip)
 

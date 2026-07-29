@@ -150,6 +150,26 @@ hardware. Load-bearing in Boost (always) and Distortion (linear Stage2 ×−22 �
 before the hard-clip shunt); in **OD** the feedback soft-clip holds pin7 at ±1.64 V, far below the
 knee, so it never engages — that is the tone-safety guarantee, and it is verified byte-for-byte.
 
+**Both op-amps have it (v1.4 P9, 2026-07-29).** Until P9 the ceiling was applied only to IC_B
+(pin7). IC_A is the same op-amp in the same package on the same supply and **NodeG is its output
+pin**, so it has the same ceiling — and the model let NodeG swing straight past it: measured through
+the real `processPre` at the captures' hot-sweep level (0.436 V peak), peak |NodeG| is
+**2.36 / 3.12 / 4.06 / 5.93 V** at G6 / G7 / G8 / G10 against +3.9 / −2.7 V. It is applied in
+`processPre` **before `driveMakeup`** — the physical order, since the DRIVE pot's second action
+(which `driveMakeup` stands in for) is a divider hung off IC_A's output pin and can only attenuate
+what IC_A already produced. Same map, same fitted ceilings (**no free parameter**), its own ADAA
+state pair (`s1RailXprev`/`s1RailFprev`) — reset alongside `railXprev`/`railFprev` in
+`prepareLinear`/`prepareClip`/`reset`, and re-based in `updateRails()`. Guarded by the
+compile-time `stage1RailsEnabled`.
+
+> **It is inert on the captures and was kept on correctness grounds, not arbiter grounds.** It does
+> change the audio (−39.7 dB of waveform difference at G10 T5 OD) but moves nothing measurable:
+> **44/44 captures within ±0.02 dB** on a whole-file null, compression curves unchanged to 0.01 dB,
+> all nine gates PASS. What it buys is a **bounded** internal node — most relevant on **Red**, whose
+> 17.7 k Stage-1 floor drives NodeG far higher with no NAM reference to catch it, and at the 18 V
+> supply mod. **It is not the fix for P9's OD ceiling** — the feedback soft-clip holds pin7 far below
+> the rails, so clamping NodeG barely changes the current the clipper sees.
+
 ### Asymmetric ceilings (v1.4 P2, 2026-07-28) — where Boost's even harmonics come from
 The two ceilings are **not equal**: `railVPos = railV + railAsymV`, `railVNeg = railV − railAsymV`,
 `railAsymV = 0.60 V`, each with its own knee. This is the entire mechanism behind Boost's even

@@ -253,11 +253,46 @@ clang-format -i src/**/*.{cpp,h}
       (identical to 4 decimals, so nothing rested on it). `load_pairs` now accepts both, takes the
       newest per label, and warns when a directory's renders span >2 minutes.
   - **Remaining, in order — see `FR_THD_AUDIT.md` P9–P10:**
-    - **P9: Overdrive's mode-specific tilt** (+1.2…+2.5 dB at *every* drive, only mode that does)
-      and its matching THD roll-off (−0.8 dB at 320 Hz → **−4.1 dB at 5 kHz** on the hot sweep).
-      The documented "OD compresses 3–4 dB lighter" residual, but it has a **shape** — never worked.
-      Not a linear-EQ fix; likely the same thing as the un-audited dynamics axis. **Now the largest
-      remaining shape error**: post-P7 Boost is flat to ±0.5 dB at every measurable drive, OD is not.
+    - **P9: Overdrive's mode-specific tilt — ⚠️ PREMISE WITHDRAWN (2026-07-29). It is not EQ: the
+      plugin's OD has no output ceiling.** *(mechanism open; measurement done)* The "tilt at every
+      drive" fails two tests. OD's clean sweep carries **1.4–6 % THD from G2 to G5**, so it was
+      never a linear FR measurement in that mode at any drive (P7's rule, applied to OD for the
+      first time — same trap as P10, one mode over). And the tilt **grows with sweep level** — G2
+      reads +0.70 (clean) → +1.31 → +1.69 → **+2.63 dB** (−6) — which is the cross-tab's own
+      definition of a compression difference rather than linear EQ. **It was the un-audited
+      dynamics axis all along**, exactly as the audit guessed.
+      - **What it is:** on 1 kHz level steps (−30 → −3 dBFS, self-anchored) **the pedal's Overdrive
+        saturates and the plugin's never does** — G5: pedal +1.26/+2.38/+3.42/+3.96/**+3.93**
+        (turns over), plugin +1.59/+2.64/+4.19/+5.94/**+7.08** (still climbing). Every drive; total
+        rise pedal +5.84/+3.93/+4.51/+5.79 vs plugin +8.42/+7.08/+7.87/+7.73 at G2/G5/G8/G10.
+        **Boost matches within 0.6 dB, Distortion within ~0.4** — their ceilings (rails, ±0.584 V
+        shunt) are modelled; OD's soft feedback clipper is the only path whose output still tracks
+        its input, so it is the only mode where a missing ceiling shows. **Mode-specific symptom,
+        no mode-specific mechanism** — the P4/P6 pattern again.
+      - **Ruled out:** capture-chain clipping (peaks 0.30–0.36 FS everywhere); a mis-traced clip
+        branch (`schematic-checker` re-traced Theseus — one shared 6.8 k in series with the whole
+        network, R10 unswitched, 4 diodes 2×2 antiparallel, nothing omitted); and "the clipper is
+        under-driven" — **the `orders` table cannot support that claim**, because measured
+        `d(odd Hn/H1)/d(input dB)` in OD above G5 is only −0.5…+0.05 and sign-unstable, so harmonic
+        dB cannot be converted into drive dB at all.
+      - **Found and shipped along the way — IC_A's missing ceiling.** Rail saturation was only ever
+        applied to IC_B; IC_A is the same op-amp on the same supply and NodeG is its output pin,
+        and the model let it swing past: peak |NodeG| **2.36/3.12/4.06/5.93 V** at G6/G7/G8/G10
+        against +3.9/−2.7 V. Now applied in `processPre` **before `driveMakeup`** (the physical
+        order — the pot's tap can only attenuate what IC_A already produced), reusing IC_B's
+        ceilings, so **no free parameter**. **Kept on correctness grounds, not arbiter grounds:**
+        it changes the audio (−39.7 dB at G10 T5 OD) but is inert — **44/44 captures within
+        ±0.02 dB**, compression unchanged to 0.01 dB, nine gates PASS. It matters most on **Red**
+        (17.7 k floor → far larger NodeG, no NAM reference) and at the 18 V mod. It is **not** the
+        OD ceiling — the feedback clipper holds pin7 far below the rails.
+      - **Next, in this order:** (1) audit the remaining never-measured axes — discrete-tone THD,
+        decay, IMD — for a second independent symptom to constrain a fit; (2) re-examine the diode
+        model (the two *parallel* strings are modelled with a **single** string's `Is`; ≈2·Is lowers
+        the clamp ~54 mV — small alone, but `Is`/`n_eff` together demonstrably do not reproduce the
+        turnover); (3) only then fit the ceiling empirically as a soft limiter on the SW-1 path,
+        judged on the compression curves **and** the null. Tracing is already exhausted for this
+        branch, so the gate for (3) is (2)'s outcome. **Do not use a linear shelf — a shelf cannot
+        make a curve turn over.**
     - **P10: the G8→G10 Boost discontinuity — ⚠️ PREMISE WITHDRAWN by P7 (2026-07-29).** The
       "+4.9 dB tilt, clean sweep, 3/3 tones" is measured where the pedal reads **14.76 %** THD and
       the plugin 10.45 % — not a linear-EQ measurement at all. Something at G10 is still real (its
@@ -478,9 +513,13 @@ linear WDF now runs at the OS rate too (relevant to the v1.1 perf pass).
   enough to reach 20 Hz overshoots 80 Hz, and below ~32 Hz the pedal's phase *leads*, so no
   minimum-phase filter matches it at all. See `FR_THD_AUDIT.md` P1/P8.
 - **OD compresses ~3–4 dB lighter than the real pedal at hot input** (Distortion compression good,
-  Δ~2 dB). **Not a flat offset — it has a shape** (P9, open): OD's THD falls off with frequency far
-  faster than the pedal's, Δ −0.8 dB at 320 Hz → **−4.1 dB at 5 kHz** on the hot sweep, and the same
-  fact makes OD the only mode carrying a tilt at every drive.
+  Δ~2 dB). **Re-characterised by P9 (2026-07-29): it is not a flat offset and not a spectral shape
+  — it is a missing CEILING.** On 1 kHz level steps the pedal's OD output *turns over* (G5:
+  +3.96 dB at −6 dBFS, +3.93 at −3) while the plugin's is still climbing (+5.94 → +7.08). Boost and
+  Distortion match, because their ceilings are modelled. The "tilt at every drive" and the THD
+  roll-off previously filed here are the **same defect seen through FR**, not separate residuals —
+  both were measured on OD's clean sweep, which carries 1.4–6 % THD and is not a linear instrument.
+  Open, with an agreed order of attack; see the P9 roadmap entry.
 - A small genuine HF-harmonic difference >8 kHz (tone-stage rolloff); the captures' own 4–6 kHz
   energy is partly NAM aliasing (the plugin's 8× anti-aliased clip is the more-correct version).
 - Per-mode capture levels are **normalized** (Boost/OD/Dist sit at the same level, physically

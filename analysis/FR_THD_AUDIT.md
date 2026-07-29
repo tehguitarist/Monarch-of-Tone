@@ -1212,16 +1212,96 @@ known-good post-P7 set: identical to 4 decimals, so nothing here rests on it. `l
 accepts both forms, takes the newest per label, and **warns when the renders in a directory span
 more than two minutes**.
 
-### P9 — Overdrive's mode-specific tilt and its THD roll-off  *(open, unworked)*
+### P9 — Overdrive's mode-specific tilt — ⚠️ **PREMISE WITHDRAWN 2026-07-29. It is not EQ; the plugin's OD has no ceiling.** *(mechanism still open)*
 
-Overdrive carries **+1.4 to +2.5 dB of tilt at every drive, including where the drive shelf is off**
-(`shape_audit.py clean`, Overdrive column). It is the only mode that does. The same fact shows up in
-THD: on the hot sweep OD's distortion falls off far faster with frequency than the pedal's —
-Δ −0.8 dB at 320 Hz growing monotonically to **−4.1 dB at 5 kHz**, with the pedal holding 11–15 %
-while the plugin drops 11.9 → 6.9 %. This is the documented "OD compresses 3–4 dB lighter" residual,
-but it has a **shape**, which has never been worked. Do not paper it over with a linear shelf — it
-is a distortion-spectrum difference, and the accepted-residuals list should stop describing it as a
-flat offset.
+**Original claim:** Overdrive carries +1.4 to +2.5 dB of tilt at every drive, including where the
+drive shelf is off (`shape_audit.py clean`, Overdrive column) — the only mode that does — plus a
+matching THD roll-off, Δ −0.8 dB at 320 Hz growing to −4.1 dB at 5 kHz on the hot sweep.
+
+**Both halves were measured on an invalid instrument, and the tilt reading fails its own test.**
+
+1. **OD's clean sweep was never a linear FR measurement.** P7 established the instrument-validity
+   rule on Boost alone. Applied to OD for the first time (`p9_od_compression.py valid`), OD's clean
+   sweep carries **1.4–6 % THD from G2 to G5** — so a tilt read through an H1 estimator there is a
+   distortion difference, not EQ. Same trap as P10, one mode over.
+2. **The tilt grows with sweep level, which is the definition of "not linear".** `p9 tilt` is a
+   drive × sweep-level cross-tab precisely so this cannot be missed. OD at G2 reads **+0.70 (clean)
+   → +1.31 (−18) → +1.69 (−12) → +2.63 dB (−6)**, and the same monotone growth at every drive. A
+   linear tilt is level-invariant by construction; a compression difference grows with level.
+   Boost's grows a little (−0.35 → +0.85), Distortion's *shrinks*. **This is the dynamics axis
+   showing through FR** — the audit's own "likely the same underlying thing as P9" note was right.
+
+**What the defect actually is (`p9 comp`, and the raw curves behind it — the never-audited dynamics
+axis, measured for the first time).** 1 kHz level steps, −30 → −3 dBFS, each curve anchored on its
+own −30 dB point (the captures are per-mode level-normalised, so only shape is comparable):
+
+| G5 T5 OD | −30 | −24 | −18 | −12 | −6 | −3 |
+|---|---|---|---|---|---|---|
+| pedal  | 0 | +1.26 | +2.38 | +3.42 | +3.96 | **+3.93** ← turns over |
+| plugin | 0 | +1.59 | +2.64 | +4.19 | +5.94 | **+7.08** ← still climbing |
+
+**The pedal's Overdrive saturates and the plugin's never does.** Every drive: total rise −30 → −3 is
+pedal +5.84/+3.93/+4.51/+5.79 at G2/G5/G8/G10 (falling at the top step at G5 and G10) against plugin
++8.42/+7.08/+7.87/+7.73, still rising at the last step in all four. **Boost matches within 0.6 dB
+and Distortion within ~0.4 at low drive — only OD lacks a ceiling.** That is coherent: Boost's
+ceiling is the rails and Distortion's is the ±0.584 V shunt, both modelled; OD's soft feedback
+clipper is the only path whose output still tracks its input, so it is the only mode where a missing
+ceiling is visible. **Mode-specific symptom, no mode-specific mechanism** — the P4/P6 pattern again.
+
+**Ruled out (do not re-test):**
+- **Capture-chain clipping.** Peak sample values on those segments are 0.30–0.36 FS in every mode,
+  drive and level — nowhere near full scale. The pedal's turnover is the pedal's.
+- **A mis-traced clipping branch.** `schematic-checker` re-traced the Theseus schematic: **one
+  shared 6.8 k (Theseus R8 ≡ matsumin R11) in series with the whole diode network**, R10/R7
+  unswitched, SW-1 gates only the diode branch, 4 diodes as 2×2 antiparallel, no cap/trimmer/second
+  resistor omitted. The model matches. (Caveat: the matsumin BMP could not be opened — it has no
+  file extension — so matsumin-side values are relayed from circuit.md, not re-verified.)
+- **"The clipper is under-driven" (the `orders` reading).** ✗ **The instrument does not support
+  it.** `p9 gain` measures the conversion factor `orders` lacks by re-rendering at +2/+4 dB flat
+  pre-clip gain: **d(odd Hn/H1)/d(input dB) is only −0.5…+0.05 and sign-unstable** across OD G5–G10.
+  Odd-order ratios are **not a usable drive meter in OD above G5**, so the −2…−4 dB deficits in the
+  `orders` median table cannot be converted into dB of drive at all — and the per-capture spread the
+  median hid (800 Hz: −0.41/−1.33/−3.90/−6.31 at G5/G6/G7/G8) says the same. Keep the view for the
+  *sensitivity* row; ignore its `req` row wherever |sens| is small.
+
+**A genuine missing circuit element, found here, implemented, and measurably inert.** The rail
+saturation was only ever applied to IC_B (pin7). **IC_A is the same op-amp in the same package on
+the same supply and NodeG is its output pin** — and the model let NodeG swing straight past its
+ceiling. Measured through the real `processPre` at the captures' hot-sweep input level (0.436 V
+peak), peak |NodeG| is **2.36 V (G6) / 3.12 (G7) / 4.06 (G8) / 5.93 (G10)** against a +3.9 / −2.7 V
+ceiling: unbounded from G7 up. Now applied in `MonarchChannel::processPre`, **before `driveMakeup`**
+— the physical order, since NodeG is IC_A's output pin and the DRIVE pot's second action (which
+`driveMakeup` stands in for) is a divider hung off that pin and can only attenuate what IC_A already
+produced. It reuses the ceilings already fitted for IC_B, so it adds **no free parameter**.
+
+> **Result: real but inert at these levels.** It changes the audio (−39.7 dB of waveform difference
+> at G10 T5 OD) yet moves **nothing** — **44/44 captures within ±0.02 dB** on the null, compression
+> curves unchanged to 0.01 dB, all nine gates PASS. The A/B used a **whole-file** null, which is
+> *more* inclusive than the headline per-segment metric — it covers the very level-step segments
+> where the defect lives — and still shows nothing. **Kept enabled** on correctness grounds, not
+> arbiter grounds: it bounds an otherwise unbounded internal node, which matters most on **Red**
+> (17.7 k Stage-1 floor → much larger NodeG, and no NAM reference to catch it) and at the 18 V
+> supply mod. It is **not** the OD ceiling: the feedback clipper holds pin7 far below the rails, so
+> clipping NodeG barely changes the current the clipper sees.
+
+**So the OD ceiling mechanism is still open** — but P9 is now a well-posed dynamics question instead
+of a mis-posed EQ one. Agreed order of attack for the next session:
+
+1. **Audit the remaining never-measured axes first** (below) — IMD, discrete-tone THD, decay. A
+   second, independent symptom of the same ceiling constrains a fit far better than the level steps
+   alone, and P2/P3/P6 all changed the clip path underneath these.
+2. **Then re-examine the diode model** — a physics fix beats an empirical one. Specific suspect:
+   the network is two *parallel* strings modelled as one `DiodePairT` carrying a **single** string's
+   `Is` (7.74e-13); two parallel strings should present ≈2·Is, which lowers the clamp by
+   `n_eff·Vt·ln2 ≈ 54 mV`. That is small on its own (~0.3 dB) — the question is whether `Is`/`n_eff`
+   *together* reproduce the pedal's turnover, which the current pair demonstrably does not.
+3. **Only if both fall through, fit the ceiling empirically** — a soft output limiter on the SW-1
+   path, judged on the compression curves **and** the null. This is the standing "depart from the
+   schematic once tracing is exhausted" authorization; note tracing is now exhausted for this branch
+   (schematic-checker, above), so the gate for step 3 is really step 2's outcome.
+
+**Do not** paper this over with a linear shelf, and the accepted-residuals list must stop calling it
+a flat offset — it is a missing *ceiling*, and a shelf cannot make a curve turn over.
 
 ### P10 — the G8 → G10 Boost discontinuity  *(open — but the PREMISE is withdrawn, 2026-07-29)*
 
@@ -1247,10 +1327,14 @@ be folded into the never-audited dynamics/THD axes rather than pursued as a tilt
 have never been compared against the plugin, and P2/P3/P6 all changed the clip path underneath them:
 
 - **IMD** (`imd_smpte`, `imd_ccif`) — used only as a *guard* in `p2_rail_asym_fit.py`, never as a target.
-- **Dynamics / compression** (`lvl_-30` … `lvl_-3` steps) — the source of the "OD compresses lighter"
-  claim, not re-measured since. Likely the same underlying thing as P9; look at them together.
-- **Discrete-tone THD** (`tone_82` … `tone_8000`) — computed by `comprehensive_report.py` but not emitted.
-- **Decay** (`decay_220`, `decay_1k`) — never examined.
+- ~~**Dynamics / compression**~~ — ✅ **audited 2026-07-29 by P9** (`p9_od_compression.py comp`). It
+  was indeed the same underlying thing as P9, and it is where P9's answer came from: the pedal's OD
+  output turns over and the plugin's does not. See P9 above. Still un-*fixed*.
+- **Discrete-tone THD** (`tone_82` … `tone_8000`) — computed by `comprehensive_report.py` but not
+  emitted. **Next up (P9 step 1)**: the discrete tones are a cleaner ceiling probe than the sweeps
+  because each is a steady state at a known level.
+- **Decay** (`decay_220`, `decay_1k`) — never examined. Also a P9 step-1 target: a missing output
+  ceiling should show as a decay-envelope difference, independent of the level steps.
 - **Red channel** — no NAM reference; unvalidatable by construction.
 
 ---
@@ -1293,6 +1377,15 @@ python3 analysis/fr_thd_audit.py h2                 # Finding 4 — H2 vs freque
 
 python3 analysis/p2_rail_asym_fit.py --json run.json            # P2's fit/guard loop (~12 s)
 python3 analysis/p2_rail_asym_fit.py --compare run.json         # ...and the A/B against a saved run
+
+# P9 — needs renders kept from a comprehensive_report.py run (see --keep-renders above).
+python3 analysis/p9_od_compression.py tilt          # THE view: does the "tilt" grow with sweep LEVEL?
+python3 analysis/p9_od_compression.py valid         # is OD's clean sweep still a linear instrument? (no)
+python3 analysis/p9_od_compression.py comp          # the dynamics axis — where P9's answer came from
+python3 analysis/p9_od_compression.py orders        # per-order deficit — READ WITH `gain` OR NOT AT ALL
+python3 analysis/p9_od_compression.py gain          # ...the missing unit conversion (~6 min, renders).
+#   Its `sens` row is the finding: |d(odd Hn/H1)/d(input dB)| is 0.0-0.5 and sign-unstable in OD
+#   above G5, so `orders` CANNOT be read as dB of drive. Ignore `req` wherever |sens| is small.
 ```
 
 `p7_eq_refit.py` reads only the JSON, so its `--base` must be told what the JSON's renders were
