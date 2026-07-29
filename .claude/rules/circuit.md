@@ -32,7 +32,7 @@ the model's value/topology is a deliberate choice over a source, the decisions l
 | Stage 2 input coupling | 100nF | Stage 2 | HPF f_c = 159 Hz w/ R9 |
 | Stage 2 input R (R9) | 10k | Stage 2 | gain = −R10/R9 = −22 |
 | Stage 2 feedback R (R10) | 220k | Stage 2 | always present |
-| Soft-clip diodes (SW-1) | MA856 ×4 | SW-1 | `[D4+D5] ∥ [D2+D3]` back-to-back series strings ≡ **1× DiodePairT, n_eff = 2·n_MA856 ≈ 3.024**, Vf≈1.64V |
+| Soft-clip diodes (SW-1) | MA856 ×4 | SW-1 | `[D4+D5] ∥ [D2+D3]` back-to-back series strings ≡ **1× DiodePairT, n_eff = 2·n_MA856 ≈ 3.024, Is = 2·Is_MA856** (parallel strings double Is; v1.4 P9 step 2), Vf≈1.58V |
 | SW-1 branch series R (R11) | 6.8k | SW-1 | series w/ diode network; branch ∥ R10, gated by SW-1 |
 | Hard-clip diodes (SW-2) | 1S1588 ×2 | SW-2 | true antiparallel pair, **1× DiodePairT**; shunt node_HC→BIAS; Vf≈0.584V |
 | Stage 2 output R (R12) | 1k | SW-2/Tone | always in path: pin7 → R12 → node_HC → TONE top terminal |
@@ -165,12 +165,15 @@ handles any SW combo, so re-adding is a 1-line change.)
 ## 6. Diode Parameters
 
 ```cpp
-// MA856 — SW-1 soft clip. Network [D4+D5]∥[D2+D3]: two series diodes ≡ one diode with n doubled.
-constexpr double Is_MA856    = 7.74e-13;   // Vf ≈ 0.820V @ 1mA
+// MA856 — SW-1 soft clip. Network [D4+D5]∥[D2+D3]: TWO PARALLEL strings of two series diodes.
+// Series stacking doubles ideality (n_eff); PARALLEL strings double Is (v1.4 P9 step 2, 2026-07-29
+// — the single-string Is was used for years and under-modelled the clamp by n_eff·Vt·ln2 ≈ 54 mV).
+constexpr double Is_MA856          = 7.74e-13;   // Vf ≈ 0.820V @ 1mA, SINGLE diode (datasheet ref only)
+constexpr double Is_MA856_parallel = 2.0 * Is_MA856; // combined Is of the two parallel strings
 constexpr double n_MA856     = 1.512;
 constexpr double Vt          = 25.85e-3;
 constexpr double n_eff_MA856 = 2.0 * n_MA856; // ≈ 3.024 → pass as DiodePairT's nDiodes arg
-// → ONE DiodePairT(Is_MA856, Vt, n_eff_MA856) in series with R11(6.8k), branch ∥ R10(220k).
+// → ONE DiodePairT(Is_MA856_parallel, Vt, n_eff_MA856) in series with R11(6.8k), branch ∥ R10(220k).
 
 // 1S1588 = 1N914 = 1N4148 — SW-2 hard clip. ONE DiodePairT.
 constexpr double Is_1S1588 = 2.52e-9;   // Vf ≈ 0.584V @ 1mA

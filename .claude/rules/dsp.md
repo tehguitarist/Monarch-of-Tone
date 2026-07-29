@@ -91,7 +91,7 @@ SW-1 diode-root skeleton:
 wdft::ResistiveCurrentSourceT<double> iSrc { 220.0e3 };  // i_in ‖ R10
 wdft::ResistorT<double> r11 { 6.8e3 };
 wdft::WDFSeriesT<double, decltype(r11), decltype(iSrc)> fbSeries { r11, iSrc };
-wdft::DiodePairT<double, decltype(fbSeries), wdft::DiodeQuality::Best> dp { fbSeries, Is_MA856, Vt, n_eff_MA856 };
+wdft::DiodePairT<double, decltype(fbSeries), wdft::DiodeQuality::Best> dp { fbSeries, Is_MA856_parallel, Vt, n_eff_MA856 };
 // per sample: iSrc.setCurrent(i_in); dp.incident(fbSeries.reflected()); fbSeries.incident(dp.reflected());
 //             V(pin7) = voltage(iSrc);   // passive read
 ```

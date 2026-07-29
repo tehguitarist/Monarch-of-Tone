@@ -49,10 +49,15 @@ public:
     static constexpr double C7 = 100.0e-9;
 
     // MA856 (Panasonic), validated — circuit.md Section 16 / dsp.md.
-    static constexpr double Is_MA856 = 7.74e-13;
+    static constexpr double Is_MA856 = 7.74e-13; // datasheet single-diode Is, reference value only
     static constexpr double n_MA856 = 1.512;
     static constexpr double Vt = 25.85e-3;
     static constexpr double n_eff = 2.0 * n_MA856; // ≈ 3.024 (back-to-back 2-diode series)
+    // Network is TWO PARALLEL series strings, [D4+D5] ∥ [D2+D3] (circuit.md §1/§6). Paralleling
+    // adds current at a given voltage (Is doubles); it does NOT change ideality (n_eff unaffected,
+    // that's series-stacking only). v1.4 P9 step 2 (2026-07-29): the single-string Is_MA856 above
+    // under-modelled the network by 2x; use the doubled value in the DiodePairT construction.
+    static constexpr double Is_MA856_parallel = 2.0 * Is_MA856;
 
     SW1SoftClipT() { dp.setHighQuality (Quality == wdft::DiodeQuality::Best); }
 
@@ -96,7 +101,7 @@ private:
     wdft::ResistiveCurrentSourceT<double> iSrc { R10 }; // current source ‖ R10
     wdft::ResistorT<double> r11 { R11 };
     wdft::WDFSeriesT<double, decltype (r11), decltype (iSrc)> fbSeries { r11, iSrc };
-    RuntimeDiodePairT<double, decltype (fbSeries)> dp { fbSeries, Is_MA856, Vt, n_eff };
+    RuntimeDiodePairT<double, decltype (fbSeries)> dp { fbSeries, Is_MA856_parallel, Vt, n_eff };
 };
 
 /** Production soft-clip stage: Best-quality diode by default (byte-for-byte unchanged). */

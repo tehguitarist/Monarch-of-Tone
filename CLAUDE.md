@@ -291,13 +291,20 @@ clang-format -i src/**/*.{cpp,h}
         220 Hz and 1 kHz. Also surfaced an unrelated finding: Boost diverges +5 dB at G10's attack,
         decaying to 0 — nothing like it at G2–G8 — which is the discrete/level-stepped instrument
         P10 was waiting for (see `FR_THD_AUDIT.md` P10). IMD still unaudited.
-      - **Next, in this order:** (2) re-examine the diode
-        model (the two *parallel* strings are modelled with a **single** string's `Is`; ≈2·Is lowers
-        the clamp ~54 mV — small alone, but `Is`/`n_eff` together demonstrably do not reproduce the
-        turnover); (3) only then fit the ceiling empirically as a soft limiter on the SW-1 path,
-        judged on the compression curves **and** the null. Tracing is already exhausted for this
-        branch, so the gate for (3) is (2)'s outcome. **Do not use a linear shelf — a shelf cannot
-        make a curve turn over.**
+      - **Step 2 done (2026-07-29):** the two *parallel* diode strings were modelled with a
+        **single** string's `Is` (`n_eff` correctly doubled for the 2 series diodes, but `Is` never
+        doubled for the 2 parallel strings). Fixed: `Is_MA856_parallel = 2·Is_MA856` in
+        `SW1SoftClip.h`. Confirmed exactly the predicted **~54 mV clamp shift** (Vf 1.64→1.58 V) —
+        real, free (no fitted parameter), and a genuine null improvement (median **−22.9 dB**, every
+        OD capture deeper or unchanged, up to 1.1 dB; Clean/Dist byte-identical). But it's a uniform
+        shift, not a saturating mechanism — **does not close the gap**: OD still climbs
+        monotonically −30→−3 dBFS at every drive, same shape as before. `Is`/`n_eff` together
+        confirmed **not** to reproduce the turnover, as suspected. Tracing is now exhausted on this
+        branch too (last untried topology lead) — **gate for step 3 is open.**
+      - **Next:** (3) fit the ceiling empirically as a soft limiter on the SW-1 path, judged on the
+        compression curves **and** the null — the standing "depart from schematic once tracing is
+        exhausted" authorization, now actually triggered. **Do not use a linear shelf — a shelf
+        cannot make a curve turn over.**
     - **P10: the G8→G10 Boost discontinuity — ⚠️ PREMISE WITHDRAWN by P7 (2026-07-29).** The
       "+4.9 dB tilt, clean sweep, 3/3 tones" is measured where the pedal reads **14.76 %** THD and
       the plugin 10.45 % — not a linear-EQ measurement at all. Something at G10 is still real (its
@@ -332,16 +339,18 @@ preset browser. Supply-voltage mod (9/12/18V) and rail-saturation ADAA are in. L
 engineering: CI/CD (`.github/workflows/`), cross-platform VST3, and per-platform installers
 (`installer/`) — see README.
 
-**Calibration result (Step 11, real-pedal A/B; refreshed v1.4 P8 2026-07-29):** the plugin nulls against
-44 NAM captures (drive G2–G10, tone T2–T8, Clean/OD/Dist) at **−8.7 to −25.6 dB, median −22.6**, and
-is now at **−19.6 dB or better on every capture from G2 to G7** (worst G6 T5 OD). (Was −6.6 to −23.2,
+**Calibration result (Step 11, real-pedal A/B; refreshed v1.4 P9 step 2, 2026-07-29):** the plugin nulls
+against 44 NAM captures (drive G2–G10, tone T2–T8, Clean/OD/Dist) at **median −22.9 dB**, and
+is at **−19.6 dB or better on every capture from G2 to G7** (worst G6 T5 OD). (Was −6.6 to −23.2,
 median −16.4→−16.6 after P2/P6. **P7** deepened the mean 2.46 dB and the median 4.9 dB — 24 captures
 deeper by up to 9.1 dB, concentrated at G2–G4 where the double-counted EQ correction lived, 2 shallower
 by ≤0.9 dB, and 18 byte-identical because both refitted instruments are exactly zero at and above drive
 0.55. **P8** then deepened mean and median a further 1.05 dB — 38 of 44 deeper by up to 3.4 dB, 6
 shallower by ≤0.2, and it is the first change to move the **G10 floor**, taking the set's worst capture
-from −6.6 to −8.7 dB.) Best
-per-mode null at the labelled mid-gain settings (G5 T5): Clean/Boost −23.3, OD −22.2, Dist −22.7 dB.
+from −6.6 to −8.7 dB. **P9 step 2** then deepened every OD capture by up to 1.1 dB — median −22.6 →
+−22.9 — by fixing the SW-1 diode network's parallel-string `Is` (Clean/Dist byte-identical); see the
+P9 roadmap entry.) Best
+per-mode null at the labelled mid-gain settings (G5 T5): Clean/Boost −23.3, OD −23.2, Dist −22.7 dB.
 Excellent to mid gain; shallower only at very high drive (G8–G10) — an
 accepted device-physics / capture-aliasing residual, not a topology error (every Stage-1 value +
 topology re-traced exact against the Theseus schematic). The 44 captures (`analysis/pedal_export2/`,

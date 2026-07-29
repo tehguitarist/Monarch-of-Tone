@@ -1343,6 +1343,40 @@ symptom confirmed for OD's ceiling" — proceed to step 2 (diode model) as plann
 P10's needed instrument as a side effect; P10 should be picked up in the same pass as convenient,
 not as a new independent investigation.
 
+#### P9 step 2 — diode model re-examination (✅ done, 2026-07-29): real fix, doesn't close the gap
+
+The suspect from the roadmap was confirmed and fixed: `SW1SoftClipT`'s `DiodePairT` modelled the
+`[D4+D5] ∥ [D2+D3]` network's two **series** diodes correctly (`n_eff = 2·n_MA856`) but never
+accounted for the two **parallel** strings, which double the combined `Is`. Series-stacking and
+paralleling are different corrections — series doubles ideality, parallel doubles saturation
+current — and only the first had been applied. Fixed with a new `Is_MA856_parallel = 2·Is_MA856`
+used in the `DiodePairT` construction (`Is_MA856` kept as the datasheet single-diode reference);
+no other diode/circuit parameter touched.
+
+**Result: exactly the ~54 mV clamp shift predicted, no turnover.** The predicted
+`n_eff·Vt·ln2 ≈ 54 mV` clamp drop (Vf ≈1.64 → ≈1.58 V, confirmed in `SW1SoftClip_Sine`'s measured
+onset 1.123 V vs the old 1.64 V ballpark) is a uniform shift of the whole soft-clip curve, not a
+new saturating mechanism — it cannot make a monotonically-rising curve turn over, and it didn't:
+`p9_od_compression.py comp` still shows OD's output climbing across the whole −30→−3 dBFS range at
+every drive, unchanged in shape. Per-step deltas move by ~0.05–0.3 dB (better at low drive, flat to
+slightly worse at G5–G10) — the magnitude the roadmap itself predicted ("small on its own, ~0.3
+dB"). `decay_1k`'s attack-window delta improves ~0.2–0.3 dB at G2–G7, flat at G8, slightly worse at
+G10 — same story on the other instrument.
+
+**But it is a real, free, arbiter-validated improvement — kept.** Full 44-capture null: Clean/
+Distortion byte-identical (correctly scoped to OD only), every OD capture deeper or unchanged (up
+to ~1.1 dB, e.g. G3 T5 OD −22.6→−23.7, G5 T5 OD −22.2→−23.2, G6 T5 OD −19.6→−20.5), **median null
+−22.6 → −22.9 dB**. No free parameter — it's a physically-required correction to a topology bug
+(one factor of 2 missing), not a fit. `SW1SoftClip_Sine`'s onset ballpark was retuned 1.2–2.2 V →
+1.05–2.1 V to match the now-correct ≈1.58 V clamp; all nine gates still PASS.
+
+**Conclusion: step 2 does not close P9's gap — proceed to step 3.** The remaining shortfall is
+unchanged in shape: plugin OD still rises ~7.2–8.1 dB from −30→−3 dBFS at G5/G8/G10 vs the pedal's
+~3.9–5.8 dB (still turns over), i.e. 2–4 dB of missing compression at the loudest step, same as
+before this fix. Tracing is exhausted on this branch too (this was the last untried topology-level
+lead) — **the gate for step 3 (empirical soft limiter, fit on the compression curves and the null)
+is now open**, per the standing "depart from schematic once tracing is exhausted" authorization.
+
 ### P10 — the G8 → G10 Boost discontinuity  *(open — but the PREMISE is withdrawn, 2026-07-29)*
 
 **Original claim:** G10 Boost reads +4.9 dB of tilt on the clean sweep at all three tone settings

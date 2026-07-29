@@ -4,7 +4,8 @@
 // feedback (R10 ∥ [R11 + diodes]). Verifies:
 //   - small-signal gain ≈ −22 (linear, diodes off),
 //   - SYMMETRIC clipping (|out+| ≈ |out−|),
-//   - soft compression with onset where the output ≈ 1.64 V (2×Vf_MA856),
+//   - soft compression with onset where the output ≈ 1.58 V (v1.4 P9 step 2, 2026-07-29: the
+//     parallel-string Is doubling lowers the ≈1.64 V single-string clamp by n_eff·Vt·ln2 ≈ 54 mV),
 //   - softer than a hard clamp (output keeps growing slowly above onset), no NaN.
 
 #include "../src/dsp/SW1SoftClip.h"
@@ -89,16 +90,16 @@ int main()
     const auto at05 = measure (stage, 0.5);
     const bool soft = 0.5 * (at2.outPos + at2.outNeg) > 0.5 * (at05.outPos + at05.outNeg) + 0.05;
 
-    std::printf ("\n  soft-knee onset: output ≈ %.3f V at in=%.3f V (target ≈1.64 V)\n", kneeOut, kneeFound);
+    std::printf ("\n  soft-knee onset: output ≈ %.3f V at in=%.3f V (target ≈1.58 V)\n", kneeOut, kneeFound);
     std::printf ("  heavy-clip gain (1 V in): %.2f  (≪ small-signal ⇒ clipping)\n", heavyGain);
 
     const bool gainOk = std::abs (absGain - 22.0) < 1.5;          // small-signal ≈ 22×
     const bool invOk = ssGain < 0.0;                             // inverting
     const bool clipOk = std::abs (heavyGain) < 0.5 * absGain;     // strong compression
-    const bool onsetOk = kneeFound > 0.0 && kneeOut > 1.2 && kneeOut < 2.2; // ≈1.64 V ballpark
+    const bool onsetOk = kneeFound > 0.0 && kneeOut > 1.05 && kneeOut < 2.1; // ≈1.58 V ballpark (P9 step 2)
     const bool pass = gainOk && invOk && symOk && clipOk && onsetOk && soft && ! nanSeen;
 
-    std::printf ("\n  gain≈−22: %s | inverting: %s | symmetric: %s | clips: %s | onset≈1.64V: %s | soft: %s | no NaN: %s\n",
+    std::printf ("\n  gain≈−22: %s | inverting: %s | symmetric: %s | clips: %s | onset≈1.58V: %s | soft: %s | no NaN: %s\n",
                  gainOk ? "ok" : "FAIL", invOk ? "ok" : "FAIL", symOk ? "ok" : "FAIL",
                  clipOk ? "ok" : "FAIL", onsetOk ? "ok" : "FAIL", soft ? "ok" : "FAIL",
                  nanSeen ? "FAIL" : "ok");
