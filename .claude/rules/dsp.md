@@ -163,6 +163,63 @@ addition to oversampling — replaces pointwise `f(x)` with `(F(x)−F(x₋₁))
 fallback when `x≈x₋₁`). Most audible in **Boost** (rails are the only nonlinearity there). State
 resets in `prepareClip`/`reset`; `setSupplyVoltage` recomputes it when the rails move.
 
+### ADAA is LOAD-BEARING at every OS factor — measured 2026-07-30, `OSFidelity` (c1)
+
+ADAA costs **25 ns/sample in Boost, 37 in OD, 25 in Dist — 18–22 % of the channel**
+(`analysis/perf_split_probe.cpp`), which makes "we are paying for antialiasing twice, drop it at
+4x/8x" the most attractive-looking optimisation in the DSP. **It is wrong, and the measurement is
+not close.** ADAA on/off (`MonarchChannel::setAdaaEnabled`, exposed on the processor for exactly
+this A/B), Boost at drive 0.85, 9 kHz at 0.5 V pk, alias energy summed at the **named fold bins**
+3/6/12/15/21 kHz:
+
+| OS | alias, ADAA on | ADAA off | ADAA is worth |
+|----|---------------|----------|---------------|
+| 1x | −31.2 dB | +2.1 dB | **33.3 dB** |
+| 2x | −38.2 | −7.4 | **30.8** |
+| 4x | −62.9 | −17.8 | **45.1** |
+| 8x | −68.3 | −22.4 | **45.9** |
+
+So oversampling does **not** subsume it — at 8x, ADAA is still removing 46 dB of alias energy that
+the decimation filter does not touch, because at hard clip the rail knee's harmonic series reaches
+far past the OS Nyquist. dsp.md's "in addition to oversampling" was right and is now quantified.
+**Do not re-propose dropping or rate-gating ADAA.**
+
+> **⚠️ Two measurement traps, both live.** (1) The **instrument** must be named fold bins, not a
+> broadband residual: `OSFidelity` (b)'s harmonic-vs-alias split moves only −47.6 → −48.8 dB from 1x
+> to 8x, i.e. it is floor-limited by things that are not aliasing, and it reported this same lever as
+> "0.22 dB at 1x, nothing at 4x/8x" — the exact opposite conclusion. A metric that does not respond
+> to the OS factor cannot answer a question about the OS factor; **check that it self-validates**
+> (alias-on falls 37 dB across the range) before reading a difference off it. (2) The **operating
+> point** must be the alias-prone one. This is a safety mechanism; sizing it at moderate drive would
+> have understated it.
+
+### The identity-region droop — measured, and it is mostly what `warp*` has been correcting
+
+Below the knee `railAntideriv` returns `½x²`, so the difference quotient is **`(x + x₋₁)/2`** — a
+half-sample delay and a `|cos(πf/fs_os)|` rolloff. Per stage at 16 kHz: 6.02 dB at 1x, 1.25 at 2x,
+0.30 at 4x, 0.07 at 8x. Measured on the real processor (`OSFidelity` (c2), small signal so the rails
+never engage and the droop is all that is left), ADAA-off minus ADAA-on:
+
+| OS | 4 kHz | 8 kHz | 12 kHz | 16 kHz |
+|----|-------|-------|--------|--------|
+| 1x | +0.09 | +2.14 | +12.04 | **+24.08** |
+| 2x | +0.04 | +0.35 | +2.75 | **+5.00** |
+| 4x | +0.01 | +0.15 | +0.67 | **+1.20** |
+| 8x | +0.00 | +0.04 | +0.17 | **+0.30** |
+
+**Exactly 4× the per-stage prediction at every rate** (24.08/6.02, 5.00/1.25, 1.20/0.30 all = 4.00) —
+and 4 is the stage count: **2 op-amp ceilings × 2 series pedal channels** (Boost has no `sw1Ceil`;
+in OD it is 6). The arithmetic is confirmed, not merely plausible.
+
+> **⚠️ This CORRECTS the bilinear-warp attribution below.** At 1x the total small-signal deficit vs
+> 8x is −3.61/−13.12/−32.52 dB at 8/12/16 kHz — and **12.04 of the 13.12 at 12 kHz, and 24.08 of the
+> 32.52 at 16 kHz, is ADAA droop, not warp.** `warp*` was fitted to that combined deficit, so it has
+> been mostly compensating the ADAA midpoint filter. **At 2x the droop (5.00 dB at 16 kHz) is LARGER
+> than the net 2x-vs-8x deviation (−3.51 dB)**, i.e. `warp*` is actively over-correcting to cover it.
+> Consequence for the identity-region early-out (v1.5 step 2): removing the droop at 2x without
+> refitting `warp*` over-brightens 16 kHz by ~5 dB. The refit budget is now known per rate — that is
+> the number the roadmap was waiting for.
+
 **Diode-stage ADAA is deferred:** those stages are WDF nonlinear *roots* (not memoryless `y=f(x)`
 maps) and chowdsp has no ADAA support for that case — true ADAA there is the research-grade
 DAFx-2020 WDF-root method. Left to oversampling. (Ref: DAFx-2020 "Antiderivative antialiasing in

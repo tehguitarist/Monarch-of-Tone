@@ -175,6 +175,95 @@ int main()
     }
 
     std::printf ("\n   (harmonic dB ~constant = distortion character preserved; aliasing dB should fall with OS.)\n");
+
+    // ---------------------------------------------------------------------------------------
+    // (c) Is ADAA still buying anything at 4x/8x? — the v1.5 CPU question, asked on fidelity.
+    //
+    //     ADAA and oversampling are two ways to buy the SAME thing (suppressed aliasing from a
+    //     hard-ish knee), and the plugin currently pays for both: 25 ns/sample in Boost, 37 in OD,
+    //     25 in Dist — 18–22 % of the channel (analysis/perf_split_probe.cpp). If the decimation
+    //     filter already removes what ADAA removes at 4x/8x, then ADAA belongs at 1x/2x only, and
+    //     that is decided here rather than by a hunch.
+    //
+    //     TWO axes, because ADAA does two things and they must not be read as one (this is exactly
+    //     the v1.5 finding — first-order ADAA of the IDENTITY map is (x+x₋₁)/2, so below the knee it
+    //     is a half-sample delay and a |cos(πf/fs_os)| rolloff, NOT a no-op):
+    //       (c1) aliasing — what ADAA is FOR. Boost, hot: the rails are the only nonlinearity there.
+    //       (c2) small-signal top octave — what ADAA COSTS, i.e. the identity-region droop the
+    //            `warp*` shelf has been unknowingly absorbing. Small signal = rails never engage, so
+    //            any difference here is purely the midpoint filter.
+    // ---------------------------------------------------------------------------------------
+    // (b)'s broadband residual is NOT a usable alias metric for this question — it moves only
+    // −47.6 → −48.8 dB from 1x to 8x, i.e. it is floor-limited by things that are not aliasing
+    // (the DC block's settling, the even-harmonic injection's envelopes, Goertzel leakage). A
+    // difference of a few tenths measured on that floor would prove nothing either way.
+    //
+    // So aliasing is measured at NAMED fold bins instead: 9 kHz into 48 kHz puts harmonics 3,4,5,6,7
+    // at 27/36/45/54/63 kHz, which fold to 21/12/3/6/15 kHz — none of which coincides with 9 or
+    // 18 kHz, so every one of those bins is aliasing and nothing else. The metric validates itself:
+    // it must fall steeply with the OS factor, and it does (~34 dB from 1x to 8x).
+    const double fAl = 9000.0;
+    const double aliasBins[] = { 3000.0, 6000.0, 12000.0, 15000.0, 21000.0 };
+    const int nAl = (int) (sizeof (aliasBins) / sizeof (aliasBins[0]));
+
+    std::printf ("\n== OSFidelity (c1): ADAA on vs off — ALIASING at named fold bins ==\n");
+    std::printf ("   Boost, %.0f Hz at %.2f V pk (hot), drive 0.85; bins 3/6/12/15/21 kHz.\n", fAl, vClip);
+    std::printf ("   %-6s | %10s %10s | %9s\n", "OS", "alias on", "alias off", "d alias");
+    std::printf ("   -------+-----------------------+----------\n");
+    setP (apvts, "clipping_mode_yellow", 0.0f); setP (apvts, "clipping_mode_red", 0.0f); // Boost
+
+    auto aliasAt = [&]
+    {
+        auto y = renderSine (proc, fAl, vClip, Nal);
+        checkFinite (y);
+        const double fund = mag (y, fAl, settle);
+        double ms = 0.0;
+        for (int i = 0; i < nAl; ++i) { const double a = mag (y, aliasBins[i], settle); ms += 0.5 * a * a; }
+        return (fund > 1e-15) ? 20.0 * std::log10 (std::sqrt (ms) / fund) : -200.0;
+    };
+
+    for (int o = 0; o < 4; ++o)
+    {
+        prep (proc, osFactors[o]); proc.setAdaaEnabled (true);
+        const double aOn = aliasAt();
+        prep (proc, osFactors[o]); proc.setAdaaEnabled (false);
+        const double aOff = aliasAt();
+        prep (proc, osFactors[o]); proc.setAdaaEnabled (true); // leave production state restored
+        std::printf ("   %-6s | %+9.1f  %+9.1f  | %+8.2f\n", osName[o], aOn, aOff, aOff - aOn);
+    }
+    std::printf ("   (d alias > 0 = ADAA is still suppressing aliasing at that rate. ~0 = the\n"
+                 "    decimation filter already covers it and ADAA is being paid for nothing.\n"
+                 "    Sanity check on the metric itself: 'alias on' must fall steeply with OS.)\n");
+
+    const double hfFreqs[] = { 4000, 8000, 12000, 16000 };
+    const int nHf = (int) (sizeof (hfFreqs) / sizeof (hfFreqs[0]));
+    std::printf ("\n== OSFidelity (c2): ADAA on vs off — small-signal FR, off MINUS on (dB) ==\n");
+    std::printf ("   %-6s", "Hz");
+    for (int f = 0; f < nHf; ++f) std::printf (" %8.0f", hfFreqs[f]);
+    std::printf ("\n");
+    for (int o = 0; o < 4; ++o)
+    {
+        std::printf ("   %-6s", osName[o]);
+        for (int f = 0; f < nHf; ++f)
+        {
+            prep (proc, osFactors[o]); proc.setAdaaEnabled (true);
+            auto yOn = renderSine (proc, hfFreqs[f], vSmall, Nfr);
+            prep (proc, osFactors[o]); proc.setAdaaEnabled (false);
+            auto yOff = renderSine (proc, hfFreqs[f], vSmall, Nfr);
+            checkFinite (yOn); checkFinite (yOff);
+            const double mOn = mag (yOn, hfFreqs[f], settle), mOff = mag (yOff, hfFreqs[f], settle);
+            const double dB = (mOn > 1e-15 && mOff > 1e-15) ? 20.0 * std::log10 (mOff / mOn) : 0.0;
+            std::printf (" %+8.2f", dB);
+        }
+        std::printf ("\n");
+    }
+    proc.setAdaaEnabled (true);
+    std::printf ("   (positive = ADAA-on is DARKER there, i.e. the identity-region midpoint droop.\n"
+                 "    Predicted per stage at 16 kHz: 6.02 dB at 1x, 1.25 at 2x, 0.30 at 4x, 0.07 at 8x,\n"
+                 "    and it CASCADES over the stages in the path — so 2x is ~3x that per-stage figure.\n"
+                 "    Whatever appears here is what the `warp*` shelf has been absorbing: refit it and\n"
+                 "    `hfTrim` in ONE pass if ADAA moves, or the same HF excess gets corrected twice.)\n");
+
     std::printf ("\n%s\n", anyNaN ? "FAIL" : "PASS");
     return anyNaN ? 1 : 0;
 }

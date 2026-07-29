@@ -760,6 +760,26 @@ public:
         sw2.setHighQuality (highQ);
     }
 
+    /** ADAA on the two soft-ceiling maps (`railSaturate` ×2 op-amps, `sw1Ceil`). Production is ON at
+        every rate; this exists because ADAA is a SUBSTITUTE for oversampling and the plugin currently
+        pays for both — measured at **25 ns/sample in Boost, 37 in OD, 25 in Dist, i.e. 18–22 % of the
+        channel** (analysis/perf_split_probe.cpp), which makes it the single largest lever in the DSP.
+        Whether the 4x/8x decimation filter already removes what ADAA removes is a fidelity question,
+        so OSFidelity section (c) A/Bs it per OS factor rather than a hunch deciding.
+
+        Toggling back ON re-bases each antiderivative from its stored x₋₁ — same reasoning as
+        updateRails(), since a stale F(x₋₁) would corrupt exactly one difference quotient. */
+    void setAdaaEnabled (bool on) noexcept
+    {
+        if (on && ! adaaEnabled)
+        {
+            railFprev = railAntideriv (railXprev);
+            s1RailFprev = railAntideriv (s1RailXprev);
+            sw1CeilFprev = sw1CeilAntideriv (sw1CeilXprev);
+        }
+        adaaEnabled = on;
+    }
+
     // Base-rate front: input network + Stage 1 → V(NodeG), then the drive-dependent voicing
     // correction (high-shelf; unity pass-through once drive ≳ 0.47, see shelf* consts).
     // `driveMakeup` is flat, so it is equivalent anywhere between Stage 1 and the clipper; it sits
@@ -888,6 +908,11 @@ private:
     // with the same ceilings but their own signals, so they need their own (x₋₁, F(x₋₁)) pair.
     inline double railSaturateADAA (double x, double& xPrev, double& fPrev) const noexcept
     {
+        if (! adaaEnabled) // see setAdaaEnabled — fPrev is re-based on re-enable, not maintained here
+        {
+            xPrev = x;
+            return railSaturate (x);
+        }
         const double Fx = railAntideriv (x);
         const double dx = x - xPrev;
         double y;
@@ -943,6 +968,11 @@ private:
     // rail knee is treated.
     inline double sw1CeilADAA (double x) noexcept
     {
+        if (! adaaEnabled) // see setAdaaEnabled
+        {
+            sw1CeilXprev = x;
+            return sw1Ceil (x);
+        }
         const double Fx = sw1CeilAntideriv (x);
         const double dx = x - sw1CeilXprev;
         const double y = (std::abs (dx) < 1.0e-6) ? sw1Ceil (0.5 * (x + sw1CeilXprev))
@@ -1080,12 +1110,32 @@ private:
         gHpX1 = nodeG;
         gHpY1 = gHp;
 
-        const double gate = std::tanh (4.0 * clipEnv);
+        // In BOOST this band's coefficient is exactly zero — `asymBoost` was retired to 0 by P2 (the
+        // rails supply Boost's mid/high evens) while `asymLowBoost` = −0.017 keeps the LOW path live.
+        // So `k` is 0.0 and the injection term is dead weight. `gate` feeds nothing but `k`, and has
+        // no state, so hoisting the coefficient out and skipping the gate tanh + the multiply-add is
+        // **byte-identical by construction** — verified over every mode × drive × tone × channel AND
+        // across mid-stream mode changes. Worth −6 ns/sample of a 114 ns Boost channel at 8x
+        // (analysis/perf_split_probe.cpp); OD/Dist take the branch and are unchanged.
+        //
+        // ⚠️ `soft` and `meanSq` deliberately STAY OUTSIDE the branch, and that is the whole reason
+        // this saves 6 ns and not 12. `meanSq` is a 50 ms running mean of soft², read only when the
+        // coefficient is live — so in Boost its only job is to be WARM if the mode later switches.
+        // Skipping it is not free: the first Boost→OD sample diverges (measured — the dump probe's
+        // only differing byte), and the term it lands in is O(0.03 V), i.e. ~−31 dB, swelling over
+        // 50 ms rather than clicking. The remaining 6 ns costs one tanh of mode-switch state
+        // coherence and is a judged change, not a free one. Same reasoning keeps the gHp high-pass
+        // above unconditional (it is a signal-history filter — cf. odLowShelf's always-running shelf).
+        const double kMid = sw1On ? asymOD : (sw2On ? asymDist : asymBoost);
         const double soft = std::tanh (asymDriveScale * gHp);
-        const double k = (sw1On ? asymOD : (sw2On ? asymDist : asymBoost)) * gate;
-
         meanSq = meanCoeff * meanSq + (1.0 - meanCoeff) * soft * soft;
-        double out = x + k * (soft * soft - meanSq); // mid/high band — DC-free 2f injection
+
+        double out = x;
+        if (kMid != 0.0)
+        {
+            const double k = kMid * std::tanh (4.0 * clipEnv);
+            out = x + k * (soft * soft - meanSq); // mid/high band — DC-free 2f injection
+        }
 
         // Low-frequency band: source the H2 from a low-pass of the clip output x (clamped only when
         // clipping → self-gating, clean stays clean). Catches low notes that clip but whose nodeG is
@@ -1121,6 +1171,7 @@ private:
     bool sw1On { true };  // default Overdrive (SW-1 ON, SW-2 OFF)
     bool sw2On { false };
     bool hiGainStage1 { false };
+    bool adaaEnabled { true }; // production default; see setAdaaEnabled
 
     double railV { railV9V };                       // MEAN op-amp ceiling (V); 9 V default = 3.3 V
     // Per-side ceiling / knee — the two differ by ±railAsymV (see the constant). setSupplyVoltage

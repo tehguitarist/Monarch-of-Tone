@@ -622,6 +622,72 @@ clang-format -i src/**/*.{cpp,h}
     first** (`OSFidelity` with the early-out, vs without), **then re-fit `warp*`, then judge on the
     44-capture null** — not on FR, per the standing rule that FR generates the hypothesis and the
     null decides. Do not ship the early-out as "just an optimisation": it is a voicing change.
+  - **✅ Step 2 MEASURED (2026-07-30). Where the per-sample CPU actually is, one lever shipped free,
+    and the biggest-looking lever KILLED on measurement.** Method: `analysis/perf_split_probe.cpp`
+    built against patched-header variants (the `p9_ceiling_fit` pattern — ~1 s per arm), run
+    back-to-back idle, ≥2 passes, baseline reproducing to ~1 %. Per-sample cost at 8x, one pedal
+    channel: Stage 1 WDF **18.0**, drive/warp/HF shelves **3.4**, **IC_A rail-sat 22.3** (≈18 of it
+    ADAA), WDF clip solve + DC block 7/29/26, IC_B rail + `sw1Ceil` ADAA 7/19/6.5,
+    **`injectEvenHarmonic` 27.6/40/36**, `odLowShelf` 1.5/7.5/1.5, `processPost` 27 (base rate) →
+    channel totals **114 / 166 / 141 ns** (Boost/OD/Dist).
+    - **The headline is where the money goes: the two EMPIRICAL correction blocks cost more than
+      every real circuit solve combined.** In Boost, `injectEvenHarmonic` (27.6) + ADAA overhead (25)
+      = 52.6 ns against 23 ns for Stage 1 + Stage 2. IC_A's rail-sat — added by P9, documented inert
+      (44/44 captures within ±0.02 dB) — costs **more than Stage 1 itself**.
+    - **✅ Shipped: the zero-coefficient injection branch.** `asymBoost` is a compile-time 0 (P2 moved
+      Boost's mid/high evens to the rails) while `asymLowBoost` = −0.017 keeps the low path live, so
+      in Boost the mid/high term was computing `tanh` and multiplying by literal 0.0. Hoisting the
+      coefficient out and skipping the gate tanh + multiply-add is **byte-identical, verified by
+      `cmp` on full-precision dumps over 72 configs (2 channels × 3 modes × 4 drives × 3 tones) plus
+      mid-stream mode changes**. Worth **−6.9 ns of Boost's 44 ns clip span (−16 %), −4 % of the
+      channel**; OD/Dist unchanged. Nine gates + all six ctest gates PASS.
+      - **The other half is NOT free, and the dump probe is what proved it.** Skipping `soft`/`meanSq`
+        too doubles the saving to −12 ns, but `meanSq` is a 50 ms running mean read only when the
+        coefficient is live — so in Boost its only job is to be **warm for a later mode switch**. The
+        first `cmp` failed at exactly one byte: the first sample of the OD segment after a Boost→OD
+        switch. The term it lands in is O(0.03 V) ≈ −31 dB, swelling over 50 ms rather than clicking.
+        **Rule: "multiplied by zero" is not the same as "dead" when the branch also maintains state
+        another mode reads.** Test mid-stream mode changes, not just steady-state renders per mode.
+    - **❌ KILLED: rate-gating ADAA (the 18–22 % lever).** ADAA and oversampling look like two ways to
+      buy the same thing, so "keep it at 1x/2x, drop it at 4x/8x" was the obvious 22 %. Measured with
+      `OSFidelity` (c1) — new section, new `setAdaaEnabled` A/B hook on the channel and processor —
+      ADAA is worth **33.3 / 30.8 / 45.1 / 45.9 dB of alias suppression at 1x / 2x / 4x / 8x.**
+      Oversampling does not subsume it at any factor, because at hard clip the rail knee's series
+      reaches far past the OS Nyquist. Dropped permanently; dsp.md's "in addition to oversampling" was
+      right and is now a number.
+      - **⚠️ And the first version of this measurement said the OPPOSITE — 0.22 dB at 1x, nothing at
+        4x/8x — because the metric was floor-limited.** `OSFidelity` (b)'s broadband harmonic-vs-alias
+        residual moves only −47.6 → −48.8 dB from 1x to 8x, so it is dominated by things that are not
+        aliasing and cannot resolve a lever that acts on aliasing. Fixed by summing **named fold bins**
+        (9 kHz into 48 k → harmonics 3–7 fold to 3/6/12/15/21 kHz, none coinciding with 9 or 18 k), and
+        the new metric self-validates: alias-on falls 37 dB across the OS range. **Rule: before reading
+        a difference off a metric, check the metric responds to the axis you are asking about** — a
+        floor-limited aggregate reads as "no effect" and is indistinguishable from a real null result.
+        Same family as P4's marginalisation trap, one level lower: not the wrong aggregation, the wrong
+        **instrument sensitivity**.
+    - **⚠️ The droop is REAL, is 4 stages deep, and `warp*` has mostly been correcting it — not warp.**
+      `OSFidelity` (c2), small signal (rails never engage, so only the midpoint filter is left):
+      ADAA-off minus ADAA-on at 16 kHz is **+24.08 / +5.00 / +1.20 / +0.30 dB at 1x / 2x / 4x / 8x**,
+      which is **exactly 4.00× the per-stage arithmetic at every rate** — and 4 = **2 op-amp ceilings
+      × 2 series pedal channels** (6 in OD, which has `sw1Ceil` too). So the mechanism is confirmed,
+      not merely plausible. Against (a)'s total 1x deficit, **12.04 of the 13.12 dB at 12 kHz and
+      24.08 of the 32.52 at 16 kHz is ADAA, not bilinear warp** — correcting the shipped attribution
+      in dsp.md. **At 2x the droop (5.00 dB) EXCEEDS the net 2x-vs-8x deviation (−3.51 dB)**, i.e.
+      `warp*` is over-correcting to cover it, so the early-out at 2x without a refit over-brightens
+      16 kHz by ~5 dB. **That refit budget, per rate, is the number step 2 was waiting for** — the
+      early-out is now unblocked and the order stands: early-out → refit `warp*` **and** `hfTrim`
+      together (v1.5 step 1 under-cut `hfTrim`; P7's rule, sixth instance) → judge on the 44-capture
+      null.
+    - **Still open, both judged changes rather than free ones:** a rational `fastTanh` in
+      `injectEvenHarmonic`/`odLowShelf` (measured **−15 / −16 / −14 ns**, i.e. −10…−13 %, on a fitted
+      −40 dBc empirical term — decide on the null), and `processPre` → base rate (18 ns ×OS, needs the
+      drive-dependent prewarp). **Do NOT expect a plugin-level saving equal to the span arithmetic** —
+      the oversampler's own FIR is unchanged, which is why v1.5 step 1 delivered 20 % against a
+      predicted 24 %. Size on `PerfBenchmark`, idle, both arms.
+    - **No HQ/Eco button, and the measurements now say so twice.** v1.1 rejected the diode-quality
+      lever; step 2 rejects the ADAA lever. What is left is either free (shipped above), a voicing
+      decision to be judged on the null (not a user control), or the OS factor — which is already two
+      controls. The one thing that changed: 4x/8x are not overpaying for antialiasing after all.
 
 ---
 

@@ -45,6 +45,19 @@ public:
 
     juce::AudioProcessorValueTreeState apvts;
 
+    /** ADAA on the soft-ceiling maps, all four channel instances. Production leaves this ON at every
+        oversampling factor; it is exposed so OSFidelity section (c) can A/B it against the real
+        oversampler, which is the only way to ask whether the 4x/8x decimation filter already removes
+        what ADAA removes. See MonarchChannel::setAdaaEnabled for the CPU figures at stake. */
+    void setAdaaEnabled (bool on) noexcept
+    {
+        for (auto& s : strips)
+        {
+            s.yellow.setAdaaEnabled (on);
+            s.red.setAdaaEnabled (on);
+        }
+    }
+
     // Meter accessors for the UI timer (message thread). ch 0 = L, 1 = R.
     float getInputLevel (int ch) const noexcept { return (ch == 0 ? inputLevelL : inputLevelR).load(); }
     float getOutputLevel (int ch) const noexcept { return (ch == 0 ? outputLevelL : outputLevelR).load(); }
