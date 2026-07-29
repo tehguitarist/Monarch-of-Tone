@@ -294,6 +294,63 @@ next step is the asymmetric diode pair (route 3 in `analysis/FR_THD_AUDIT.md` P3
 **Still true: do not raise the H2 injection to chase H4/H6** — that re-creates the LF overshoot P3
 removed. Raise the knee, then re-level.
 
+## SW-1 output ceiling (`MonarchChannel::sw1Ceil*`) — v1.4 P9 step 3, 2026-07-29
+
+**A symmetric soft ceiling on pin7, applied INSIDE the `sw1On` branch of `processClip`** — so Boost
+and Distortion are byte-identical by construction (same discipline as `odLowShelf`), verified on all
+30 of their captures.
+
+```
+sw1CeilV = 1.6 V (ceiling) | sw1CeilKneeV = 0.5 V (identity below this) | sw1CeilEnabled derived
+```
+
+Identity below the knee, then a tanh approach to the ceiling — the **same map as `railSaturate`**, so
+`sw1CeilAntideriv` has the same form and it is ADAA'd with its own state pair
+(`sw1CeilXprev`/`sw1CeilFprev`, reset alongside the rails'). Symmetric, because the diode network is
+symmetric and OD's even series is `injectEvenHarmonic`'s job — an asymmetry here would double-count.
+It sits **before** the rail-sat: in OD it is the dominant ceiling, which is exactly why the rails
+could never supply this (the feedback clipper holds pin7 far below them).
+
+**What it models.** The real pedal's Overdrive output *saturates* with input level and the model's
+never did: above the diode clamp, pin7 ≈ `Vf + i_in·R11`, and that `R11/R9` = 0.68 residual slope
+keeps it climbing without bound. Measured on 1 kHz level steps the pedal rose ~4.0–6.1 dB from −30 to
+−3 dBFS where the plugin rose 7.3–8.5 — 2.4–3.9 dB of missing compression, at every drive, on two
+independent signal families (`p9_od_compression.py comp` and `decay`). **Empirical**, and only after
+tracing was exhausted (P9 step 2 fixed the one real topology bug — the parallel strings' `Is` — which
+moved the clamp 54 mV and left the shape untouched).
+
+**R11 was ruled out on the schematics, not assumed.** The fitted ceiling landing at ~1.6 V ≈ the
+diode clamp is precisely what a much smaller series R would produce on its own, and `R11 = 1.5 k`
+scores nearly as well with **no** re-levelling (`p9_ceiling_fit.py r11`: comp rms 1.378 → 0.383).
+Both sources refuse it — one shared **6k8** feeds the whole network (Theseus R8 ≡ matsumin R11) — so
+6.8 k stands and the empirical ceiling is what is left. (The matsumin BMP, previously recorded as
+unopenable, converts with `sips -s format png`; it now independently confirms this topology.)
+
+> **The rule this adds: prove a clip-path nonlinearity is ADMISSIBLE before fitting it.**
+> `p9_ceiling_fit.py static`. A memoryless map on pin7 imposes ONE level→level relation shared by
+> every drive, pinned only up to a per-drive offset. Measured pairwise on the **absolute** pin7 level
+> it holds to **0.31 dB rms over G2–G7**, degrades to 1.4 dB with G8/G10 in, and the residual **grows
+> monotonically with the drive gap** — a second, drive-keyed error, not noise. So the **fit window
+> was G2–G7 before any fitting** and G10's cost was predicted rather than discovered. Note also that
+> a self-anchored objective is **blind to overall level**: watch the harness's `dG` column, or a
+> candidate will quietly re-level the mode.
+
+**Result (all 44 captures):** OD comp-curve rms over G2–G7 **1.33 → 0.40 dB** (bias +0.87 → −0.25,
+worst cell 3.94 → 1.00), better at every drive G2–G8; `decay_1k` attack error G2 +1.38 → −0.20,
+G6 +3.12 → +0.49 — the instrument it was *not* fitted to. Headline null **median −22.9 → −23.1 dB**,
+G5 T5 OD **−23.2 → −24.4**, worst G2–G7 capture −19.6 → −21.9; 13 deeper, 30 byte-identical,
+1 shallower. Nine gates PASS.
+
+> **⚠️ Cost: G10 over-corrects, structurally.** Its comp error flips sign (+2.25 → −2.83 dB) and its
+> driven-sweep nulls lose 1.0–2.0 dB; G10 T2 OD is now the set's worst capture (−8.6). The pedal's
+> own OD compresses *less* at G10 than at G7 while a level-keyed ceiling bites *more* there, because
+> pin7 is higher — wrong-signed by construction. The penalty is **identical at every knee** (so it is
+> set by the ceiling voltage, not tunable on the knee axis) and a 1.8 V ceiling halves it but loses on
+> both the fit window and the null. **Do not chase it with a drive-keyed ceiling** — that puts a
+> second knob-keyed instrument in the clip path (P6's rule in reverse). It is the same G8–G10
+> drive-keyed residual as `driveMakeup`'s 6.0 dB cap. IMD moves OD-only and both ways (SMPTE worst
+> +1.64 dB at G10 T8, CCIF −1.07…+2.17), median 0.00.
+
 ## OD clip-depth-gated low-mid restoration (`MonarchChannel::odLowShelf`)
 
 Farina `linear_tf` audit vs the captures (`analysis/mid_eq_audit.py`) found the **Overdrive channel

@@ -301,10 +301,43 @@ clang-format -i src/**/*.{cpp,h}
         monotonically −30→−3 dBFS at every drive, same shape as before. `Is`/`n_eff` together
         confirmed **not** to reproduce the turnover, as suspected. Tracing is now exhausted on this
         branch too (last untried topology lead) — **gate for step 3 is open.**
-      - **Next:** (3) fit the ceiling empirically as a soft limiter on the SW-1 path, judged on the
-        compression curves **and** the null — the standing "depart from schematic once tracing is
-        exhausted" authorization, now actually triggered. **Do not use a linear shelf — a shelf
-        cannot make a curve turn over.**
+      - **Step 3 done (2026-07-29) — ✅ P9's mechanism is CLOSED for G2–G7.** `MonarchChannel::sw1Ceil*`
+        — a symmetric soft ceiling on **pin7 inside the `sw1On` branch only** (`sw1CeilV` = 1.6 V,
+        `sw1CeilKneeV` = 0.5 V; identity below the knee, then a tanh approach, same map + ADAA form
+        as `railSaturate` with its own state pair). Boost/Distortion **byte-identical by
+        construction**, verified on all 30 of their captures.
+        - **The instrument was proved admissible BEFORE being fitted** (`p9_ceiling_fit.py static`)
+          — the transferable part. A memoryless map on pin7 imposes ONE level→level relation shared
+          by every drive, up to a per-drive offset. Measured pairwise on the **absolute** pin7 level
+          it holds to **0.31 dB rms over G2–G7**, degrades to 1.4 dB once G8/G10 are in, and the
+          residual **grows monotonically with the drive gap** — a second, drive-keyed error, not
+          noise. So the **fit window was set to G2–G7 up front** and G10's cost was predicted.
+        - **A physics fix was genuinely in reach and was checked, not assumed.** The best ceiling
+          landing at ~1.6 V ≈ the diode clamp is exactly what a smaller series R would do on its own
+          (pin7 climbs only because of `R11/R9` = 0.68 above the clamp), and **R11 = 1.5 k scores
+          nearly as well with no re-levelling**. Both schematics refuse it — one shared **6k8** feeds
+          the whole network (Theseus R8 ≡ matsumin R11) — so 6.8 k stands. **The matsumin BMP is
+          readable after all** (`sips -s format png`); P9 had recorded it as unopenable, which had
+          left its values relayed rather than verified. That caveat is retired.
+        - **Result:** OD comp-curve rms over G2–G7 **1.33 → 0.40 dB** (bias +0.87 → −0.25, worst cell
+          3.94 → 1.00), better at **every** drive G2–G8; confirmed on the instrument it was *not*
+          fitted to (`decay_1k` attack error G2 +1.38 → −0.20, G6 +3.12 → +0.49). Headline null
+          **median −22.9 → −23.1 dB**, G5 T5 OD **−23.2 → −24.4**, worst G2–G7 capture **−19.6 →
+          −21.9**. 13 deeper, 30 byte-identical, 1 shallower. Nine gates PASS.
+        - **⚠️ Cost, and it is structural: G10 over-corrects** (comp error flips +2.25 → −2.83 dB;
+          driven-sweep nulls lose 1.0–2.0 dB; G10 T2 OD is now the set's worst at −8.6). The pedal's
+          own OD compresses *less* at G10 than at G7 while a level-keyed ceiling bites *more* there —
+          wrong-signed by construction. The penalty is **identical at every knee**, so it is set by
+          the ceiling voltage and cannot be tuned out; ceiling 1.8 V halves it but loses on both the
+          fit window and the null. **Do not chase it with a drive-keyed ceiling** (P6's rule in
+          reverse). IMD moves OD-only and both ways (SMPTE worst +1.64, CCIF −1.07…+2.17).
+      - **What's left of P9 is G8–G10 only, and it is the SAME defect P6 and P10 have open** —
+        `driveMakeup`'s 6.0 dB cap against a measured 6.8 dB G10 need. One open defect seen from
+        three sides, not three defects.
+      - **Harness trap fixed:** `p9_od_compression.py` defaulted to its own private render dir
+        (`/tmp/monarch_renders_p9`) while everything else uses `/tmp/monarch_renders`, so it
+        **reported step 3 as "no change"** on the first run. Now shared. Same class as P8's
+        two-naming-conventions trap: **never give a harness its own render dir.**
     - **P10: the G8→G10 Boost discontinuity — ⚠️ PREMISE WITHDRAWN by P7 (2026-07-29).** The
       "+4.9 dB tilt, clean sweep, 3/3 tones" is measured where the pedal reads **14.76 %** THD and
       the plugin 10.45 % — not a linear-EQ measurement at all. Something at G10 is still real (its
@@ -325,7 +358,15 @@ clang-format -i src/**/*.{cpp,h}
     expose the underlying defect, `seesaw` collapses it to the 508 Hz pivot, `fit` refits them
     jointly, `--base pre-p7` re-reads a pre-P7 JSON), **`analysis/offline_null_probe.py`** (score an
     EQ hypothesis on the arbiter without rebuilding — `transfer` gives complex pedal/plugin
-    magnitude **and phase**, `shelf` fits on the complex residual, `null` re-nulls the kept renders).
+    magnitude **and phase**, `shelf` fits on the complex residual, `null` re-nulls the kept renders),
+    **`analysis/p9_ceiling_fit.py`** + **`analysis/p9_pin7_probe.cpp`** (P9 step 3 — `static` is the
+    **admissibility** test to run *before* fitting a clip-path nonlinearity, `r11` asks whether the
+    defect is a component value instead, `fit`/`probe` sweep the ceiling. The probe includes the DSP
+    headers ONLY, so a candidate is a **~1 s** recompile of the real `processClip` instead of a
+    plugin rebuild + 44-capture render; watch its `dG` column, because a self-anchored objective
+    cannot see a candidate re-levelling the whole mode).
+    **Every `p9_*` view reads `/tmp/monarch_renders`** — the shared dir all the other harnesses use;
+    `p9_od_compression.py` had its own and silently read a stale vintage (fixed in P9 step 3).
 
 ---
 
@@ -339,18 +380,22 @@ preset browser. Supply-voltage mod (9/12/18V) and rail-saturation ADAA are in. L
 engineering: CI/CD (`.github/workflows/`), cross-platform VST3, and per-platform installers
 (`installer/`) — see README.
 
-**Calibration result (Step 11, real-pedal A/B; refreshed v1.4 P9 step 2, 2026-07-29):** the plugin nulls
-against 44 NAM captures (drive G2–G10, tone T2–T8, Clean/OD/Dist) at **median −22.9 dB**, and
-is at **−19.6 dB or better on every capture from G2 to G7** (worst G6 T5 OD). (Was −6.6 to −23.2,
+**Calibration result (Step 11, real-pedal A/B; refreshed v1.4 P9 step 3, 2026-07-29):** the plugin nulls
+against 44 NAM captures (drive G2–G10, tone T2–T8, Clean/OD/Dist) at **median −23.1 dB**, and
+is at **−21.9 dB or better on every capture from G2 to G7** (worst G4 T5 Dist / G6 T5 OD / G7 T5 Dist,
+all −21.9). (Was −6.6 to −23.2,
 median −16.4→−16.6 after P2/P6. **P7** deepened the mean 2.46 dB and the median 4.9 dB — 24 captures
 deeper by up to 9.1 dB, concentrated at G2–G4 where the double-counted EQ correction lived, 2 shallower
 by ≤0.9 dB, and 18 byte-identical because both refitted instruments are exactly zero at and above drive
 0.55. **P8** then deepened mean and median a further 1.05 dB — 38 of 44 deeper by up to 3.4 dB, 6
 shallower by ≤0.2, and it is the first change to move the **G10 floor**, taking the set's worst capture
 from −6.6 to −8.7 dB. **P9 step 2** then deepened every OD capture by up to 1.1 dB — median −22.6 →
-−22.9 — by fixing the SW-1 diode network's parallel-string `Is` (Clean/Dist byte-identical); see the
+−22.9 — by fixing the SW-1 diode network's parallel-string `Is` (Clean/Dist byte-identical). **P9
+step 3** then added the SW-1 output ceiling — median **−22.9 → −23.1**, 13 deeper, 30 byte-identical
+(Boost/Dist untouched by construction), 1 shallower, and the worst G2–G7 capture −19.6 → −21.9; its
+one real cost is that **G10 OD now over-corrects** and is the set's worst capture at −8.6. See the
 P9 roadmap entry.) Best
-per-mode null at the labelled mid-gain settings (G5 T5): Clean/Boost −23.3, OD −23.2, Dist −22.7 dB.
+per-mode null at the labelled mid-gain settings (G5 T5): Clean/Boost −23.3, OD **−24.4**, Dist −22.7 dB.
 Excellent to mid gain; shallower only at very high drive (G8–G10) — an
 accepted device-physics / capture-aliasing residual, not a topology error (every Stage-1 value +
 topology re-traced exact against the Theseus schematic). The 44 captures (`analysis/pedal_export2/`,
@@ -526,14 +571,17 @@ linear WDF now runs at the OS rate too (relevant to the v1.1 perf pass).
   (−3.23…+2.95 → −2.12…+0.59 dB). What is left is genuinely stuck: an 85 Hz first-order shelf deep
   enough to reach 20 Hz overshoots 80 Hz, and below ~32 Hz the pedal's phase *leads*, so no
   minimum-phase filter matches it at all. See `FR_THD_AUDIT.md` P1/P8.
-- **OD compresses ~3–4 dB lighter than the real pedal at hot input** (Distortion compression good,
-  Δ~2 dB). **Re-characterised by P9 (2026-07-29): it is not a flat offset and not a spectral shape
-  — it is a missing CEILING.** On 1 kHz level steps the pedal's OD output *turns over* (G5:
-  +3.96 dB at −6 dBFS, +3.93 at −3) while the plugin's is still climbing (+5.94 → +7.08). Boost and
-  Distortion match, because their ceilings are modelled. The "tilt at every drive" and the THD
-  roll-off previously filed here are the **same defect seen through FR**, not separate residuals —
-  both were measured on OD's clean sweep, which carries 1.4–6 % THD and is not a linear instrument.
-  Open, with an agreed order of attack; see the P9 roadmap entry.
+- ~~**OD compresses ~3–4 dB lighter than the real pedal at hot input**~~ — **✅ FIXED for G2–G7 by
+  v1.4 P9 step 3 (2026-07-29)**, and it was never a flat offset or a spectral shape: it was a
+  missing **CEILING**, now supplied by `MonarchChannel::sw1Ceil*` on pin7 in OD. OD comp-curve rms
+  over G2–G7 1.33 → 0.40 dB, better at every drive G2–G8. The "tilt at every drive" and the THD
+  roll-off once filed here were the **same defect seen through FR** (both measured on OD's clean
+  sweep, which carries 1.4–6 % THD and is not a linear instrument) — so they are gone too.
+  **What remains is G8–G10, where the ceiling now OVER-corrects** (G10 comp error +2.25 → −2.83 dB,
+  driven-sweep nulls 1.0–2.0 dB shallower, G10 T2 OD the set's worst at −8.6): the pedal's own OD
+  compresses *less* at G10 than at G7 while a level-keyed ceiling bites *more* there, so it is
+  wrong-signed by construction and not fixable with that instrument. This is the **same G8–G10
+  drive-keyed residual** as P6's `driveMakeup` cap and P10, not a separate one. See the P9 entry.
 - A small genuine HF-harmonic difference >8 kHz (tone-stage rolloff); the captures' own 4–6 kHz
   energy is partly NAM aliasing (the plugin's 8× anti-aliased clip is the more-correct version).
 - Per-mode capture levels are **normalized** (Boost/OD/Dist sit at the same level, physically

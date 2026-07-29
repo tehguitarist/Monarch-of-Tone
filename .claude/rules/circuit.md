@@ -33,7 +33,7 @@ the model's value/topology is a deliberate choice over a source, the decisions l
 | Stage 2 input R (R9) | 10k | Stage 2 | gain = −R10/R9 = −22 |
 | Stage 2 feedback R (R10) | 220k | Stage 2 | always present |
 | Soft-clip diodes (SW-1) | MA856 ×4 | SW-1 | `[D4+D5] ∥ [D2+D3]` back-to-back series strings ≡ **1× DiodePairT, n_eff = 2·n_MA856 ≈ 3.024, Is = 2·Is_MA856** (parallel strings double Is; v1.4 P9 step 2), Vf≈1.58V |
-| SW-1 branch series R (R11) | 6.8k | SW-1 | series w/ diode network; branch ∥ R10, gated by SW-1 |
+| SW-1 branch series R (R11) | 6.8k | SW-1 | series w/ diode network (ONE shared resistor, not per string); branch ∥ R10, gated by SW-1. **Re-confirmed on BOTH schematics v1.4 P9 step 3** — Theseus R8 ≡ matsumin R11 — after a fit preferred ~1.5k (see §2) |
 | Hard-clip diodes (SW-2) | 1S1588 ×2 | SW-2 | true antiparallel pair, **1× DiodePairT**; shunt node_HC→BIAS; Vf≈0.584V |
 | Stage 2 output R (R12) | 1k | SW-2/Tone | always in path: pin7 → R12 → node_HC → TONE top terminal |
 | TONE pot | 25kB linear | Tone | 3-terminal tap (R-type adaptor at wiper): top=node_HC, bottom→C8→BIAS, wiper→R13 |
@@ -57,6 +57,18 @@ the model's value/topology is a deliberate choice over a source, the decisions l
 - **Soft-clip diodes MA856** (Vf≈0.82V single). The matsumin 1N914+1N4004 pairing is a DIY
   substitution artifact, not the original — disregard. BAS33 (Theseus) is a close cross-check.
 - **Hard-clip diodes 1S1588 = 1N914 = 1N4148** — identical Shockley parameters.
+- **R11 = 6.8k is CONFIRMED, and a fit that wanted 1.5k was refused (v1.4 P9 step 3, 2026-07-29).**
+  OD's missing output saturation would be largely explained by a much smaller series R in the diode
+  branch — above the clamp pin7 ≈ Vf + i_in·R11, so that slope is the whole reason it keeps climbing,
+  and `analysis/p9_ceiling_fit.py r11` shows R11 = 1.5k takes the compression-curve error 1.378 →
+  0.383 dB with no level change. It was checked instead of adopted, and **both schematics show one
+  shared 6k8 feeding the whole 2×2 network** (Theseus R8, matsumin R11; R10/R7 unswitched, SW-1
+  gating only the diode branch). So the model keeps 6.8k and the shortfall is corrected empirically
+  at the output instead (`MonarchChannel::sw1Ceil*`, dsp.md).
+  - **The matsumin BMP is readable** — it has no file extension, which is why an earlier session
+    recorded it as unopenable and relayed its values from this file rather than verifying them.
+    `sips -s format png KoT_schematic_matsumin --out /tmp/m.png` converts it. It independently
+    confirms the Stage-2 feedback topology; that caveat is retired.
 - **Stage-1 floor: Yellow R2∥R3 ≈ 990Ω, Red ≈ 17.7k (tamed Hi-Gain).** Stock (Yellow) runs the low
   ~1k floor → nearly-clean minimum. The literal Theseus Hi-Gain mod opens SW1B → floor = R2 = 100k,
   but that was measured as too hot (its minimum already very driven). With no Red NAM captures to

@@ -91,7 +91,13 @@ import gen_test_signal as gts  # noqa: E402
 import offline_null_probe as ONP  # noqa: E402
 
 MODES = ("Boost", "Overdrive", "Distortion")
-DEFAULT_RENDERS = "/tmp/monarch_renders_p9"
+# The SAME directory FR_THD_AUDIT.md tells you to render into and every other harness reads. This
+# defaulted to a private "/tmp/monarch_renders_p9" until v1.4 P9 step 3, which meant a fresh
+# `comprehensive_report.py --keep-renders /tmp/monarch_renders` left this script reading whatever
+# vintage happened to be in its own directory — it reported a change as "no change" exactly once
+# (2026-07-29) before that was caught. Same failure mode as the two-naming-conventions trap in
+# offline_null_probe.load_pairs, one directory over: do not give a harness its own render dir.
+DEFAULT_RENDERS = "/tmp/monarch_renders"
 
 # Bands. 80 Hz up because sub-64 Hz is P1/P8's phase-limited problem; 5120 Hz because the captures
 # are untrustworthy above ~8 kHz and Farina's THD is H2-only past ~6.3 kHz (P0).

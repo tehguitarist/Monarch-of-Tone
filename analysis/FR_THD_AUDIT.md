@@ -1377,6 +1377,78 @@ before this fix. Tracing is exhausted on this branch too (this was the last untr
 lead) — **the gate for step 3 (empirical soft limiter, fit on the compression curves and the null)
 is now open**, per the standing "depart from schematic once tracing is exhausted" authorization.
 
+#### P9 step 3 — the SW-1 output ceiling (✅ done, 2026-07-29): fitted, and it closes G2–G7
+
+**Shipped:** `MonarchChannel::sw1Ceil*` — a symmetric soft ceiling on **pin7, inside the `sw1On`
+branch only**, `sw1CeilV` = **1.6 V** with `sw1CeilKneeV` = **0.5 V**: identity below the knee, then
+a tanh approach to the ceiling. Same map as `railSaturate`, so the same antiderivative form, with
+its own ADAA state pair (`sw1CeilXprev`/`sw1CeilFprev`). Because it lives inside the `sw1On` branch,
+**Boost and Distortion are byte-identical by construction** — verified on all 30 of their captures.
+
+**The instrument was tested for admissibility BEFORE it was fitted, and that is the transferable
+part.** `analysis/p9_ceiling_fit.py static`. A memoryless map on pin7 imposes ONE level→level
+relation shared by every drive, pinned only up to a per-drive offset (the captures are
+level-normalised). Tested pairwise on the **absolute** pin7 level — measured, by a new standalone
+probe that runs the real `MonarchChannel` — every drive's curve is that one curve to within
+**0.31 dB rms over G2–G7**, so a ceiling is admissible there. Including G8/G10 it degrades to
+1.4 dB, and the residual **grows monotonically with the drive gap** (0.20 dB at Δ0.1 → 1.08 at
+Δ0.7), which is the signature of a second, drive-keyed error rather than noise. So the fit window
+was set to **G2–G7 before any fitting**, and the G10 cost below was predicted, not discovered.
+
+**R11 was ruled out first, and this is where a physics fix was genuinely in reach.** The best
+ceiling landed at ~1.6 V — essentially the diode clamp itself. That is exactly what a much smaller
+series resistance would produce on its own: above the clamp the model's pin7 is `Vf + i_in·R11`, so
+the whole reason it climbs is the `R11/R9` = 0.68 residual slope, and a bare diode's voltage grows
+only logarithmically. `p9_ceiling_fit.py r11` confirms it numerically — **R11 = 1.5 k takes the comp
+rms 1.378 → 0.383 with dG −0.04 dB**, i.e. nearly the fitted ceiling's benefit, one component value,
+and no re-levelling. So it was taken back to the schematics rather than adopted, and **both refuse
+it**: one shared **6k8** feeds the whole diode network (Theseus **R8**, matsumin **R11**), R10/R7
+unswitched, SW-1 gating only the diode branch. Two independent sources agree → 6.8 k stands.
+> **Also closed here: the matsumin BMP is readable after all.** P9 recorded it as unopenable
+> ("no file extension"), which left every matsumin-side value relayed from circuit.md rather than
+> verified. `sips -s format png` converts it fine. It now independently confirms the Stage-2
+> feedback topology, so that caveat is retired.
+
+**Result — fit window (all 44 captures, `p9 comp`, render path not the probe):**
+
+| OD comp-curve error | rms | bias | worst cell |
+|---|---|---|---|
+| G2–G7 before | 1.33 | +0.87 | 3.94 |
+| G2–G7 **after** | **0.40** | **−0.25** | **1.00** |
+
+Per-drive rms improves at **every** drive G2–G8 (G2 1.05→0.23, G5 1.40→0.28, G7 1.71→0.62,
+G8 1.57→1.17). Confirmed on the instrument it was **not** fitted to — `decay_1k`'s attack-window
+error goes **G2 +1.38 → −0.20, G6 +3.12 → +0.49**. Headline null (`run_validation.py`, all 44):
+**median −22.9 → −23.1 dB**, range −8.6…−25.6; **G5 T5 OD −23.2 → −24.4**; worst capture in
+G2–G7 **−19.6 → −21.9**. On the p2-harness A/B: 13 deeper (to −1.50 dB), 30 byte-identical,
+1 shallower. All nine gates PASS.
+
+**⚠️ The cost, stated plainly: G10 over-corrects, and it is not fixable with this instrument.**
+G10's comp error flips sign (**+2.25 → −2.83 dB** at −3 dBFS) and its driven-sweep nulls lose
+**1.0–2.0 dB**; G10 T2 OD is now the set's worst capture at −8.6. The reason is structural: the
+**pedal's own** Overdrive compresses *less* at G10 (+5.79 dB rise −30→−3) than at G7 (+3.86), while
+a level-keyed ceiling necessarily bites *more* at G10 because pin7 is higher there. Wrong-signed by
+construction. Two things were checked before accepting it: the G10 penalty is **the same at every
+knee** (+1.97/+2.06/+2.13 dB at knee 0.5/0.7/0.9), so it is set by the ceiling *voltage* and cannot
+be tuned away on the knee axis; and raising the ceiling to 1.8 V does halve it but loses on both the
+fit window and the headline null. **Do not chase this with a drive-keyed ceiling** — that would put
+a second knob-keyed instrument in the clip path, which is P6's rule in reverse.
+Also honest: **IMD moves OD-only and both ways** (SMPTE worst +1.64 dB at G10 T8, +1.15 at G8 T5;
+CCIF −1.07 at G3 T5 but +2.17 at G7 T5). Median 0.00 on both, Boost/Dist untouched.
+
+**Net P9 verdict:** the missing-ceiling diagnosis was right and is now fixed where the measurement
+supports a fix. What remains is **G8–G10**, which is the *same* drive-keyed residual P6 left open
+(its `driveMakeup` caps at 6.0 dB against a measured 6.8 dB need at G10) and which P10 is also
+looking at — now visible from a third side. That is one open defect, not three.
+
+**Harness trap caught and fixed on the way:** `p9_od_compression.py` defaulted to its own private
+render directory (`/tmp/monarch_renders_p9`) while this document, `offline_null_probe` and every
+other harness use `/tmp/monarch_renders`. A fresh `comprehensive_report.py --keep-renders` therefore
+left it reading a different vintage, and it **reported this change as "no change"** on its first run
+before that was caught. Now defaulted to the shared directory. Same failure mode as
+`load_pairs`' two-naming-conventions trap (P8), one directory over: **do not give a harness its own
+render dir.**
+
 ### P10 — the G8 → G10 Boost discontinuity  *(open — but the PREMISE is withdrawn, 2026-07-29)*
 
 **Original claim:** G10 Boost reads +4.9 dB of tilt on the clean sweep at all three tone settings
@@ -1468,6 +1540,19 @@ python3 analysis/p9_od_compression.py orders        # per-order deficit — READ
 python3 analysis/p9_od_compression.py tones         # discrete-tone ceiling probe (P9 step 1) — read as a caveat only
 python3 analysis/p9_od_compression.py decay         # decay-envelope ceiling probe (P9 step 1) — THE confirmation
 python3 analysis/p9_od_compression.py gain          # ...the missing unit conversion (~6 min, renders).
+#   NOTE all p9_* views read /tmp/monarch_renders (the dir above). p9_od_compression.py used to
+#   default to its own /tmp/monarch_renders_p9 and so could silently read a different vintage.
+
+# P9 step 3 — the SW-1 ceiling. Iteration is ~1 s: p9_pin7_probe.cpp pulls in the DSP headers only
+# (no JUCE), so `fit` patches MonarchChannel.h, recompiles the probe and scores the REAL processClip.
+python3 analysis/p9_ceiling_fit.py static           # THE admissibility test — run before fitting
+python3 analysis/p9_ceiling_fit.py curves           # the absolute pedal/plugin comp curves behind it
+python3 analysis/p9_ceiling_fit.py r11              # is it a SERIES-RESISTANCE error? (no — schematics)
+python3 analysis/p9_ceiling_fit.py fit --ceils 1.5 1.6 1.7 --knees 0.3 0.5 0.7   # the grid
+python3 analysis/p9_ceiling_fit.py probe --ceil 1.6 --knee 0.5                   # one candidate
+#   Its `dG` column is load-bearing: the comp objective is self-anchored and so CANNOT see a
+#   candidate quietly re-levelling the whole mode. Then take the top few to the arbiter:
+python3 analysis/p2_rail_asym_fit.py --captures all --json cand.json --compare base.json
 #   Its `sens` row is the finding: |d(odd Hn/H1)/d(input dB)| is 0.0-0.5 and sign-unstable in OD
 #   above G5, so `orders` CANNOT be read as dB of drive. Ignore `req` wherever |sens| is small.
 ```

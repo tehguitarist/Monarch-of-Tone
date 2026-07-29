@@ -514,6 +514,72 @@ public:
     static constexpr double odShelfMaxDb = 2.0;     // shelf lift at full clip-depth gate (dB)
     static constexpr double odGateScale = 12.0;     // clipEnv→gate steepness (tanh): engages only under hard clip
 
+    // ---- SW-1 output ceiling (v1.4 P9 step 3, 2026-07-29) — OD's missing saturation -------------
+    // THE DEFECT (FR_THD_AUDIT.md P9): on 1 kHz level steps the real pedal's OVERDRIVE output
+    // saturates and this model's never did — the pedal rises ~4.0–6.1 dB from −30 to −3 dBFS where
+    // the plugin rose 7.3–8.5, i.e. 2.4–3.9 dB of missing compression at the hot end, at EVERY
+    // drive. Confirmed on two independent signal families (synthetic level steps `comp` and
+    // plucked-note decay `decay`) and absent in Boost/Distortion, whose ceilings (the op-amp rails
+    // and the ±0.584 V shunt) are already modelled. OD's soft feedback clipper is the only path
+    // whose output still tracks its input: above the diode clamp, pin7 ≈ Vf + i_in·R11, and that
+    // R11/R9 = 0.68 residual slope keeps the output growing without bound.
+    //
+    // EMPIRICAL, and only after tracing was exhausted (schematic-checker re-traced the whole clip
+    // branch; P9 step 2 found and fixed the one real topology bug — the parallel strings' Is —
+    // which shifted the clamp 54 mV but left the SHAPE untouched). This is the standing "depart
+    // from the schematic once tracing is exhausted" authorization being used.
+    //
+    // WHY A STATIC CEILING IS THE RIGHT INSTRUMENT — measured, not assumed
+    // (`analysis/p9_ceiling_fit.py static`). A memoryless map on pin7 imposes ONE level→level
+    // relation shared by every drive, pinned only up to a per-drive offset. Tested pairwise on the
+    // absolute pin7 level, every drive's curve IS that one curve to within **0.31 dB rms over
+    // G2–G7** — so a ceiling is admissible. It degrades (to 1.4 dB) only when G8/G10 are included,
+    // and the residual grows monotonically with the DRIVE GAP (0.20 dB at Δ0.1 → 1.08 at Δ0.7),
+    // which is the signature of a second, drive-keyed error — P6's `driveMakeup`, whose 6.0 dB cap
+    // is already known to fall ~0.8 dB short of the measured G10 need. So the fit window is
+    // **G2–G7** and the G8–G10 remainder is left to that separate defect, exactly as P7 scoped its
+    // own fit to where its instrument was still valid.
+    //
+    // R11 WAS RULED OUT FIRST, on the primary sources. The ceiling landing at ~1.6 V — essentially
+    // the diode clamp itself — is exactly what a much SMALLER series resistance would produce on
+    // its own (a bare diode's voltage grows only logarithmically with current), and R11 = 1.5 k
+    // scores nearly as well as the fitted ceiling with no re-levelling at all
+    // (`p9_ceiling_fit.py r11`: comp rms 1.378 → 0.383, dG −0.04 dB). That would have been a
+    // component-value fix rather than a new mechanism, so it was checked against the schematics
+    // rather than adopted: BOTH show one shared 6k8 feeding the whole network (Theseus R8,
+    // matsumin R11 — the matsumin BMP had never been opened before because it has no file
+    // extension; it converts fine with `sips`). Two independent sources agree, so 6.8 k stands and
+    // the empirical ceiling is what is left.
+    //
+    // Shape: identity below the knee, then a tanh approach to the ceiling — the same map as
+    // `railSaturate`, so the ADAA antiderivative is the same form (its own state pair, since this
+    // is a different signal). SYMMETRIC: the diode network is symmetric and OD's even series is
+    // `injectEvenHarmonic`'s job, so putting asymmetry here would double-count it.
+    //
+    // The two constants were swept on the comp curves and the top candidates taken to the null.
+    // The objective is BROAD along the ceiling ridge (0.305–0.315 dB rms for knee 0.2–0.5 at
+    // ceiling 1.6), so the knee was NOT ground finer than that: 0.5 is the largest knee that keeps
+    // the full G2–G7 benefit (a bigger knee gives up benefit for no reduction in the G10 cost —
+    // see below — and a smaller one only re-levels OD harder for 0.03 dB). Ceiling 1.8 was tried
+    // too: it halves the G10 damage but loses on both the fit window and the headline null.
+    static constexpr double sw1CeilV = 1.6;     // ceiling on pin7 in OD (V); 0 disables
+    static constexpr double sw1CeilKneeV = 0.5; // level (V) below which the map is exactly identity
+    static constexpr bool sw1CeilEnabled = (sw1CeilV > 0.0 && sw1CeilKneeV < sw1CeilV);
+    // RESULT (all 44 captures; Boost + Distortion byte-identical by construction, verified):
+    // comp-curve rms error over the fit window **1.33 → 0.40 dB**, bias +0.87 → −0.25, worst cell
+    // 3.94 → 1.00; every drive G2–G8 improves. Confirmed on the instrument it was NOT fitted to —
+    // `decay_1k`'s attack-window error goes G2 +1.38 → −0.20, G6 +3.12 → +0.49. Headline null
+    // median −22.9 → −23.1 dB, G5 T5 OD −23.2 → −24.4, worst G2–G7 capture −19.6 → −21.9;
+    // 13 captures deeper (to −1.50 dB), 30 byte-identical, 1 shallower. All nine gates PASS.
+    //
+    // ⚠️ THE COST, stated plainly: **G10 over-corrects.** Its comp error flips sign (+2.25 →
+    // −2.83 dB at −3 dBFS) and its driven-sweep nulls lose 1.0–2.0 dB, because the pedal's OWN
+    // Overdrive compresses LESS at G10 than at G7 while a level-keyed ceiling necessarily bites
+    // MORE there. That is not fixable with this instrument and was predicted before fitting, by
+    // the admissibility test — it is the same G8–G10 drive-keyed residual, now visible from the
+    // other side. The headline still improves because G10's deepest segment is its clean sweep.
+    // IMD also moves OD-only and both ways (SMPTE worst +1.64 dB at G10 T8, CCIF −1.07 to +2.17).
+
     explicit MonarchChannel (bool hiGain = false) : stage1 (hiGain), hiGainStage1 (hiGain) {}
 
     // The WHOLE channel now runs at the OVERSAMPLED rate (PluginProcessor wraps Stage 1, the clip
@@ -575,6 +641,8 @@ public:
         railFprev = 0.0;
         s1RailXprev = 0.0;
         s1RailFprev = 0.0;
+        sw1CeilXprev = 0.0;
+        sw1CeilFprev = 0.0;
         railMean = 0.0;
     }
 
@@ -596,6 +664,8 @@ public:
         railFprev = 0.0;
         s1RailXprev = 0.0;
         s1RailFprev = 0.0;
+        sw1CeilXprev = 0.0;
+        sw1CeilFprev = 0.0;
         railMean = 0.0;
         hsX1 = hsY1 = lsX1 = lsY1 = wsX1 = wsY1 = olX1 = olY1 = htX1 = htY1 = bcX1 = bcX2 = bcY1 = bcY2 = leX1 = leY1 = 0.0;
     }
@@ -671,7 +741,19 @@ public:
     // → V(node_HC). This is the ONLY part that should run at the oversampled rate.
     inline double processClip (double nodeG) noexcept
     {
-        double pin7 = sw1On ? sw1.processSample (nodeG) : stage2.processSample (nodeG);
+        // The SW-1 ceiling lives INSIDE the sw1On branch, so Boost and Distortion are byte-identical
+        // by construction (same discipline as odLowShelf). It sits before the rail-sat because in OD
+        // it is the dominant ceiling — the feedback clipper holds pin7 well below the rails, which is
+        // exactly why the rails could not supply this (see the sw1Ceil* constants).
+        double pin7;
+        if (sw1On)
+        {
+            pin7 = sw1.processSample (nodeG);
+            if constexpr (sw1CeilEnabled)
+                pin7 = sw1CeilADAA (pin7);
+        }
+        else
+            pin7 = stage2.processSample (nodeG);
         pin7 = railSaturateADAA (pin7); // op-amp output ceiling, antialiased (Boost always; Dist via Stage2)
         pin7 = railDcBlock (pin7);      // strip rectified DC before it smears (see railDcTauSeconds)
         const double hc = sw2On ? sw2.processSample (pin7) : pin7;
@@ -774,6 +856,42 @@ private:
             y = (Fx - fPrev) / dx;
         xPrev = x;
         fPrev = Fx;
+        return y;
+    }
+
+    // ---- SW-1 output ceiling: same map/antiderivative form as railSaturate, own parameters -----
+    // See the sw1Ceil* constants. Symmetric, so this map IS odd and its antiderivative even —
+    // simpler than the rails' asymmetric pair.
+    inline double sw1Ceil (double v) const noexcept
+    {
+        const double a = std::abs (v);
+        if (a <= sw1CeilKneeV)
+            return v;
+        const double w = sw1CeilV - sw1CeilKneeV;
+        return std::copysign (sw1CeilKneeV + w * std::tanh ((a - sw1CeilKneeV) / w), v);
+    }
+
+    inline double sw1CeilAntideriv (double v) const noexcept
+    {
+        const double a = std::abs (v);
+        if (a <= sw1CeilKneeV)
+            return 0.5 * a * a;
+        const double w = sw1CeilV - sw1CeilKneeV;
+        const double u = a - sw1CeilKneeV;
+        return 0.5 * sw1CeilKneeV * sw1CeilKneeV + sw1CeilKneeV * u + w * w * logCosh (u / w);
+    }
+
+    // First-order ADAA on the ceiling. It is a NEW nonlinearity in the OD path, so it aliases like
+    // any other; the clip span already runs oversampled and this is in addition, matching how the
+    // rail knee is treated.
+    inline double sw1CeilADAA (double x) noexcept
+    {
+        const double Fx = sw1CeilAntideriv (x);
+        const double dx = x - sw1CeilXprev;
+        const double y = (std::abs (dx) < 1.0e-6) ? sw1Ceil (0.5 * (x + sw1CeilXprev))
+                                                  : (Fx - sw1CeilFprev) / dx;
+        sw1CeilXprev = x;
+        sw1CeilFprev = Fx;
         return y;
     }
 
@@ -958,6 +1076,8 @@ private:
     double railFprev { 0.0 };                       // ADAA state: F(railXprev) (F(0)=0)
     double s1RailXprev { 0.0 };                     // ADAA state for IC_A's ceiling (see processPre)
     double s1RailFprev { 0.0 };
+    double sw1CeilXprev { 0.0 };                    // ADAA state for the SW-1 output ceiling (OD only)
+    double sw1CeilFprev { 0.0 };
     double railMean { 0.0 };                        // running mean removed by railDcBlock
     double railDcCoeff { 0.0 };                     // railDcBlock one-pole coeff (set in prepareClip)
 
