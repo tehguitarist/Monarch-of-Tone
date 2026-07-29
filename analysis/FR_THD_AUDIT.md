@@ -1303,6 +1303,46 @@ of a mis-posed EQ one. Agreed order of attack for the next session:
 **Do not** paper this over with a linear shelf, and the accepted-residuals list must stop calling it
 a flat offset — it is a missing *ceiling*, and a shelf cannot make a curve turn over.
 
+#### P9 step 1 — discrete-tone + decay audit (✅ done, 2026-07-29): the ceiling confirms independently, and a second defect fell out of the same instrument
+
+`p9_od_compression.py decay` (plucked-note decay, `decay_220`/`decay_1k`, a **continuous** natural
+trajectory through the drive range rather than `comp`'s synthetic level steps) reproduces `comp`'s
+finding on a completely different signal: in **Overdrive**, plugin-minus-pedal output level is
+**positive at the loud attack and shrinks toward 0 at the quiet tail, at every drive, growing with
+drive** — e.g. decay_1k G2 +1.38 → 0.00 dB across the 8 windows, G6 +3.12 → 0.00. That is the exact
+shape of "the plugin has no ceiling and the pedal does," now confirmed on a second, unrelated signal
+family. Boost and Distortion mostly stay within ±1.5 dB (i.e. their modelled ceilings hold) at G2–G8.
+
+`p9_od_compression.py tones` (discrete steady tones, −14 dBFS, self-anchored on 82 Hz) is **not
+flat vs frequency** — it rises from ~0 dB at 82 Hz to +1–2 dB by 3–5 kHz at high drive, in **all
+three modes**, not just OD. Read alone this would argue against a broadband ceiling. But it is not a
+competing mechanism: Stage 1's own frequency response feeds more pre-clip level into the clipper at
+higher frequencies, so a level-triggered ceiling reads *frequency-shaped* through it even though the
+ceiling itself is flat — the tones view can't separate "ceiling" from "Stage 1's known shelf" at a
+single input level per tone, which is exactly the limitation `comp`/`decay`'s continuous-level sweep
+was built to avoid. Read `decay`/`comp` as the ceiling evidence; read `tones` only as a caveat.
+
+**New finding, not previously visible: a large, real, dynamics-only anomaly in Boost at G10.**
+`decay_220`/`decay_1k` both show Boost G10 diverging **+5 dB at the attack, decaying back to 0** by
+the tail — nothing like this appears at G2–G8 in Boost, where the modelled rail ceiling holds fine.
+This is exactly the instrument **P10** asked for and didn't have ("a discrete-tone or level-stepped
+measurement" to replace its withdrawn clean-sweep tilt reading) — see P10 below, now updated. Two
+candidate causes, neither investigated yet: `driveMakeup`'s 6.0 dB cap falling short of G10's
+measured +6.8 dB need (P6), or the rail knee not being reached the same way on a transient attack as
+on the steady captures the rail-sat fit was validated against.
+
+**Also visible, smaller and not yet explained:** Distortion's decay delta is *negative* at low-mid
+drive (the plugin is quieter than the pedal at the loud attack, opposite sign to OD) and only turns
+positive at G8–G10. And OD's own G10 row is non-monotonic on `decay_1k` (+0.77 → −0.73 → +0.49,
+never fully converging) where every other OD row decays cleanly to 0 — an outlier worth another look
+before fitting anything at G10 specifically, since it doesn't fit either the "no ceiling" story or a
+simple measurement artifact.
+
+**Net effect on the agreed plan:** step 1 is done and its verdict is "yes, second independent
+symptom confirmed for OD's ceiling" — proceed to step 2 (diode model) as planned. It also surfaced
+P10's needed instrument as a side effect; P10 should be picked up in the same pass as convenient,
+not as a new independent investigation.
+
 ### P10 — the G8 → G10 Boost discontinuity  *(open — but the PREMISE is withdrawn, 2026-07-29)*
 
 **Original claim:** G10 Boost reads +4.9 dB of tilt on the clean sweep at all three tone settings
@@ -1321,6 +1361,15 @@ established to be linear EQ, and the clean sweep cannot decide it. **P10 needs a
 instrument before it needs a fix** — a discrete-tone or level-stepped measurement, i.e. it should
 be folded into the never-audited dynamics/THD axes rather than pursued as a tilt.
 
+**⚠️ That instrument now exists (P9 step 1, 2026-07-29) and it found something.**
+`p9_od_compression.py decay` — built for P9, not P10 — shows Boost G10 diverging **+5 dB at the
+loud attack, decaying to 0 by the quiet tail**, at both 220 Hz and 1 kHz, with nothing comparable at
+G2–G8. That is a dynamics-domain (not EQ) symptom, consistent with the null evidence above, and it's
+the first measurement that says *what kind* of thing is wrong at G10 rather than just that something
+is. Not yet investigated: whether it's `driveMakeup`'s 6.0 dB cap (short of the +6.8 dB P6 measured
+as needed at G10) or the rail knee behaving differently on a transient attack than on the steady
+captures it was fit against. See the P9 step-1 write-up above for the full table.
+
 ### Axes never audited at all
 
 `comprehensive_data.json` carries only `fr`, `thd`, `harmonics`, `h2`. These are in the captures but
@@ -1330,11 +1379,10 @@ have never been compared against the plugin, and P2/P3/P6 all changed the clip p
 - ~~**Dynamics / compression**~~ — ✅ **audited 2026-07-29 by P9** (`p9_od_compression.py comp`). It
   was indeed the same underlying thing as P9, and it is where P9's answer came from: the pedal's OD
   output turns over and the plugin's does not. See P9 above. Still un-*fixed*.
-- **Discrete-tone THD** (`tone_82` … `tone_8000`) — computed by `comprehensive_report.py` but not
-  emitted. **Next up (P9 step 1)**: the discrete tones are a cleaner ceiling probe than the sweeps
-  because each is a steady state at a known level.
-- **Decay** (`decay_220`, `decay_1k`) — never examined. Also a P9 step-1 target: a missing output
-  ceiling should show as a decay-envelope difference, independent of the level steps.
+- ~~**Discrete-tone THD**~~ — ✅ **audited 2026-07-29** (`p9_od_compression.py tones`). Not flat vs
+  frequency, but read as a caveat on `decay`/`comp`, not a competing mechanism — see P9 step 1.
+- ~~**Decay**~~ — ✅ **audited 2026-07-29** (`p9_od_compression.py decay`). Confirms P9's ceiling on
+  a second signal family, AND surfaced a new dynamics-only anomaly at G10 Boost (see P9 step 1 / P10).
 - **Red channel** — no NAM reference; unvalidatable by construction.
 
 ---
@@ -1383,6 +1431,8 @@ python3 analysis/p9_od_compression.py tilt          # THE view: does the "tilt" 
 python3 analysis/p9_od_compression.py valid         # is OD's clean sweep still a linear instrument? (no)
 python3 analysis/p9_od_compression.py comp          # the dynamics axis — where P9's answer came from
 python3 analysis/p9_od_compression.py orders        # per-order deficit — READ WITH `gain` OR NOT AT ALL
+python3 analysis/p9_od_compression.py tones         # discrete-tone ceiling probe (P9 step 1) — read as a caveat only
+python3 analysis/p9_od_compression.py decay         # decay-envelope ceiling probe (P9 step 1) — THE confirmation
 python3 analysis/p9_od_compression.py gain          # ...the missing unit conversion (~6 min, renders).
 #   Its `sens` row is the finding: |d(odd Hn/H1)/d(input dB)| is 0.0-0.5 and sign-unstable in OD
 #   above G5, so `orders` CANNOT be read as dB of drive. Ignore `req` wherever |sens| is small.

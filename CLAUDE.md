@@ -285,8 +285,13 @@ clang-format -i src/**/*.{cpp,h}
         ±0.02 dB**, compression unchanged to 0.01 dB, nine gates PASS. It matters most on **Red**
         (17.7 k floor → far larger NodeG, no NAM reference) and at the 18 V mod. It is **not** the
         OD ceiling — the feedback clipper holds pin7 far below the rails.
-      - **Next, in this order:** (1) audit the remaining never-measured axes — discrete-tone THD,
-        decay, IMD — for a second independent symptom to constrain a fit; (2) re-examine the diode
+      - **Step 1 done (2026-07-29):** decay-envelope audit (`p9_od_compression.py decay`) confirms
+        the missing ceiling on a second, unrelated signal (plucked-note decay, not synthetic level
+        steps) — OD is hot at the attack, converges to 0 at the tail, growing with drive, at both
+        220 Hz and 1 kHz. Also surfaced an unrelated finding: Boost diverges +5 dB at G10's attack,
+        decaying to 0 — nothing like it at G2–G8 — which is the discrete/level-stepped instrument
+        P10 was waiting for (see `FR_THD_AUDIT.md` P10). IMD still unaudited.
+      - **Next, in this order:** (2) re-examine the diode
         model (the two *parallel* strings are modelled with a **single** string's `Is`; ≈2·Is lowers
         the clamp ~54 mV — small alone, but `Is`/`n_eff` together demonstrably do not reproduce the
         turnover); (3) only then fit the ceiling empirically as a soft limiter on the SW-1 path,

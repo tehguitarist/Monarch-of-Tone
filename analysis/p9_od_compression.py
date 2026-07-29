@@ -34,6 +34,16 @@ WHAT THE VIEWS ARE FOR.
            d(odd Hn/H1)/d(input dB) directly, so a harmonic deficit can be read as dB of drive.
            Needs renders + PedalRender, ~6 min.
 
+  `tones`  P9 step 1's first new axis: discrete steady tones (-14 dBFS, gts.TONE_FREQS), self-
+           anchored per capture on 82 Hz. `comp` found the ceiling at ONE frequency (1 kHz); this
+           checks whether it is broadband (flat delta vs frequency -- more ceiling evidence) or
+           frequency-shaped (Stage 1's shelf, a different mechanism). Needs renders.
+
+  `decay`  P9 step 1's second new axis: plucked-note decay (decay_220, decay_1k), self-anchored on
+           each curve's own quietest window. A CONTINUOUS trajectory through the drive range inside
+           one segment, unlike `comp`'s synthetic level steps -- the natural-dynamics version of
+           the same test, at two frequencies. Needs renders.
+
 WHAT THIS SCRIPT FOUND (2026-07-29) -- read before re-running any of it:
 
   * P9's premise is WITHDRAWN. `valid` shows OD's clean sweep carries 1.4-6 % THD from G2 to G5, so
@@ -47,13 +57,23 @@ WHAT THIS SCRIPT FOUND (2026-07-29) -- read before re-running any of it:
     = 0.0-0.5, sign-unstable, in OD above G5 -- harmonic dB does not convert to drive dB there at
     all, and `orders`' median hid a per-capture spread of -0.4 to -6.3 dB at 800 Hz. Use `gain`'s
     `sens` row as the finding; ignore its `req` row wherever |sens| is small.
+  * STEP 1 DONE (2026-07-29): `decay` reproduces `comp`'s finding on a totally different signal
+    (plucked-note decay, not synthetic level steps) -- OD is hot at the attack, converges to 0 at
+    the tail, growing with drive, at BOTH 220 Hz and 1 kHz. Second independent confirmation of the
+    missing ceiling. `tones` is NOT flat vs frequency (rises through 1-5 kHz) but that's Stage 1's
+    known shelf feeding more pre-clip level in at HF, not a competing mechanism -- read it as a
+    caveat, not evidence against the ceiling. `decay` ALSO found something nobody was looking for:
+    Boost at G10 diverges +5 dB at the attack (both frequencies), decaying to 0 -- nothing like it
+    at G2-G8. That's the discrete/level-stepped instrument P10 was waiting for; see FR_THD_AUDIT.md
+    P10. Distortion's decay delta is negative at low-mid drive (opposite sign to OD) and OD's own
+    G10 row doesn't converge cleanly on decay_1k -- both unexplained, noted for later.
 
 LEVEL IS NOT SHAPE, and the arbiter is still the null. This script measures; it decides nothing.
 
 Usage:
-  p9_od_compression.py tilt|thd                       # JSON only, <1 s
-  p9_od_compression.py orders|valid|comp [--render-dir DIR]
-  p9_od_compression.py gain [--in-gain 0 2 4]         # renders; slow
+  p9_od_compression.py tilt|thd                             # JSON only, <1 s
+  p9_od_compression.py orders|valid|comp|tones|decay [--render-dir DIR]
+  p9_od_compression.py gain [--in-gain 0 2 4]               # renders; slow
   p9_od_compression.py all
 """
 import argparse
@@ -345,11 +365,75 @@ def view_gain(binpath, os_factor, gains, sweep="sweep_drv_-6", out=sys.stdout):
             ("     n/a" if not np.isfinite(v) else f"{v:>+8.2f}") for v in req), file=out)
 
 
+def view_tones(render_dir, out=sys.stdout):
+    """Discrete steady-state tones (-14 dBFS, gts.TONE_FREQS) — a cleaner ceiling probe than the
+    sweeps because each is a fixed, known level (no continuous level change to fight the estimator
+    with). Self-anchored per capture on the LOWEST tone (82.41 Hz, least shelved by Stage 1), so
+    only the delta's shape vs frequency is read — the discriminator this view exists for: a missing
+    OUTPUT ceiling is broadband (flat delta vs frequency); a missing/misfit EQ shelf is not."""
+    orig, items = _pairs(render_dir)
+    freqs = np.array(gts.TONE_FREQS, float)
+    print("\n=== DISCRETE TONES, -14 dBFS — output level, plugin-minus-pedal dB, "
+          "self-anchored on 82 Hz ===", file=out)
+    print("  Flat across frequency => broadband (the P9 ceiling, showing at a second, steady-state\n"
+          "  operating point). Rising/falling with frequency => Stage 1's shelf, not the ceiling.",
+          file=out)
+    for mode in MODES:
+        sel = [it for it in items if it["mode"] == mode]
+        if not sel:
+            continue
+        print(f"\n-- {mode}", file=out)
+        print(f"{'drive':<8}" + "".join(f"{f:>8.0f}" for f in freqs), file=out)
+        rows = {}
+        for it in sel:
+            pe = np.array([A.db(A.rms(A.seg(it["cap"], f"tone_{f:g}"))) for f in gts.TONE_FREQS])
+            pl = np.array([A.db(A.rms(A.seg(it["ren"], f"tone_{f:g}"))) for f in gts.TONE_FREQS])
+            d = (pl - pl[0]) - (pe - pe[0])
+            rows.setdefault(it["drive"], []).append(d)
+        for dv in sorted(rows):
+            print(f"G{dv * 10:<7.0f}" + "".join(f"{v:>+8.2f}" for v in _med(rows[dv])), file=out)
+
+
+def view_decay(render_dir, out=sys.stdout, n_windows=8):
+    """Plucked-note decay (decay_220, decay_1k) — a CONTINUOUS trajectory through the drive range
+    within one segment, unlike the synthetic `comp` level steps. Self-anchored on the quietest
+    (last) window, same logic as `comp`: if OD has no ceiling, the plugin should read hotter than
+    the pedal in the early (loud) windows and converge as the note decays into the linear region."""
+    orig, items = _pairs(render_dir)
+    for name, f0 in (("decay_220", 220.0), ("decay_1k", 1000.0)):
+        print(f"\n=== DECAY ENVELOPE — {name}, output level re each curve's own QUIETEST window, dB ===",
+              file=out)
+        print("  Window 0 = loudest (attack), last = quietest (tail). 'd' = plugin minus pedal:\n"
+              "  positive & shrinking toward 0 = the plugin stays hot while the note is loud, same\n"
+              "  shape as the `comp` level-step finding, seen here in a natural continuous decay.",
+              file=out)
+        for mode in MODES:
+            sel = [it for it in items if it["mode"] == mode]
+            if not sel:
+                continue
+            print(f"\n-- {mode}", file=out)
+            print(f"{'drive':<8}" + "".join(f"{'w' + str(i):>8}" for i in range(n_windows)), file=out)
+            rows = {}
+            for it in sel:
+                pe_rows = A.dynamics(it["cap"], name, f0, n_windows=n_windows)
+                pl_rows = A.dynamics(it["ren"], name, f0, n_windows=n_windows)
+                n = min(len(pe_rows), len(pl_rows))
+                if n < 2:
+                    continue
+                pe = np.array([r[0] for r in pe_rows[:n]])
+                pl = np.array([r[0] for r in pl_rows[:n]])
+                d = (pl - pl[-1]) - (pe - pe[-1])
+                rows.setdefault(it["drive"], []).append(d)
+            for dv in sorted(rows):
+                vals = _med(rows[dv])
+                print(f"G{dv * 10:<7.0f}" + "".join(f"{v:>+8.2f}" for v in vals), file=out)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("view", nargs="?", default="all",
-                    choices=["tilt", "thd", "orders", "valid", "comp", "gain", "all"])
+                    choices=["tilt", "thd", "orders", "valid", "comp", "tones", "decay", "gain", "all"])
     ap.add_argument("--render-dir", default=DEFAULT_RENDERS)
     ap.add_argument("--sweep", default="sweep_drv_-6")
     ap.add_argument("--bin", default="build/PedalRender_artefacts/Release/PedalRender")
@@ -373,6 +457,10 @@ def main():
         view_orders(a.render_dir, sweep=a.sweep)
     if a.view in ("comp", "all"):
         view_comp(a.render_dir)
+    if a.view in ("tones", "all"):
+        view_tones(a.render_dir)
+    if a.view in ("decay", "all"):
+        view_decay(a.render_dir)
 
 
 if __name__ == "__main__":
