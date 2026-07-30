@@ -1,5 +1,9 @@
 # Monarch of Tone
 
+![Build](https://github.com/tehguitarist/Monarch-of-Tone/actions/workflows/ci.yml/badge.svg?branch=main)
+[![License](https://img.shields.io/badge/License-AGPLv3-blue.svg)](https://opensource.org/license/agpl-v3)
+[![Downloads](https://img.shields.io/github/downloads/tehguitarist/Monarch-of-Tone/total)](https://somsubhra.github.io/github-release-stats/?username=tehguitarist&repository=Monarch-of-Tone&page=1&per_page=30)
+
 A circuit-accurate, dual-channel overdrive plugin (AU/VST3, JUCE 8) modelled directly
 from the schematic of a boutique two-in-one Bluesbreaker-derived pedal — the kind of
 "holy grail" overdrive that's notoriously hard to get hold of and even harder to clone by ear.
