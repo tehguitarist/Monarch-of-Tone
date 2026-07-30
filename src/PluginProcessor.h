@@ -178,7 +178,9 @@ private:
     // max-quality FIR for render. Rebuilt on the audio thread only when the factor/quality/channel
     // count changes (rare, user-driven) — one-block gap accepted per architecture.md.
     std::unique_ptr<juce::dsp::Oversampling<double>> osYellow, osRed;
-    juce::AudioBuffer<double> scratchDry, scratchNodeHC;
+    // scratchNodeG holds Stage 1's BASE-RATE output, which is what the oversampler now takes as its
+    // input when MonarchChannel::preAtBaseRate (scratchDry must survive for the bypass crossfade).
+    juce::AudioBuffer<double> scratchDry, scratchNodeG, scratchNodeHC;
     double baseSampleRate { 0.0 };
     int maxBlock { 0 };
     int activeLog2 { -1 };          // current OS exponent: 0 = 1x, 1 = 2x, 2 = 4x, 3 = 8x

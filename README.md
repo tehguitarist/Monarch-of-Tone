@@ -97,16 +97,16 @@ bypassed:
 | Oversampling | CPU (≈ % of one core) | Added latency | Best for |
 |---|---|---|---|
 | **1×** | ~2–4% | 0 samples | Tracking / low-latency live use; highs are slightly soft |
-| **2×** *(live default)* | ~4–6% | 6 samples | Everyday playing — the recommended balance |
-| **4×** | ~7–12% | 9 samples | Higher-fidelity highs when CPU allows |
-| **8×** | ~14–23% | 10 samples | Maximum fidelity |
-| **Render** *(auto, offline bounce)* | ~13% | 119 samples | Engages automatically when your DAW exports |
+| **2×** *(live default)* | ~3–5% | 6 samples | Everyday playing — the recommended balance |
+| **4×** | ~5–10% | 9 samples | Higher-fidelity highs when CPU allows |
+| **8×** | ~9–19% | 10 samples | Maximum fidelity |
+| **Render** *(auto, offline bounce)* | ~11% | 119 samples | Engages automatically when your DAW exports |
 
 Each range spans the three clipping modes: **Boost is the cheapest and Overdrive the most
-expensive** (roughly 1.7× Boost), because Overdrive's soft clipper is a genuine nonlinear solve on
-the diode network, every sample, at the oversampled rate. Distortion sits between them. Only the
-parts of the circuit that can actually alias are oversampled — the tone stack and volume pot are
-linear, so they run once per output sample, which is worth about 20% of the total at 4× and 8×.
+expensive** (roughly 2× Boost at 8×), because Overdrive's soft clipper is a genuine nonlinear solve
+on the diode network, every sample, at the oversampled rate. Distortion sits between them. Only the
+parts of the circuit that can actually alias are oversampled — both linear stages (Stage 1, tone
+stack, volume pot) run once per output sample.
 
 The Live and Render oversampling amounts are set independently, so you can play at 2× and still
 bounce at full quality automatically. Higher oversampling mainly improves the **top octave**

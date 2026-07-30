@@ -40,22 +40,29 @@ the source port (instead of `voltage(branch1) − voltage(driveR)`) once drooped
 ~0.2 dB by 5 kHz and dragged the gain peak down ~880 Hz — it looked like bilinear warping but was
 this bug.
 
-### Linear stages run oversampled (top-octave warp fix, 2026-06-29)
+### Linear stages: the bilinear top-octave warp, and where it's fixed NOW (superseded by v1.5 step 5)
 With the passive-port readout the WDF matches the analog circuit's bilinear transform to within the
 expected warp at the gain peak (Stage-1 peak vs analog 3803 Hz: −74 Hz @48k). BUT near Nyquist that
 warp is large: at 48 kHz the **top octave droops** (16 kHz −6.6 dB vs the 192 kHz solve), which A/B
 showed as a real treble deficit vs the captures (NOT capture aliasing — NAM captures null to ~−50 dB
-and are accurate up there). Fix: **Stage 1 — not just the clip span — runs at the oversampled rate**
-(`processSamplesUp` wraps `processPre`+`processClip`), so the warp shrinks with the OS factor (16 kHz
-deficit: −2.4 dB @48k → −0.2 @96k → ~0 @192k). Voicing is now (correctly) more accurate at higher OS.
-At **1x** the linear rate == session rate, so the warp remains; a per-channel rate-scaled high-shelf
-(`warp*` in MonarchChannel, `×(48k/rate)^warpExp`) compensates it. **Since v1.5 step 3 that shelf is
-small and 1x is no longer the "approximate top" mode** — with the ADAA droop removed at source the
-true residual warp is ≤3.1 dB at 1x/16 kHz and ~nothing below 12 kHz, and the refit lands 1x within
-0.75 dB of 8x everywhere (2x within 0.14). 1x remains the low-CPU choice, but not on fidelity grounds
-any more. Prewarping was rejected earlier (a fixed prewarp freezes the gain peak,
-but the analog peak sweeps ~2.8–5.0 kHz with DRIVE — and see `postAtBaseRate` below, which reopens
-that for Stage 1 since `setDrive` now recomputes coefficients per block).
+and are accurate up there).
+
+> **⚠️ HISTORICAL — the fix described in the rest of this subsection (running Stage 1 at the OS rate,
+> the rate-keyed `warp*` shelf) was RETIRED by v1.5 step 5 (2026-07-30).** Stage 1 is linear and
+> cannot alias, so oversampling it only ever bought a smaller warp for a CPU cost paid ×OS (§2's
+> rule). Step 5 moved it to the base rate at every factor and replaced `warp*` with the drive-keyed
+> `s1Warp*` — see "Oversampling" above and the `s1Warp*` entry in the drive-shelf section below for
+> what actually ships. Kept here only for the historical reasoning (why the warp exists, what a
+> prewarp does and doesn't buy) — do not read the mechanics below as current.
+
+At 48 kHz the top octave droops (16 kHz −6.6 dB vs the 192 kHz solve). The historical fix ran Stage 1
+at the oversampled rate so the warp shrank with the OS factor (16 kHz deficit: −2.4 dB @48k → −0.2
+@96k → ~0 @192k) and used a rate-scaled shelf (`×(48k/rate)^warpExp`) to cover the 1x residual.
+Prewarping the WDF element itself was tried and rejected (see the "REJECTED on measurement" entry in
+CPU_AUDIT.md §5d) — not because the peak sweeps with DRIVE (that objection turned out to be false:
+the peak is rate-immune), but because a single-element prewarp only matches one corner of the
+composite `Av = 1 + Z_upper/Z_lower` and pays for it with error everywhere else, including *creating*
+peak displacement that didn't exist before.
 
 > **⚠️ `processPost` was in this span until v1.5 (2026-07-29) and is NOT any more —
 > `MonarchChannel::postAtBaseRate`.** Tone + Volume are linear, so they cannot alias; the OS span
@@ -137,15 +144,22 @@ Hi-Gain is fixed on Red.
 
 ## Oversampling
 
-- `juce::dsp::Oversampling`, one per channel, wrapping **Stage 1 + the clip span** (`processSamplesUp`
-  → `processPre`+`processClip` → `processSamplesDown` → `processPost`), i.e. more than the clip span
-  but NOT the whole channel. Both `prepareLinear` AND `prepareClip` are re-called at the oversampled
-  rate on factor change. So the OS factor changes anti-aliasing of the clip stages AND removes Stage
-  1's near-Nyquist bilinear warp (higher OS = more accurate top octave; see above).
-  - **`prepareLinear (rate, postRate = 0)`** — `postRate` is the Tone/Volume rate and defaults to
-    `rate`, so a caller wanting one rate for everything (the standalone probes in `analysis/`) needs
-    no change and gets the pre-v1.5 behaviour exactly. `PluginProcessor` passes the base rate when
-    `MonarchChannel::postAtBaseRate`.
+- `juce::dsp::Oversampling`, one per channel, wrapping **the clip span only** — as of v1.5 both linear
+  spans have left it: `processStage1` (base rate) → `processSamplesUp` → `processPreOs`+`processClip`
+  → `processSamplesDown` → `processPost` (base rate). So the OS factor now buys **anti-aliasing and
+  nothing else**, which is the point of the rule below. `prepareClip` is re-called at the oversampled
+  rate on factor change; `prepareLinear` gets all three rates.
+  - **`prepareLinear (rate, postRate = 0, preRate = 0)`** — `postRate` is the Tone/Volume rate,
+    `preRate` is Stage 1's; both default to `rate`, so a caller wanting one rate for everything (the
+    standalone probes in `analysis/`, the per-stage tests, 1x) needs no change and gets the pre-v1.5
+    behaviour exactly. `PluginProcessor` passes the base rate for both when
+    `MonarchChannel::postAtBaseRate` / `preAtBaseRate`. ⚠ `rate` remains the **shelf** design rate
+    (`shBaseRate`) for everything in `driveShelf`, which is downstream of IC_A's rail-sat and so stays
+    oversampled. The one exception is the `s1Warp*` shelf, which is designed at `preRate` because it
+    corrects Stage 1's own warp — see the drive-shelf section.
+  - **Only Stage 1 could leave, and that is forced, not chosen.** `processPre`'s other two blocks are
+    IC_A's rail saturation — a genuine nonlinearity — and `driveShelf`, which sits *downstream* of it.
+    The only admissible cut is `Stage 1 | [rail-sat → driveMakeup → driveShelf]`.
   - **The rule this establishes: oversample what can ALIAS, not what is merely inaccurate.** A linear
     stage's error under bilinear mapping is frequency warp, which a filter can correct; a
     nonlinearity's error is aliasing, which nothing downstream can undo. Paying ×OS for the first
@@ -584,11 +598,16 @@ each unity by the G4–G5 crossover:
   2026-07-04): eases the slightly-hot top end so the plugin matches the captures within ~0.3 dB across
   2–4.5 kHz (where the captures are reliable; above that they roll off/alias erratically — 6 kHz shows a
   spurious −15 dB dip — so this is a conservative, by-ear-confirmable cut, NOT fit to those artifacts).
-- **Warp high-shelf** (`warpPivotHz` **17k** / `warpScaleDb` **1.0** / `warpExp` **1.80**, rate-scaled
-  `×(48k/rate)^warpExp`, capped `warpMaxDb` **1.0**, then **DC-normalized**): compensates the
-  finite-rate bilinear top-octave droop. The DC-normalization (divide by H(z=1)) keeps low/mid at
-  exact unity at every rate — without it the near-Nyquist prewarp droops the whole spectrum.
-  > **⚠️ REFIT v1.5 step 3 (2026-07-30) and the base lift fell 10.6 → 1.0 dB — ~90 % of what this
+- **Warp high-shelf** (`warp*`) — **❌ RETIRED by v1.5 step 5 (2026-07-30).** `warpScaleDb` = 0,
+  compiled out via the derived `warpShelfEnabled`. It was keyed to the **OS rate**, and step 5 moved
+  Stage 1 to the **base** rate, which removes the rate-dependence *at source*: Stage 1 was ~97 % of all
+  the remaining bilinear warp in the plugin, so with it at the base rate and this shelf off,
+  `OSFidelity` (a) puts **1x within 0.26 dB of 8x at 16 kHz** (2x within 0.06) — three times better
+  than the +0.28/−0.75 that shipped *with* the shelf in step 3. Leaving it in is then a pure
+  over-correction: measured, **1x reads +2.23 dB ABOVE 8x** at 16 kHz. The physical defect did not
+  disappear — it became **absolute** (present at every factor, render included) and **drive-keyed**.
+  Replaced by `s1Warp*` below. Its `warpPoleMaxFrac` guard is still live, now serving that shelf.
+  > **⚠️ Its step-3 history, kept because the traps are still live. REFIT v1.5 step 3 (2026-07-30) and the base lift fell 10.6 → 1.0 dB — ~90 % of what this
   > shelf was correcting was never bilinear warp.** Two errors, both in the instrument: the **ADAA
   > identity-region droop** (see the ADAA section — 24 of the 32.5 dB at 1x/16 kHz), and
   > `OSFidelity` (a) being **measured at 0.01 FS in Overdrive**, where Stage 1's ~4 kHz gain peak puts
@@ -616,6 +635,40 @@ each unity by the G4–G5 crossover:
   > the arbiter says −0.3 dB of HF is 0.023 dB *better* (wants more), and both are inside what either
   > instrument resolves. The null's preference here is the known driven-sweep dulling bias. See
   > CPU_AUDIT.md §5b.
+- **Stage-1 warp high-shelf** (`s1WarpPivotHz` **16k** / `s1WarpLift0` **0.40**, drive-keyed via
+  `R_leg`, DC-normalized, v1.5 step 5): replaces `warp*`. It runs **inside `processStage1`, at the base
+  rate** — not in `driveShelf` — because it corrects Stage 1's own warp and so must live at Stage 1's
+  rate. Designed in `updateS1Warp`, called from both `setDrive` (drive) and `prepareLinear` (rate).
+  - **Keyed on `R_leg`, not on the knob — which makes it correct on RED for free.** Z_upper is
+    `R_leg ∥ C2(100 pF)`, so C2's corner `1/(2π·R_leg·C2)` runs **75.8 kHz at G2 → 15.8 kHz at G10**:
+    it walks *into* the top octave as DRIVE rises, and warping a corner that near Nyquist is the whole
+    mechanism. Every other drive-keyed instrument here (`bassCut*`, `bassBoost*`, `driveMakeup`) is
+    knob-keyed and Yellow-fitted, which is what the standing "Red drive-shelf keying" note below is
+    about; this one reads Red's 17.7 k floor directly, so **one expression covers both channels** and
+    the fit was scored over both at once. It does **not** add to that deferred mismatch.
+  - **Zero fitted shape — `s1WarpLift0` is the only free number.** The bilinear warp of a one-pole at
+    `fc` read at the pivot is `10·log10((1+(f̃/fc)²)/(1+(pivot/fc)²))`, `f̃ = (rate/π)·tan(π·pivot/rate)`
+    — closed form. `s1WarpLift0` converts that one-pole prediction to the composite
+    `Av = 1 + Z_upper/Z_lower`. Verified: the shipped C++ matches the analytic law to **0.01 dB** in all
+    24 (channel × rate × drive) cells.
+  - **⚠️ The target is EXACT and the null cannot arbitrate it** — the one EQ fit in this project with a
+    right answer. `analysis/v15_stage1_warp_probe.cpp fit` emits base-rate vs an **8x-of-base solve of
+    the same filter** (its own residual warp ~1/64 of what is measured): no captures, no NAM model, no
+    noise, so **FR generates *and* decides** here. The null renders at 4x and the whole effect is above
+    8 kHz where the captures carry ±18 dB of spread — its only job is to confirm nothing *else* moved.
+    Harness `analysis/v15_s1warp_fit.py`.
+  - **⚠️ 0.40 is deliberately BELOW the harness's weighted optimum (0.545), and the reason is a
+    metric-weighting trap.** That weighting scores 4–11 kHz at 3–4× where the raw deficit is already
+    ~0, so it credits the 14–16 kHz repair almost nothing while charging full price for presence-band
+    over-correction — its "best" answer spends **+0.3…+0.40 dB at 6–10 kHz** (series pair) to buy the
+    last 20 %. At 0.40 the 6–10 kHz residual stays **≤0.23 dB**, below what any instrument here
+    resolves, so it cannot later be double-corrected by `hfTrim` (4.5 kHz) or a P7 refit — the two
+    things in that band. Series pair @48 kHz, 16 kHz, G2→G10: deficit **−1.0…−5.4 → −0.4…−2.7 dB**.
+    **The aggregate is a screen, the cells are the verdict** (P10 step 3's rule).
+  - Accepted undershoot: above ~0.36·rate the warp **diverges** toward Nyquist (+9.1 dB at 22.6 kHz on
+    a 48 kHz session) while a first-order shelf flattens at its own lift. Out of the audio band, not
+    fitted. The `warpPoleMaxFrac` = 0.42 pole guard **binds harder** here than it did for `warp*`,
+    because this shelf is live at every factor and its lift moves with the knob.
 
 ## DRIVE make-up gain (`MonarchChannel::driveMakeup`) — v1.4 P6, 2026-07-28
 

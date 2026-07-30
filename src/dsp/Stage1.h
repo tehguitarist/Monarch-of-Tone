@@ -71,6 +71,11 @@ public:
         c2.reset();
     }
 
+    /** Z_upper's resistive floor — R6_floor (Yellow) or HiGain_floor (Red). R_leg = this + DRIVE.
+        Read by MonarchChannel::updateS1Warp, whose law is keyed on R_leg so ONE expression covers
+        both channels (see the s1Warp* constants). */
+    double floorResistance() const noexcept { return floorR; }
+
     /** DRIVE in [0,1], linear (100kB taper applied here). */
     void setDrive (double drive01)
     {

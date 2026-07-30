@@ -69,11 +69,11 @@ don't proceed on FAIL). All gates currently **PASS** (auval PASS). Each has a de
 | SW-2 hard | `SW2HardClip_Sine` | symmetric hard clamp ≈±0.55 V |
 | Tone | `ToneStage_FreqResponse` | treble-cut control, presence lifts hi-cut, DC divider exact |
 | Volume | `VolumePot_Taper` | audio taper 0/−10/−20/−30/−40 dB exact |
-| Full chain | `FullChain_DualChannel` | Boost>OD>Dist hierarchy, Boost rail-bounded, Red→Yellow series stable, no NaN, Red hotter than Yellow **measured small-signal** (at a hot input both channels are pinned on the same rail, so peak output carries no gain information — see the test's comment) |
+| Full chain | `FullChain_DualChannel` | Boost>OD>Dist hierarchy, Boost rail-bounded, Red→Yellow series stable, no NaN, Red hotter than Yellow **measured small-signal** (at a hot input both channels are pinned on the same rail, so peak output carries no gain information — see the test's comment); **plus the Stage-1 NodeG bound** over {22.05,32,44.1,48,88.2,96} kHz × {1,2,4,8}x × 11 drives × both channels (v1.5 step 5 — it reads the INTERNAL node because the diode clipper masks an upstream blowup from every output-bounded check; see the test's comment) |
 | Oversampling | (auval + DSP regression) | clip-span only; voicing OS-independent |
-| Final sweep | `tools/ControlSweep` | full range × all clip combos × 4 OS factors + bypass + render: 0 non-finite, bounded, stable |
+| Final sweep | `tools/ControlSweep` | full range × all clip combos × 4 OS factors + bypass + render + **6 session rates × 4 OS factors × 3 drives** (v1.5 step 5): 0 non-finite, bounded, stable. ⚠ The rate sweep is real added coverage but is **NOT** the guard for a mis-clamped internal filter — it was verified blind to one; that bound lives in `FullChain_DualChannel` |
 | Trim Lock | `TrimLock` | editor-level: ±18 dB range on both trims, `trim_lock` defaults on, delta-linked mirroring (incl. no-snap-on-enable + rail clamp) matches the acceptance table |
 
 **Calibration / null validation** (Step 11, real-pedal A/B): see CLAUDE.md. The plugin nulls
-against 44 NAM captures at **−8.6 to −26.9 dB (median −23.4, v1.5 step 3)**. Harness: `analysis/null_test.py`,
+against 44 NAM captures at **−8.6 to −27.0 dB (median −23.4, v1.5 step 5)**. Harness: `analysis/null_test.py`,
 `run_validation.py` (writes `analysis/VALIDATION_REPORT.md`), `internal_checks.py`.

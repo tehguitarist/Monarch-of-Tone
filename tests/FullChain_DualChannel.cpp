@@ -126,13 +126,52 @@ int main()
     std::printf ("  series Red→Yellow (OD, vol=0.5) peak: %.4f V%s\n",
                  seriesPeak, seriesNan ? "  [NaN!]" : "");
 
+    // ---- Stage-1 internal bound across session rate × OS factor × drive (v1.5 step 5) -----------
+    // ⚠ This reads NodeG, the INTERNAL node, and it has to. The drive-keyed `s1Warp*` shelf's lift
+    // law contains tan(π·pivot/rate), so on a 32 kHz session its 16 kHz pivot lands on Nyquist; with
+    // the pivot clamped only AFTER the lift (as the retired rate-keyed warp* safely was), the lift
+    // diverges and Stage 1 reaches ~5e6.
+    //
+    // The plugin's OUTPUT never moves when that happens — the diode clipper clamps ±1.64 V, so the
+    // output stays ~0.26 and every output-bounded gate reads a clean PASS. A rate sweep was added to
+    // ControlSweep for this and was verified BLIND to it for exactly that reason: **an output-bounded
+    // check cannot see a blowup upstream of a clipper.** The clipper is a perfect mask. So the bound
+    // must be asserted on the node itself, which is why this lives here rather than there.
+    double worstNodeG = 0.0;
+    bool s1Nan = false;
+    for (double rate : { 22050.0, 32000.0, 44100.0, 48000.0, 88200.0, 96000.0 })
+        for (int os : { 1, 2, 4, 8 })
+            for (int hi = 0; hi <= 1; ++hi)
+                for (int d = 0; d <= 10; ++d)
+                {
+                    monarch::MonarchChannel ch { hi != 0 };
+                    ch.prepareLinear (rate * os, rate, rate); // preAtBaseRate: Stage 1 gets the base rate
+                    ch.prepareClip (rate * os);
+                    ch.setDrive (0.1 * (double) d);
+                    for (int n = 0; n < 4000; ++n)
+                    {
+                        // Near-Nyquist tone: where a mis-clamped top-octave shelf does its damage.
+                        const double y = ch.processStage1 (0.5 * std::sin (2.0 * M_PI * 0.45 * (double) n));
+                        if (std::isnan (y) || std::isinf (y))
+                            s1Nan = true;
+                        worstNodeG = std::max (worstNodeG, std::abs (y));
+                    }
+                }
+    // Stage 1 is a ~13 dB gain stage on a ±0.5 V input, then rail-clamped downstream: a few volts is
+    // physical, 100 V is not. The broken-clamp failure overshoots this by five orders of magnitude.
+    const bool s1Ok = ! s1Nan && worstNodeG < 100.0;
+    std::printf ("  Stage-1 NodeG bound over {22.05,32,44.1,48,88.2,96}k × {1,2,4,8}x × 11 drives ×\n"
+                 "    both channels: worst |NodeG| = %.3g V%s\n",
+                 worstNodeG, s1Nan ? "  [NaN!]" : "");
+
     const bool seriesOk = ! seriesNan && seriesPeak > 1e-4 && seriesPeak < 10.0;
-    const bool pass = ! nanSeen && redHotter && boostHighest && nonSilent && boostRails && seriesOk;
+    const bool pass = ! nanSeen && redHotter && boostHighest && nonSilent && boostRails && seriesOk && s1Ok;
 
     std::printf ("\n  no NaN: %s | Red hotter(Boost): %s | Boost highest: %s | non-silent: %s | "
-                 "Boost on rails: %s | series ok: %s\n",
+                 "Boost on rails: %s | series ok: %s | Stage-1 bounded: %s\n",
                  nanSeen ? "FAIL" : "ok", redHotter ? "ok" : "FAIL", boostHighest ? "ok" : "FAIL",
-                 nonSilent ? "ok" : "FAIL", boostRails ? "ok" : "FAIL", seriesOk ? "ok" : "FAIL");
+                 nonSilent ? "ok" : "FAIL", boostRails ? "ok" : "FAIL", seriesOk ? "ok" : "FAIL",
+                 s1Ok ? "ok" : "FAIL");
     std::printf ("%s\n", pass ? "PASS" : "FAIL");
     return pass ? 0 : 1;
 }

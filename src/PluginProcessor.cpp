@@ -173,6 +173,7 @@ void MonarchAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBloc
 
     const int numCh = (int) strips.size();
     scratchDry.setSize (numCh, samplesPerBlock);
+    scratchNodeG.setSize (numCh, samplesPerBlock);
     scratchNodeHC.setSize (numCh, samplesPerBlock);
 
     for (auto& s : strips)
@@ -250,10 +251,13 @@ void MonarchAudioProcessor::updateOversampling (int numCh)
     // Tone/Volume run at the BASE rate when postAtBaseRate — they are linear and cannot alias, so
     // the OS span bought them nothing but warp accuracy (v1.5; see monarch::MonarchChannel::postAtBaseRate).
     const double postRate = monarch::MonarchChannel::postAtBaseRate ? baseSampleRate : clipRate;
+    // Same for Stage 1 (v1.5 step 5; see monarch::MonarchChannel::preAtBaseRate) — linear, so it too
+    // was paying ×OS purely for warp accuracy, and at 18.0 ns/sample it was the largest such block.
+    const double preRate = monarch::MonarchChannel::preAtBaseRate ? baseSampleRate : clipRate;
     for (auto& s : strips)
     {
-        s.yellow.prepareLinear (clipRate, postRate);
-        s.red.prepareLinear (clipRate, postRate);
+        s.yellow.prepareLinear (clipRate, postRate, preRate);
+        s.red.prepareLinear (clipRate, postRate, preRate);
         s.yellow.prepareClip (clipRate);
         s.red.prepareClip (clipRate);
     }
@@ -328,19 +332,42 @@ void MonarchAudioProcessor::processPedalChannel (juce::AudioBuffer<float>& buf, 
     //    version of it, which is strictly within what its stopband is specified to remove.
     if (os != nullptr)
     {
-        juce::dsp::AudioBlock<double> dryBlock (scratchDry.getArrayOfWritePointers(),
-                                                (size_t) numCh, (size_t) numSamples);
-        auto up = os->processSamplesUp (dryBlock);
+        // Stage 1 at the base rate, BEFORE the upsampler (preAtBaseRate). It is linear, so it cannot
+        // alias and the upsampler's band-limit is exactly where its output already sits; what changes
+        // is that its bilinear warp no longer shrinks with the OS factor. Writes to scratchNodeG, not
+        // in place, because scratchDry is still needed for the bypass crossfade below.
+        if constexpr (monarch::MonarchChannel::preAtBaseRate)
+            for (int ch = 0; ch < numCh; ++ch)
+            {
+                const double* dry = scratchDry.getReadPointer (ch);
+                double* nodeG = scratchNodeG.getWritePointer (ch);
+                auto& c = chan ((size_t) ch);
+                for (int n = 0; n < numSamples; ++n)
+                    nodeG[n] = c.processStage1 (dry[n]);
+            }
+
+        auto& osSource = monarch::MonarchChannel::preAtBaseRate ? scratchNodeG : scratchDry;
+        juce::dsp::AudioBlock<double> upIn (osSource.getArrayOfWritePointers(),
+                                            (size_t) numCh, (size_t) numSamples);
+        auto up = os->processSamplesUp (upIn);
         const int osN = (int) up.getNumSamples();
         for (int ch = 0; ch < numCh; ++ch)
         {
             auto& c = chan ((size_t) ch);
-            if (monarch::MonarchChannel::postAtBaseRate)
-                for (int i = 0; i < osN; ++i)
-                    up.setSample (ch, i, c.processClip (c.processPre (up.getSample (ch, i))));
-            else
-                for (int i = 0; i < osN; ++i)
-                    up.setSample (ch, i, c.processPost (c.processClip (c.processPre (up.getSample (ch, i)))));
+            // `if constexpr` on BOTH flags: the span's entry point has to stay paired with where
+            // Stage 1 actually ran, so a plain `if` here would let the two drift out of step.
+            for (int i = 0; i < osN; ++i)
+            {
+                double v = up.getSample (ch, i);
+                if constexpr (monarch::MonarchChannel::preAtBaseRate)
+                    v = c.processPreOs (v); // Stage 1 already ran at the base rate, above
+                else
+                    v = c.processPre (v);
+                v = c.processClip (v);
+                if constexpr (! monarch::MonarchChannel::postAtBaseRate)
+                    v = c.processPost (v);
+                up.setSample (ch, i, v);
+            }
         }
         juce::dsp::AudioBlock<double> wetBlock (scratchNodeHC.getArrayOfWritePointers(),
                                                 (size_t) numCh, (size_t) numSamples);

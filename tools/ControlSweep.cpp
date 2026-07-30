@@ -256,6 +256,31 @@ int main()
         note (nm, runPhase (proc, 0.25, nullptr), &worstStaticDelta, true);
     }
 
+    // ---- Session-rate × OS-factor stability -----------------------------------------------------
+    // Added v1.5 step 5, because a real instability shipped past every other gate here. The
+    // drive-keyed `s1Warp*` shelf's LIFT law contains tan(π·pivot/rate), so on a 32 kHz session its
+    // 16 kHz pivot sits exactly at Nyquist and the lift diverged — Stage 1's output reached 7e6.
+    // Everything above runs at 48 kHz only, so none of it could see that. Two prior audit items
+    // ("verified finite over {22.05…96} kHz × {1,2,4,8}x") checked this BY HAND and left no gate
+    // behind; this is that check, made permanent. Rates below 44.1 kHz are where the pivot clamps
+    // bind, which is exactly why they are in the list.
+    setP (apvts, "clipping_mode_yellow", 1.0f);
+    setP (apvts, "clipping_mode_red", 1.0f);
+    proc.setNonRealtime (false);
+    for (double rate : { 22050.0, 32000.0, 44100.0, 48000.0, 88200.0, 96000.0 })
+        for (int os = 0; os < 4; ++os)
+            for (float drive : { 0.0f, 0.5f, 1.0f })
+            {
+                proc.setPlayConfigDetails (2, 2, rate, block);
+                proc.prepareToPlay (rate, block);
+                setP (apvts, "oversampling_realtime", (float) os);
+                setP (apvts, "drive_yellow", drive);
+                setP (apvts, "drive_red", drive);
+                char nm[48];
+                std::snprintf (nm, sizeof nm, "%.1fk %dx drive=%.1f", rate / 1000.0, 1 << os, drive);
+                note (nm, runPhase (proc, 0.1, nullptr), &worstStaticDelta, true);
+            }
+
     // Verdict.
     std::printf ("\n== SUMMARY ==\n");
     std::printf ("  worst |out|              %.3f  (bound %.0f)\n", worstAbs, BOUND);

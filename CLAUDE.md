@@ -51,725 +51,18 @@ clang-format -i src/**/*.{cpp,h}
 
 ## Roadmap
 
-- **v1.0 — Project cleanup.** ✅ Done — repo/docs audited and condensed; `.claude/rules/*` + this
-  file collapsed to load-bearing facts (values, topology, decisions+why), "DONE" narratives and
-  resolved discrepancy back-and-forth removed, experiments folded to one-line "tried X → Y"
-  notes. Stale facts reconciled to the actual code (Stage-1 floors, input cap, OS defaults).
-- **v1.1 — CPU / latency / memory optimization pass. ✅ Done (2026-06-29, commit `c81664b`).**
-  Three probes shipped, all wired into ctest as **finite-only** gates (they assert no NaN/Inf,
-  never an absolute CPU %, which varies with the host): **`PerfBenchmark`** (CPU % of realtime +
-  reported latency per OS factor × clip mode, through the real stereo processor — the source of
-  the README Performance table), **`OSFidelity`** (how close 1x/2x/4x sit to 8x), and
-  **`FeatureProfile`** (header-only: CPU *and* accuracy of a candidate lever together).
-  - **The HQ toggle was measured and REJECTED — don't re-propose it without new evidence.** The
-    roadmap flagged it for discussion; `FeatureProfile` answered it instead. The diode-quality
-    lever buys accuracy that is inaudible next to what the OS factor already does, and
-    **oversampling *is* the quality-vs-CPU dial** — it is the only setting that measurably changes
-    the sound. A second knob would have split the same axis in two.
-  - **And the "cheap" side of that lever is a PESSIMISATION — re-confirmed 2026-07-29.** Chowdsp's
-    `DiodeQuality::Good` is both less accurate *and*, in two of three modes, **slower** than
-    `Best`: Best/Good CPU = **0.74× Boost, 1.01× OD, 0.87× Dist**, while the two differ by only
-    1.7e-07 (null −61…−83 dB, THD identical to 4 dp). `Best` is Wright-Omega and lands in roughly
-    one step; `Good` iterates. **Never assume the lower-quality setting is the faster one** —
-    measure both, as `FeatureProfile` does, or an "Eco" mode ships that costs more and sounds worse.
-  - **⚠️⚠️ `PerfBenchmark` IS SENSITIVE TO MACHINE LOAD — never measure right after a build, and
-    never compare two numbers taken at different times.** On an **idle** Mac, three consecutive runs
-    agree to **±2 %**; a run started as a compile finishes reads **15–25 % high**. The first pass of
-    this audit was measured that way and published an 8x OD figure of 50.2 % against a true 35.1,
-    then attributed a v1.4 regression of "~1.9× in OD" that is really ~1.47×. Both were wrong, in
-    the same direction, for the same reason. **Protocol: rebuild both arms, then measure them
-    back-to-back, ≥2 runs each, with nothing else running.** A no-op arm (here: 1x, where the change
-    cannot apply) is the cheap internal control — if it moves, the measurement is contaminated.
-  - **v1.4's real cost, idle-vs-idle (2026-07-29):** 8x Boost 15.8 → 20.4 (**1.29×**), OD 23.9 →
-    35.1 (**1.47×**), Dist 21.2 → 25.8 (**1.22×**), render 13.4 → 18.6 (**1.39×**). Measured by
-    rebuilding `d15128b` in a `git worktree` and benchmarking it in the same session — so this is
-    code, not thermals or hardware.
-    - **The shape of the regression localises half of it, MEASURED:** pre-v1.4 OD and Distortion
-      were comparable (27.5 vs 24.7) and now OD has pulled far ahead, which is a mode-selective
-      cost, and the only mode-selective thing v1.4 added is **`sw1Ceil` + its ADAA** (P9 step 3,
-      inside the `sw1On` branch). The remaining all-modes share is **inferred, not yet isolated** —
-      IC_A's rail-sat ADAA (P9, `processPre`) and the `injectEvenHarmonic` paths are the
-      candidates. Flip `stage1RailsEnabled` / zero `sw1CeilV` and re-run `PerfBenchmark` to split
-      them properly before acting on it.
-    - Every one of these is a per-sample map inside the oversampled span, so it is paid **×OS ×2
-      pedal channels ×2 audio channels** — a map that costs 20 ns/sample costs ~1.3 µs per output
-      frame at 8x stereo, against a 20.8 µs budget at 48 kHz. **Cheap-looking per-sample work is
-      not cheap here.**
-    - **Don't benchmark a hypothesis against a remembered number.** The June table was measured on
-      unknown thermal state; the only sound comparison is rebuilding the old commit now. A
-      `git worktree` at the old SHA costs one JUCE compile and removes the confound entirely.
-- **v1.4 — FR / harmonic accuracy pass. ✅ Done (2026-07-29). → `analysis/FR_THD_AUDIT.md`** — full
-  findings, evidence and the worked P0–P10 plan live there; don't re-derive them here. Headline:
-  null median **−16.4 → −23.1 dB**, and −21.9 dB or better on every capture from G2 to G7. Every
-  remaining gap is an explicitly accepted residual with its evidence recorded (sub-32 Hz
-  non-minimum-phase LF; the G8–G10 clip corner, ~half of which is target-side noise). **The
-  ordered plan is finished — there is no open P-item.**
-  - **P0 harness hygiene — ✅ done (2026-07-28).** THD above the H3 limit (~6.3 kHz) now reports
-    `na` (both estimators fail up there: Farina is H2-only, the discrete fallback aliases onto the
-    fundamental at 6/8 kHz), the FR trust band (40 Hz–8 kHz) is owned by `comprehensive_report.py`
-    and read by the dashboard from `meta`, the per-mode tiles use the same shape metric as the
-    heatmap, and **H2-vs-frequency** is a first-class chart. The old dashboard's dramatic 6–8.5 kHz
-    "THD cliff" was a measurement artifact and is gone.
-  - **P1 sub-64 Hz LF extension — ❌ CLOSED, no DSP change (2026-07-28).** Real but *not*
-    correctable; see the rejected-experiments entry below. Consequence: the LF THD gap is now an
-    accepted residual too, and **P2/P3 no longer need to wait for P1** — the harmonic baseline
-    won't move, so fit them against the current `comprehensive_data.json` directly.
-  - **P2 asymmetric op-amp rail saturation — ✅ done (2026-07-28).** `railSaturate` now has
-    **separate ± ceilings** (`railAsymV = 0.60 V` around the unchanged 3.3 V mean), which generates
-    Boost's whole missing even series with the right internal ratios: H2/H4/H6 went from **−21/−29/
-    −39 dB short to within ~2 dB**, odd orders unchanged. The empirical `asymBoost` is retired to 0
-    (redundant now). Three things the plan got wrong, all recorded in the audit: the **sign** is
-    invisible to harmonic magnitudes and was decided by the null; an asymmetric clipper **rectifies**,
-    and the 0.16 Hz output cap smeared a 1 s DC tail into the next segment (now stripped at source —
-    worth **0.5–0.7 dB of OD/Dist null on its own**); and **Distortion is rail-clamped**, so a fixed
-    asymmetry made it 26 dB too even — it is scaled off under SW-2's ~25× heavier load. Whole set:
-    null mean **0.12 dB deeper**, Boost **0.29 dB**, OD/Dist neutral, FR unchanged.
-  - **P3 even-harmonic H2 shape in OD/Dist — ✅ done (2026-07-28).** Both injection paths ran
-    full-range and **the same fact broke both**: Stage 1's high-shelf makes `nodeG` small below a
-    few hundred Hz. Ablation reversed the diagnosis — the plan blamed the low path, but the
-    **mid/high** path was the larger share (+15.5 dB hot on its own at 100 Hz), because its
-    `tanh(asymDriveScale·nodeG)` wash-out never leaves the linear region down there and so grows as
-    `nodeG²` instead of collapsing. Two fixes: **`asymMidFc` = 400 Hz high-pass** on the mid source
-    (the counterpart the low band's 150 Hz low-pass always implied — the paths now split the
-    spectrum), and the low band gets **its own depth envelope** (`lowEnv`, `asymLowWash` = 25,
-    `asymLowThresh` = 0.15 V) because its source is clamped and `clipEnv`'s 0.37 V threshold is
-    never met at LF (a wash keyed to it moved H2 by 0.7 dB — nothing). The envelope's **threshold**
-    is what makes the shape right rather than merely smaller. `asymLowOD/Dist` then raised 1.4×.
-    All 44 captures, driven sweeps: **H2 rms error OD 10.3 → 6.9 dB, Dist 10.2 → 7.9, systematic
-    bias eliminated** (+2.8 → 0.0, +3.0 → +0.2). Odd orders bit-identical, Boost byte-identical,
-    **null unchanged on every capture**.
-  - **P3.1 H4/H6 in OD/Dist — ✅ done (2026-07-28), and it corrected a wrong P3 claim.** P3 called
-    this structurally unfixable ("a squared source only makes H2"); its own ablation data disproved
-    that, and re-fitting the **tanh knee** fixed it inside the same mechanism. Two knees were
-    needed, for different reasons: `asymDriveScale` **1.70 → 3.50** (never re-swept since before
-    P2; the knee alone sets the H2:H4:H6 ratio), and a **new** `asymLowDriveScale` = 4.90 on the
-    low path — whose source is a low-pass of the clip output, i.e. nearly a **sine**, so its square
-    had **no H4/H6 by construction** and never responded to `asymDriveScale` at all. Order matters:
-    **knee first, then re-zero the bias with the coefficients** — a joint search drifted H2
-    +3.7/+5.1 dB hot buying H4/H6, and a gain moves the whole series while the knee does not. All
-    44 captures, driven sweeps: H4 bias **−11.1/−11.2 → −1.5/−2.1**, H6 **−22.0/−18.2 → −7.4/−5.8**,
-    H2 bias still **0.0**. Odd orders 0.00 dB changed, Boost byte-identical, null unchanged (worst
-    +0.04 dB), and **IMD is now a measured guard** (SMPTE 60 Hz+7 kHz — the pair straddling the
-    injection split — 0.00 dB) rather than the by-ear check the plan proposed. H6 stays ~6 dB
-    short: accepted, since closing it costs H2 rms faster than it gains H6. Prerequisite settled
-    first — `analysis/p31_harm_floor.py` shows the pedal's H4/H6 targets clear the capture chain's
-    harmonic floor by 39 dB median / 6.9 dB worst, so none of the gap was measurement noise.
-  - **P3.2 Boost's evens vanish on the quiet driven sweeps — ✅ done (2026-07-28), in ONE constant.**
-    Found by P3.1's whole-set metric, which P2 could not see (it measured the −6 dB sweep only):
-    **30 of 143** Boost H2 cells had the plugin at ≈−160 dBc — no even-harmonic mechanism engaged at
-    all — while the pedal reads −18…−59 dBc, and `p31_harm_floor.py` puts those pedal readings
-    **+58.7 dB clear of the capture chain's floor at worst** (median +100), so the target was real.
-    The fix needed **no new mechanism**, which is the finding: **P3.1's low path was already wired
-    and running in Boost** (with `railV` as its `clampRef`) and only its coefficient was zero — and
-    it has exactly the property the rails lack, being sourced from a low-pass of the clip output and
-    so *always-on* rather than knee-triggered, with `lowEnv` handing over to the rails as drive
-    rises. `asymLowBoost` 0 → **−0.017**, chosen on the whole set where aggregate rms is flat across
-    0.017–0.030 and only H2's bias moves (P3.1's rule: zero H2). Driven sweeps, whole set: **silent
-    30/24/11 → 0**, H2 rms 47.7 → 6.9 (bias −22.5 → **+0.5**), H4 43.2 → 8.3 (−18.3 → −1.7), H6 31.5
-    → 11.1 (−12.1 → −4.5) — Boost's even series is now on a par with OD/Dist's and its H4/H6 bias is
-    the best of the three. Two invented mechanisms were probed numerically and rejected first (a
-    `tanh²` term on `railSaturate` — H4/H6 30–50 dB too weak, P3.1's "squared near-sine" trap again;
-    and widening `railKneeMargin` — right ratio, but no margin both spares OD's ±1.64 V and reaches
-    0.5 V). Guards: **OD/Dist byte-identical** (verified by rebuilding with the coefficient zeroed),
-    Boost null within **0.005 dB**, IMD ≤0.002 dB, 44-capture headline unchanged. What's left is at
-    100 Hz / quiet / high drive, where the pedal is fully saturated and the plugin can't swing to its
-    rails — that is **P1's LF shortfall seen through the clipper**, not a second mechanism. See
-    `FR_THD_AUDIT.md` P3.2.
-  - **P6 mid-gain FR peak displacement — ✅ done (2026-07-28), and the premise was wrong.** It was
-    framed as a **mode sign-split** (OD peaks too HIGH — G6 T5 488 vs 376 Hz, +0.38 oct — while
-    Distortion peaks too LOW, G4/G5 ≈−0.25), and three sessions hunting a mode-differentiated
-    mechanism found nothing, correctly: **there isn't one.** Reading the same table as a
-    **trajectory in drive** instead of a list of per-capture errors shows one mode-*independent*
-    effect — the pedal's FR peak migrates **1.4–1.7 octaves down** from G2 to G10, the plugin's only
-    0.2–1.0. The "split" is that single monotone drift crossing zero at a different knob position in
-    each mode, because each mode has a different low-drive intercept (G2: Clean +0.24, OD +0.06,
-    Dist −0.14). Finding 3's original "±0.2 oct" hid it by averaging; P6's sign reading hid it by
-    dropping the drive axis. **Two aggregation errors on the same data.**
-    - **Cause:** a **gain-vs-DRIVE-knob curve error above ~G5**. The FR peak is a clip-depth meter
-      (**−0.35 oct per +3 dB** of pre-clip level, measured with `p6_peak_fit.py --in-gain`), which
-      converts the error into dB of missing drive: ~0 to G5, then **+3.2/+3.7/+5.5/+6.8** at
-      G6/G7/G8/G10. Confirmed twice independently — Boost's best-fit gain vs the captures rises
-      **−0.69 → +4.83 dB** across G2→G10 (a metric that never touches the peak), and the
-      **time-domain null splits at the same knob position**: extra pre-clip level *hurts* at G5 and
-      *helps* from G6 up (G6 T5 OD −16.9 → −22.1 at +3 dB).
-    - **Fix:** `MonarchChannel::driveMakeup` — one flat drive-keyed gain at NodeG (onset 0.5,
-      14 dB/unit, cap 6 dB), **not a shelf**. It restores the half of the real 3-terminal DRIVE
-      pot's dual action the 2-terminal model drops: the literal wiring was rejected for over-swinging
-      Stage-2 gain (28 vs 10.6 dB), and the 2026-06-29 re-derivation had already shown the discarded
-      action moves **Stage 2's flat LEVEL, not Stage 1's tilt** — right shape, wrong magnitude. So
-      the schematic-departure authorization ended up not being needed.
-    - **Result (all 44 captures):** null **−22.7…−6.8 median −16.4 → −23.2…−6.6 median −16.6**, mean
-      **0.52 dB deeper**; 13 deeper (up to **−4.9 dB**, G7 T5 OD), 5 shallower (worst +0.9, the
-      anomalous G10 T2 OD), **26 byte-identical** — the gain is exactly 1.0 below G5, so no earlier
-      G2–G5 fit moved. Peak error: all-44 mean +0.24 → **+0.08** oct, sd 0.44 → **0.28**; rms OD
-      0.44 → **0.14**, Dist 0.37 → 0.21, Clean 0.66 → 0.35. All nine per-stage gates still PASS.
-    - **Left open:** Distortion's −0.25 oct at G4–G5 (below the onset — the genuine *intercept*
-      part, no mechanism found) and the G10 residual (documented bass bloom; the measured need is
-      +6.8 dB vs the 6.0 cap, and raising it trades against the G10 Distortion null).
-    - **Rule it establishes:** a **gain-vs-knob error is not a tilt**, even though clipping makes it
-      look like one in a single capture's FR. When an error is indexed by a knob, plot it against
-      the knob before hypothesising a mechanism. See `FR_THD_AUDIT.md` P6.
-  - **P4 the 1.6–5 kHz tilt — ❌ PREMISE WITHDRAWN (2026-07-28). There is no fixed tilt.**
-    Re-measured on fresh post-P6 data as the plan required. Aggregated over all 176 capture×sweep
-    rows the error looks like a textbook fixed tilt (**+0.23 dB/oct, 99% sign-consistent, ~1.8 dB
-    total**) and a retuned `hfTrim` collapses it 0.379 → **0.073 dB rms**. It is an **artifact**:
-    the error is indexed by **DRIVE and SWEEP LEVEL jointly**, so a median over either axis alone
-    averages the other away and neither marginal shows the extreme cell. **Third instance of the
-    same trap** (Finding 3's ±0.2 oct, P6's sign reading) — first one caught *while* building the
-    aggregate. On the cleanest linear instrument (Boost, clean sweep) the plugin is **flat to
-    ±0.5 dB wherever the drive shelf's treble lift is zero**, and where the lift is non-zero the
-    error tracks it **≈1:1** (G2 +3.92 dB vs 3.24 lift; G3 +2.45 vs 2.06; G4 +1.20 vs 0.88).
-    Distortion doesn't show it — the ±0.584 V clamp destroys the pre-clip tilt, so it's pre-clip
-    and mode-independent. Confirmed on the arbiter, not just FR: removing the lift from G2 T5 Clean
-    moves FR rms **1.51 → 0.44 dB** *and* the null **−15.10 → −25.23 dB**, and over the 17 affected
-    captures the null deepens **2.3–6.0 dB on every one**. The FR-optimal fixed shelf is rejected by
-    the null (splits by drive: −1.9 dB at G2 against +2.5 dB at G5–G6); the honest ceiling on a
-    *fixed* HF trim is ~0.1 dB. → **replaced by P7.**
-  - **P7 refit the drive-keyed EQ instruments as one set — ✅ done (2026-07-29). Biggest null gain
-    yet: median −16.6 → −21.5 dB.** The 450 Hz treble lift is **retired** (`shelfMaxDb` 5.6 → 0,
-    `shelfSlopeDb` 11.8 → 0, behind a *derived* `trebleShelfEnabled` so the audio path and the
-    header-parsing harnesses cannot disagree) and the bass-cut bell absorbs its job: `bassCutQ`
-    0.45 → **0.50**, `bassCutOffDrive` 0.50 → **0.55**, `bassCutSlopeDb` 13.0 → **10.909**,
-    `bassCutMaxDb` 4.6 → **6.0**. Pivot 185 was already right; `bassBoost*` deliberately untouched
-    (freeing it wanted to move its pivot to 75 Hz — straight into P8's band — for 0.02 dB).
-    - **The rule it adds: P4's "least-nonlinear instrument" is necessary but NOT sufficient.** The
-      clean sweep *stops being linear part-way up the DRIVE knob* — THD 250 Hz–2 kHz (plugin/pedal)
-      runs 0.08/0.87 at G2 through 0.43/1.11 at G6, then **4.64/4.36 at G7, 7.63/7.71 at G8,
-      10.45/14.76 at G10**. Fit window is G2–G6. **Check that the instrument is still an instrument
-      at the far end of the axis you are sweeping** — a cell can be the least-nonlinear one
-      available and still be useless. This is what **withdrew P10's premise** (below).
-    - **The defect is ONE see-saw about 508 Hz** — that band reads −0.16…−0.31 dB at *every* drive
-      including G10, which is what identifies the pivot rather than assuming it. Tilt (HF−LF) runs
-      +3.95/+2.73/+1.25/+0.20/+0.02 dB at G2–G6, then reverses. The shipped law shape
-      (`max(0, max − slope·drive)`) already traced that trajectory; only the magnitude was wrong.
-    - **Why no single instrument could be read alone:** the lift and the bell each supplied ~half of
-      the same correction, so together they delivered ~6.6 dB of tilt at G2 where 3.95 is needed.
-      P4 measured the lift alone, saw that removing it fixed G2, and called it 100 % spurious —
-      right outcome, wrong reason (removing it left the bell's 3.9 dB standing, ≈ the 3.95 actually
-      required). **Corrections that overlap in band AND in keying must be measured in one pass.**
-    - **Result (all 44 captures):** median **−16.6 → −21.5**, range −6.6…−23.2 → −6.6…**−25.1**,
-      mean 2.46 dB deeper; 24 deeper (up to **−9.1 dB**, G2 T6.5 Clean), **18 byte-identical** (both
-      instruments are exactly 0 at and above drive 0.55, so nothing P6 fitted above G5 moved), 2
-      shallower (worst +0.9, G5 T8 OD). FR shape rms G2–G6 **0.941 → 0.259 dB**, and Boost/clean is
-      now flat to **±0.5 dB at every measurable drive**. All nine per-stage gates PASS. Two
-      candidates were fit on FR and judged on the null; **deleting** the shelf beat shrinking it in
-      every mode, so the simpler answer won on the arbiter rather than on taste. Harness
-      `analysis/p7_eq_refit.py`. See `FR_THD_AUDIT.md` P7.
-  - **P8 the LF band read as ONE drive-keyed instrument — ✅ done (2026-07-29). Median null
-    −21.5 → −22.6 dB, 38 of 44 captures deeper, and the worst capture in the set moved for the
-    first time.** P1's measurements were right; its *conclusion* over-generalised from two shelves,
-    both fit to zero the FR magnitude and both ~2× the complex-optimal depth. The phase lead
-    blocking a minimum-phase fix exists **only below ~32 Hz**; at 40–80 Hz the pedal **lags** 3–9°,
-    exactly what a min-phase low-shelf supplies.
-    - **But the fix is NOT the new shelf both P1 and P8's own plan assumed.** A *fixed* 100 Hz
-      +1.0 dB shelf is knob-indexed on the arbiter — helps 1.0–1.6 dB at G2–G5, **hurts 0.6–1.5 dB
-      at G6–G10**, in every mode — which is `offline_null_probe`'s own stated tell that a fixed
-      filter is the wrong instrument. And the band already had a drive-keyed instrument in it:
-      **`bassBoost*`**, which P7 had deliberately left alone as "it belongs to P8". So the two were
-      fit as one set, P7's rule applied prospectively for once.
-    - **The old law was fit to one end of the drive axis.** `bassBoost` (105 Hz, onset G2.5,
-      7.5 dB/unit, cap 4.2) exists to counter the high-drive bass bloom, was measured at high drive,
-      and read as monotone because nothing had measured the low end. Per-drive fitting shows the
-      pedal wants LF gain at **every** drive — **+1.2 dB at G2 where the ramp gives exactly zero** —
-      peaking near G5 and then **falling back**: the ramp was ~1.2 dB short below G5 and ~2.4 dB
-      **over** at G10, and a ramp cannot express the fall at all.
-    - **Fix:** `bassBoost*` becomes a **hump in drive** — 85 Hz, 3.0 dB peak at drive 0.50, falling
-      6.0 dB/unit below and 2.5 above, floored at 0 (reached exactly at drive 0). **No new
-      instrument, no new mechanism, one law reshaped.** The offline optimum is broad (±10 Hz,
-      2.8–3.5 dB, peak 0.48–0.55 all within 0.07 dB), so it was not ground finer than the
-      pre-clip/post-clip placement caveat can carry.
-    - **Result (all 44 captures):** null **−25.1…−6.6 median −21.5 → −25.6…−8.7 median −22.6**, mean
-      and median both **1.05 dB deeper**; **38 deeper** (best −3.4 dB, G8 T5 Clean), **6 shallower by
-      at most +0.2 dB**, none worse. The **worst capture in the set improved 2.1 dB** (G10 T2 Dist
-      −6.6 → −8.7) — nothing had moved the G10 floor before. FR: the *drive-dependence* of the 20 Hz
-      error more than halves (−3.23…+2.95 → −2.12…+0.59 dB). All nine gates PASS; SMPTE IMD median
-      +0.05 dB, CCIF −0.00; even-harmonic series neutral except Boost H6 rms 7.9 → 10.9 (bias only
-      −3.2 → −3.6 — a quiet harmonic already ~6 dB short, accepted).
-    - **Left open:** the sub-32 Hz remainder — a near-constant ~2 dB shortfall at 20 Hz that an
-      85 Hz first-order shelf cannot reach without overshooting 80 Hz, and whose phase lead is
-      non-minimum-phase anyway. This is now the *whole* of the accepted LF residual.
-    - **Harness trap caught and fixed:** `comprehensive_report.py --keep-renders` and
-      `run_validation.py --render-dir` write **two different filename conventions into the same
-      directory**, and `offline_null_probe.load_pairs` matched only one — so a fresh render run
-      silently left the older set in place. The fit was re-run against a known-good post-P7 set
-      (identical to 4 decimals, so nothing rested on it). `load_pairs` now accepts both, takes the
-      newest per label, and warns when a directory's renders span >2 minutes.
-  - **Remaining, in order — see `FR_THD_AUDIT.md` P9–P10:**
-    - **P9: Overdrive's mode-specific tilt — ⚠️ PREMISE WITHDRAWN (2026-07-29). It is not EQ: the
-      plugin's OD has no output ceiling.** *(mechanism open; measurement done)* The "tilt at every
-      drive" fails two tests. OD's clean sweep carries **1.4–6 % THD from G2 to G5**, so it was
-      never a linear FR measurement in that mode at any drive (P7's rule, applied to OD for the
-      first time — same trap as P10, one mode over). And the tilt **grows with sweep level** — G2
-      reads +0.70 (clean) → +1.31 → +1.69 → **+2.63 dB** (−6) — which is the cross-tab's own
-      definition of a compression difference rather than linear EQ. **It was the un-audited
-      dynamics axis all along**, exactly as the audit guessed.
-      - **What it is:** on 1 kHz level steps (−30 → −3 dBFS, self-anchored) **the pedal's Overdrive
-        saturates and the plugin's never does** — G5: pedal +1.26/+2.38/+3.42/+3.96/**+3.93**
-        (turns over), plugin +1.59/+2.64/+4.19/+5.94/**+7.08** (still climbing). Every drive; total
-        rise pedal +5.84/+3.93/+4.51/+5.79 vs plugin +8.42/+7.08/+7.87/+7.73 at G2/G5/G8/G10.
-        **Boost matches within 0.6 dB, Distortion within ~0.4** — their ceilings (rails, ±0.584 V
-        shunt) are modelled; OD's soft feedback clipper is the only path whose output still tracks
-        its input, so it is the only mode where a missing ceiling shows. **Mode-specific symptom,
-        no mode-specific mechanism** — the P4/P6 pattern again.
-      - **Ruled out:** capture-chain clipping (peaks 0.30–0.36 FS everywhere); a mis-traced clip
-        branch (`schematic-checker` re-traced Theseus — one shared 6.8 k in series with the whole
-        network, R10 unswitched, 4 diodes 2×2 antiparallel, nothing omitted); and "the clipper is
-        under-driven" — **the `orders` table cannot support that claim**, because measured
-        `d(odd Hn/H1)/d(input dB)` in OD above G5 is only −0.5…+0.05 and sign-unstable, so harmonic
-        dB cannot be converted into drive dB at all.
-      - **Found and shipped along the way — IC_A's missing ceiling.** Rail saturation was only ever
-        applied to IC_B; IC_A is the same op-amp on the same supply and NodeG is its output pin,
-        and the model let it swing past: peak |NodeG| **2.36/3.12/4.06/5.93 V** at G6/G7/G8/G10
-        against +3.9/−2.7 V. Now applied in `processPre` **before `driveMakeup`** (the physical
-        order — the pot's tap can only attenuate what IC_A already produced), reusing IC_B's
-        ceilings, so **no free parameter**. **Kept on correctness grounds, not arbiter grounds:**
-        it changes the audio (−39.7 dB at G10 T5 OD) but is inert — **44/44 captures within
-        ±0.02 dB**, compression unchanged to 0.01 dB, nine gates PASS. It matters most on **Red**
-        (17.7 k floor → far larger NodeG, no NAM reference) and at the 18 V mod. It is **not** the
-        OD ceiling — the feedback clipper holds pin7 far below the rails.
-      - **Step 1 done (2026-07-29):** decay-envelope audit (`p9_od_compression.py decay`) confirms
-        the missing ceiling on a second, unrelated signal (plucked-note decay, not synthetic level
-        steps) — OD is hot at the attack, converges to 0 at the tail, growing with drive, at both
-        220 Hz and 1 kHz. Also surfaced an unrelated finding: Boost diverges +5 dB at G10's attack,
-        decaying to 0 — nothing like it at G2–G8 — which is the discrete/level-stepped instrument
-        P10 was waiting for (see `FR_THD_AUDIT.md` P10). IMD still unaudited.
-      - **Step 2 done (2026-07-29):** the two *parallel* diode strings were modelled with a
-        **single** string's `Is` (`n_eff` correctly doubled for the 2 series diodes, but `Is` never
-        doubled for the 2 parallel strings). Fixed: `Is_MA856_parallel = 2·Is_MA856` in
-        `SW1SoftClip.h`. Confirmed exactly the predicted **~54 mV clamp shift** (Vf 1.64→1.58 V) —
-        real, free (no fitted parameter), and a genuine null improvement (median **−22.9 dB**, every
-        OD capture deeper or unchanged, up to 1.1 dB; Clean/Dist byte-identical). But it's a uniform
-        shift, not a saturating mechanism — **does not close the gap**: OD still climbs
-        monotonically −30→−3 dBFS at every drive, same shape as before. `Is`/`n_eff` together
-        confirmed **not** to reproduce the turnover, as suspected. Tracing is now exhausted on this
-        branch too (last untried topology lead) — **gate for step 3 is open.**
-      - **Step 3 done (2026-07-29) — ✅ P9's mechanism is CLOSED for G2–G7.** `MonarchChannel::sw1Ceil*`
-        — a symmetric soft ceiling on **pin7 inside the `sw1On` branch only** (`sw1CeilV` = 1.6 V,
-        `sw1CeilKneeV` = 0.5 V; identity below the knee, then a tanh approach, same map + ADAA form
-        as `railSaturate` with its own state pair). Boost/Distortion **byte-identical by
-        construction**, verified on all 30 of their captures.
-        - **The instrument was proved admissible BEFORE being fitted** (`p9_ceiling_fit.py static`)
-          — the transferable part. A memoryless map on pin7 imposes ONE level→level relation shared
-          by every drive, up to a per-drive offset. Measured pairwise on the **absolute** pin7 level
-          it holds to **0.31 dB rms over G2–G7**, degrades to 1.4 dB once G8/G10 are in, and the
-          residual **grows monotonically with the drive gap** — a second, drive-keyed error, not
-          noise. So the **fit window was set to G2–G7 up front** and G10's cost was predicted.
-        - **A physics fix was genuinely in reach and was checked, not assumed.** The best ceiling
-          landing at ~1.6 V ≈ the diode clamp is exactly what a smaller series R would do on its own
-          (pin7 climbs only because of `R11/R9` = 0.68 above the clamp), and **R11 = 1.5 k scores
-          nearly as well with no re-levelling**. Both schematics refuse it — one shared **6k8** feeds
-          the whole network (Theseus R8 ≡ matsumin R11) — so 6.8 k stands. **The matsumin BMP is
-          readable after all** (`sips -s format png`); P9 had recorded it as unopenable, which had
-          left its values relayed rather than verified. That caveat is retired.
-        - **Result:** OD comp-curve rms over G2–G7 **1.33 → 0.40 dB** (bias +0.87 → −0.25, worst cell
-          3.94 → 1.00), better at **every** drive G2–G8; confirmed on the instrument it was *not*
-          fitted to (`decay_1k` attack error G2 +1.38 → −0.20, G6 +3.12 → +0.49). Headline null
-          **median −22.9 → −23.1 dB**, G5 T5 OD **−23.2 → −24.4**, worst G2–G7 capture **−19.6 →
-          −21.9**. 13 deeper, 30 byte-identical, 1 shallower. Nine gates PASS.
-        - **⚠️ Cost, and it is structural: G10 over-corrects** (comp error flips +2.25 → −2.83 dB;
-          driven-sweep nulls lose 1.0–2.0 dB; G10 T2 OD is now the set's worst at −8.6). The pedal's
-          own OD compresses *less* at G10 than at G7 while a level-keyed ceiling bites *more* there —
-          wrong-signed by construction. The penalty is **identical at every knee**, so it is set by
-          the ceiling voltage and cannot be tuned out; ceiling 1.8 V halves it but loses on both the
-          fit window and the null. **Do not chase it with a drive-keyed ceiling** (P6's rule in
-          reverse). IMD moves OD-only and both ways (SMPTE worst +1.64, CCIF −1.07…+2.17).
-      - **What's left of P9 is G8–G10 only, and it is the SAME defect P6 and P10 have open** —
-        `driveMakeup`'s 6.0 dB cap against a measured 6.8 dB G10 need. One open defect seen from
-        three sides, not three defects.
-      - **Harness trap fixed:** `p9_od_compression.py` defaulted to its own private render dir
-        (`/tmp/monarch_renders_p9`) while everything else uses `/tmp/monarch_renders`, so it
-        **reported step 3 as "no change"** on the first run. Now shared. Same class as P8's
-        two-naming-conventions trap: **never give a harness its own render dir.**
-    - **P10: the G8→G10 discontinuity — ⚠️ MEASURED (steps 1–2 done 2026-07-29): ONE defect, a
-      ~5.0–5.3 dB G10 gain shortfall, and the fix is BLOCKED BY P9's clipper, not by the gain law.
-      Step 2 withdrew the second defect step 1 thought it had found.** The original "+4.9 dB tilt, clean sweep, 3/3 tones"
-      premise stays withdrawn (P7: that sweep carries 10–15 % THD). The replacement instrument is
-      **`p9_od_compression.py knee`** — the decay segments read against the *known input envelope*
-      instead of self-anchored, which separates **gain into the clipper** (the knee's *input* level)
-      from **ceiling** (the plateau). The knee is an **x-axis** quantity, so the captures' per-mode
-      level normalisation cannot touch it: it is the first number P10 has ever had that needs no
-      caveat.
-      - **The number:** Boost dKnee (plugin − pedal) is **±0.4 dB at G2–G8 on decay_220 and ±1.0 on
-        decay_1k, then +5.28 / +6.21 dB at G10.** The pedal's gain-vs-knob law **accelerates** at
-        the top (−1.7 dB per 0.1 knob over G2–G8, **−4.0** over G8–G10); `driveMakeup`'s capped ramp
-        decelerates. **A cap is the wrong shape, not just the wrong number.**
-      - **Two candidates built and scored; both rejected.** Raising the cap 6.0 → 7.0 (G2–G8
-        byte-identical by construction) buys 0.7–0.9 dB on the quiet Boost sweeps and loses
-        0.06–0.19 on every driven one. Replacing the cap with the shape the circuit implies —
-        `1/(R6 + R(1−d))`, one parameter, reproducing P6's fitted ramp within 0.5 dB at every drive
-        P6 could measure and supplying **+11.3 dB at G10** — moves only the nine G10 captures:
-        **Clean −1.7/−2.1/−2.5 dB better, Dist +0.8/+0.9/+0.8 worse, OD +1.6/+1.0/+1.1 worse**;
-        median −23.1 → −23.2 but the set's **worst capture −8.6 → −7.0**. Mean ≈ 0.0. Rejected.
-      - **The split is the finding.** The correction is right in the one mode with **no diode
-        clipper** and wrong in **both** diode modes — in OD it drives P9's `sw1Ceil` harder, which
-        P9 already records as over-correcting at G10; in Dist it pushes further into a clamp the
-        model already squares off too hard. So **`driveMakeup`'s cap is not "0.8 dB short", it is
-        masking a clip-path error at G10** — and the order of operations is now established: **fix
-        the G10 clip behaviour first, then reinstate the gain shape** (candidate 2 is the shape).
-        Same single defect as P6's cap and P9's G8–G10 remainder, seen from a fourth side.
-      - **Step 2 done (2026-07-29) — ⚠️ the "missing half" is WITHDRAWN. There is no falling
-        ceiling, and the plateau was never independent evidence for one.** Step 1 had filed the
-        pedal's Boost plateau falling −13.91 → −15.53 dB (decay_1k, G2→G10) against a plugin flat to
-        0.16 as a second, unexplained defect. Harnesses: `p9_od_compression.py split` + `char`.
-        - **The plateau is the other two readings added together.** With `G` = the plugin's gain
-          deficit, `Δ` = the ceiling difference and `c` = a flat per-capture level offset: the linear
-          **tail** (new in step 2) gives −G−c, the **knee** gives +G+Δ, and the **plateau** gives
-          −c+Δ ≡ knee + tail. Confirmed on the data to **≤0.29 dB on every row**. So the observables
-          have **rank 2 in three unknowns** — a ceiling error and a per-capture level offset are
-          **algebraically inseparable** here, and compression depth measures `G+Δ` too.
-        - **And the G10 ceiling number was read off a void row.** Both ends of a decay curve need a
-          guard and neither had one: a plateau is only a plateau where the **top is flat** (at low
-          drive `max(y[:3])` reads a shoulder — 2.83 dB spread at G2), and a tail only measures gain
-          where its **slope is ≈1** (at G10/decay_1k the pedal's is **0.37** — 21 dB more gain, so
-          the whole 34 dB envelope stays compressed and nothing anchors the plateau). **The two decay
-          frequencies are two instruments with complementary valid windows** — decay_1k G2–G8,
-          decay_220 G6–G10 — not one table with two columns.
-        - **Result:** on the single properly-conditioned G10 row, **dPlat = +0.12 dB — the ceilings
-          agree** (and −0.24/−0.20/−0.05/+0.12 across decay_220's whole valid G6–G10 span). Step 1's
-          `dKnee` +6.21 at G10 is void as well; the valid figure is **+5.28 against a tail reading of
-          −4.96**, two quantities from opposite ends of the same curve, which is the independent
-          confirmation step 1 wanted. **G10's Boost gain shortfall is ~5.0–5.3 dB, confirmed twice.**
-        - **What the G10 anomaly actually is — a knee SHAPE, which no ceiling can produce.** dBc is
-          immune to both `c` and `Δ`. Boost `lvl_-3`: pedal H3/H5/H7 −15.7/−22.8/−27.2 (G8) →
-          **−21.2/−30.4/−41.6** (G10) against a plugin flat at −16.7/−25.2/−30.9 — **order-
-          progressive** (5.5/7.6/14.4 dB, a rounding signature), fading at `lvl_-6/-9`, present in
-          **Distortion** above G6 and **absent in Overdrive**, i.e. tracking how *square* the
-          waveform is rather than the mode. Not noise: the captures are **NAM model renders**, so
-          there is no measurement noise at all (interstitial floor −126…−148 dBc). **Leading
-          hypothesis (not closable from here): per-model fit error at the squarest target in the
-          set** — no circuit mechanism low-passes more as DRIVE rises (tone stack is knob-fixed;
-          1 kHz at ±3.3 V is orders of magnitude inside the 4580's slew/GBW), and H7 spreads 10 dB
-          across TONE at fixed drive, which has no physical reading either.
-      - **Step 3 done (2026-07-29) — ⚠️ the PRECONDITION is withdrawn. The G10 clip path is fixable
-        only down to the target's own floor, and that floor is now measured.** Nothing shipped; the one
-        DSP change (`sw1CeilSlope`) is a generalisation left switched off and verified bit-identical.
-        - **The gain error was NOT what made the ceiling inadmissible at G8–G10.** P9 step 3 read the
-          residual-grows-with-drive-gap signature as `driveMakeup`'s cap mixed in. Removing the
-          measured error first (`static --gain-fix`; the probe gained an optional per-drive pre-clip
-          gain, applied between `processPre` and `processClip`, which is exactly equivalent to raising
-          `driveMakeup` since a scalar commutes with `driveShelf`'s linear filters) moves the
-          all-drives residual only **0.59 → 0.54 dB** (worst 1.37 → 1.42). The reason is geometric:
-          **pin7 is a near-saturated coordinate at G10** — above the clamp pin7 ≈ `Vf + i_in·R11`, so
-          5.28 dB of extra pre-clip level moves it just **1.13 dB** at the quiet end and **0.41** at
-          the hot end. P9's inference was reasonable and is falsified. (The fix's size is now doubly
-          sourced: **+5.28 dB measured** vs **+5.30** from candidate 2's own hyperbolic shape.)
-        - **`need` explains the "identical at every knee" penalty.** The extra compression the pedal
-          requires is nearly drive-INDEPENDENT (mean **3.11 dB**, spread 1.71) while a ceiling
-          *voltage* must supply more where pin7 is higher, and does (mean **3.20**, spread **3.06**).
-          The mean was always right; only the distribution across the knob was wrong.
-        - **Two shapes built, neither shipped.** A **fixed-ratio power law** wins the axis (0.946 →
-          0.714 dB rms) but gives up the validated window (0.315 → **0.486**) and re-levels OD ~1 dB.
-          A **ceiling with residual slope** `m` (contains the shipped map at m=0, so the window can be
-          held) gives 1.6/0.3/0.10 → all 0.842, fit 0.318, dG −0.17 — better on every column. It still
-          did not ship, because **the G10 error is in the MIDDLE of the level range, not the top**: at
-          m=0.30 the −3 dBFS cell goes −2.40 → −0.41 dB while −12 dBFS goes −3.36 → −3.03. **The
-          aggregate rms hid that** — fourth marginalisation instance, first caught by decomposing an
-          aggregate this harness had just built.
-        - **The reason to stop, and the transferable artifact: the compression instrument now has a
-          TARGET-SIDE FLOOR** (`p9_ceiling_fit.py floor`). TONE is the probe *because the circuit makes
-          it provably irrelevant* — the tone stack is post-clip and linear, so a self-anchored comp
-          curve must be tone-independent, and the plugin's spread is 0.00–0.08 dB. The pedal's OD
-          spread is **0.16 dB at G2, 0.12 at G5, 1.19 at G10** — about **half** of G10's 2.4 dB
-          residual is the target disagreeing with itself. Also ruled out along the way: the **Stage-1
-          rails** (comp rms 0.946 with them on or off, identical to 3 dp — re-confirming their "inert"
-          verdict on a second metric), and the pedal's G10 **turnover** (output falls 0.38 dB at the
-          hottest step, which no monotone memoryless map can produce — but it is inside the floor and
-          appears in Clean and Dist too, so not a dynamic mechanism).
-        - **Consequence: candidate 2 reverts from "blocked" to "a decision".** Its cost is a mode trade
-          at G10 and nothing else (Boost 1.7–2.5 dB deeper, OD 1.0–1.6 shallower, Dist ~0.8, mean ≈ 0,
-          worst capture −8.6 → −7.0) and **no measurement is left that would settle it**. Left
-          rejected on the standing rule that the worst capture should not get worse.
-        - **Rule it adds — measure the target's floor on the INSTRUMENT you are about to fit, not just
-          on the signal.** P9 required *admissible*, step 2 added *identifiable*, this adds
-          **resolvable**. Look for a knob the circuit makes irrelevant to the quantity being measured:
-          variation along it is instrument error, for free. Corollary: an aggregate rms is a screen, not
-          a verdict — decompose it along the axis you mean to fix before believing an improvement.
-        - **Consequences:** supply sag needs no further consideration (there was never a symptom);
-          the **G10 × hottest-level corner has a target-side floor — do not fit a mechanism to it**;
-          and step 1's order of operations stands unchanged (clip path first, then candidate 2's
-          hyperbolic gain shape).
-        - **Rules it adds:** *guard both ends of a curve before reading anything off it* (a plateau
-          needs a flat top, a tail needs unit slope — nine audit items read these segments without
-          either check; same failure class as P4's cross-tab and P7's instrument-validity rule, one
-          level down). And *count observables against unknowns before naming a defect*: P9 step 3
-          required a nonlinearity be proved **admissible** before fitting; this adds that a defect
-          must be proved **identifiable** before it is named.
-    - **⚠️ Capture-axis caveat (2026-07-29, widened by P10 step 2) — absolute levels are a
-      PER-CAPTURE property on EVERY axis; hold both knobs fixed when comparing them.** Each of the
-      44 captures is an independently trained NAM model, so no two share an absolute-level
-      calibration and nothing would make an offset knob-*selective*. Only x-axis quantities (the
-      clip knee), self-anchored shapes and dBc ratios cross captures. TONE is merely where it was
-      caught: the original reading below said "comparable across DRIVE, but NOT across TONE", and
-      reading a drive-indexed level difference as a *ceiling* is exactly the error P10 step 1 then
-      made. The captures carry a flat, capture-side gain that varies with the
-      TONE knob: plugin-minus-pedal broadband error runs **−3.2 / −1.3 / +1.8 dB at T2 / T5 / T8**,
-      the same ±0.2 dB in **all three modes at every drive**, frequency-flat to ±0.5 dB over
-      100 Hz–4.7 kHz. It **cannot** be the tone stack — at 100 Hz C6 is effectively open, so the pot
-      is a plain series resistance into the load and LF output *must* rise with TONE; the plugin's
-      does (+1.3 dB T2→T8) and the pedal's **falls 3.7 dB**. Pedal and plugin agree on the tilt
-      *span* to 0.01 dB, so the filter matches and only the level differs — a level that moves with
-      a knob but not with frequency is a volume setting, not a filter. Invisible to the null
-      (best-fit gain per capture) and to the FR tables (shape metric), which is how it survived this
-      long. **Do not read a tone-indexed level difference as a plugin defect.** Recorded in
-      `p9_od_compression.py`'s module docstring.
-    - **Never audited at all** (in the captures, absent from `comprehensive_data.json`): **IMD**,
-      **dynamics/compression** (`lvl_-30…-3`), **discrete-tone THD**, **decay**. P2/P3/P6 all changed
-      the clip path underneath them.
-    Audit
-    tools: `analysis/fr_thd_audit.py` (`evens` view = the even-series rms/bias table, `--base` for
-    before/after), `analysis/p2_rail_asym_fit.py` (fast clip-nonlinearity fit loop, now with an IMD
-    guard — also the P3/P3.1 harness), `analysis/p31_harm_floor.py` (harmonic noise floor),
-    `analysis/p6_peak_fit.py` (FR-peak + compression-tilt subset harness, ~15 s; its `--in-gain`
-    probe is the clip-depth calibration that identified P6), **`analysis/shape_audit.py`** (FR error
-    *shape*: the `cross` drive×level cross-tab that broke P4, and `clean` = Boost/clean-sweep, the
-    only near-linear instrument in the set — **and only up to G6**, per P7),
-    **`analysis/p7_eq_refit.py`** (the drive-keyed EQ set read as ONE set: `raw` strips all three to
-    expose the underlying defect, `seesaw` collapses it to the 508 Hz pivot, `fit` refits them
-    jointly, `--base pre-p7` re-reads a pre-P7 JSON), **`analysis/offline_null_probe.py`** (score an
-    EQ hypothesis on the arbiter without rebuilding — `transfer` gives complex pedal/plugin
-    magnitude **and phase**, `shelf` fits on the complex residual, `null` re-nulls the kept renders),
-    **`analysis/p9_ceiling_fit.py`** + **`analysis/p9_pin7_probe.cpp`** (P9 step 3 — `static` is the
-    **admissibility** test to run *before* fitting a clip-path nonlinearity, `r11` asks whether the
-    defect is a component value instead, `fit`/`probe` sweep the ceiling. The probe includes the DSP
-    headers ONLY, so a candidate is a **~1 s** recompile of the real `processClip` instead of a
-    plugin rebuild + 44-capture render; watch its `dG` column, because a self-anchored objective
-    cannot see a candidate re-levelling the whole mode).
-    **`analysis/p9_ceiling_fit.py`'s THREE GATES** (P10 step 3 added two) — different questions, run
-    all three before fitting anything in the clip path: `static` = **admissible** (can one memoryless
-    map explain every cell? `--gain-fix` removes the gain path's measured error first, because the test
-    absorbs only a *vertical* offset and a wrong pre-clip level displaces a drive along the *x* axis);
-    `floor` = **resolvable** (the target's own noise on this instrument, probed via TONE, which the
-    circuit makes provably irrelevant to a self-anchored comp curve — worst cell OD G10 at 1.19 dB);
-    `need` = **right shape** (requirement vs supply per drive — what showed the requirement to be
-    drive-independent while a ceiling voltage must ramp). `ratio` sweeps `sw1CeilSlope`. ⚠ `probe`
-    leaves its candidate in the header on purpose — **never `git checkout` that file to restore it**
-    while other DSP work is uncommitted (it silently discards it; copy the file aside instead).
-    **`analysis/p9_od_compression.py knee`** (P10 — the ONE view that separates *gain into the
-    clipper* from *ceiling*: the decay segments read against the known input envelope, so the knee
-    is an **input** level and needs no normalisation. **Boost rows only** — in OD the output keeps
-    climbing above the clamp so the "plateau" is a slope and the metric prints artifacts, in Dist it
-    never falls 3 dB inside the segment above G6).
-    **`analysis/p9_od_compression.py split`** (P10 step 2 — run this BEFORE trusting `knee`: it adds
-    the curve's linear **tail**, proves `dPlat ≡ dKnee + dGlin` so the plateau is not independent
-    evidence, states the rank-2 degeneracy that makes a ceiling error and a per-capture level offset
-    inseparable, and **guards both ends of the curve** — plateau flatness and unit tail slope — which
-    is what shows `knee`'s G10/decay_1k column to be void) and **`char`** (the dBc knee-shape view,
-    the only evidence class immune to both level offsets and ceilings; prints the interstitial floor
-    so quiet orders can be trusted — NAM renders have no measurement noise, ≈−140 dBc).
-    **Every `p9_*` view reads `/tmp/monarch_renders`** — the shared dir all the other harnesses use;
-    `p9_od_compression.py` had its own and silently read a stale vintage (fixed in P9 step 3).
-- **v1.5 — CPU pass + the ADAA identity-region droop (OPEN). → `analysis/CPU_AUDIT.md`** — the span
-  split, every lever's measured cost, the rejected levers with their evidence, the measurement
-  protocol and the ordered plan live there; don't re-derive them here. **Steps 1–4 are shipped.**
-  **Step 4 (2026-07-30):** `MonarchChannel::fastTanh`, a Padé [7/6] rational replacing `std::tanh`
-  in `injectEvenHarmonic`/`odLowShelf`'s four calls — CPU −10.0/−31.4/−10.5 ns of the clip span
-  (Boost/OD/Dist), 44-capture null and H2/H4/H6 table **identical to 0.1 dB** before/after (CPU_AUDIT
-  §5c). Only `processPre` → base rate (§6.3) remains, and it's a *judged* change, not a free one.
-  - **What is CERTAIN, because it is arithmetic.** First-order ADAA of the *identity* map is not the
-    identity. Below the knee `railAntideriv` returns `½x²`, so the difference quotient is
-    `½(x² − x₋₁²)/(x − x₋₁)` = **`(x + x₋₁)/2`** — a midpoint average, i.e. a half-sample delay and a
-    one-zero HF rolloff `|H(f)| = |cos(πf/fs_os)|`. Per stage, at 16 kHz: **−6.02 dB at 1x, −1.25 at
-    2x, −0.30 at 4x, −0.07 at 8x.**
-  - **And it is definitely reached.** `railSaturateADAA (pin7)` at `processClip` runs
-    **unconditionally in every mode**, while in OD the feedback clipper holds `|pin7| ≤ 1.64 V`
-    against a knee of 2.4/3.6 V — so in Overdrive that call is *only ever* the midpoint filter. Same
-    applies to `sw1CeilADAA` below its 0.5 V knee and IC_A's `railSaturateADAA` below 2.4 V, and
-    they **cascade**: three stages at 2x is 0.866³ ≈ **−3.7 dB at 16 kHz**.
-  - **⚠️ This collides with a shipped explanation, and that is the interesting part.** dsp.md
-    attributes the top-octave deficit to **bilinear warping** and records it as "16 kHz: −2.4 dB
-    @48k → −0.2 @96k → ~0 @192k". The ADAA droop has the **same monotone collapse with OS rate**, so
-    the `warp*` shelf — which was *fitted* to a "warp-free baseline vs 8x" deficit — has been
-    absorbing **both mechanisms as one**. That is P7's rule again, a fourth time: **two corrections
-    overlapping in band AND in keying, fit as one.** The tone-safety note in circuit.md ("in OD the
-    rails never engage → no tone change, verified byte-for-byte") is true of the *saturation* and
-    false of the *ADAA wrapper*.
-  - **✅ Both halves of that were SHIPPED as step 3 — see the step 3 entry below.** The early-out
-    removes the droop at source; `warp*` was then refit and its base lift fell **10.6 → 1.0 dB**,
-    confirming the collision above was not just real but the *majority* of what the shelf did.
-  - **⚠️ But it is NOT the big CPU win — that is the oversampled LINEAR spans, measured
-    2026-07-29 by `analysis/perf_split_probe.cpp`** (header-only, ~1 s compile, times each span
-    separately at 8x, drive 0.7). ns/sample: **Boost pre 40.1 / clip 43.9 / post 27.3**, OD
-    40.6/95.1/26.9, Dist 40.4/69.9/27.1 → the **linear share (pre+post) is 60.6 % / 41.5 / 49.2**.
-    `processPre` (Stage-1's two one-port solves + four shelves) and `processPost` (the 3-port tone
-    R-type + volume) **cannot alias**; they are paid ×OS only to shrink the bilinear warp, which is
-    a *filter* problem. Aliasing is the only thing oversampling is irreplaceable for.
-  - **✅ Step 1 SHIPPED (2026-07-29): `processPost` runs at the BASE rate** —
-    `MonarchChannel::postAtBaseRate`, with `prepareLinear (rate, postRate)` and the tone/volume loop
-    moved after `processSamplesDown` in `processBlock`. **CPU −20 % at 4x/8x** (8x Boost 20.4 → 16.3,
-    OD 35.1 → 27.2, Dist 25.8 → 21.6, render 18.6 → 15.0; 2x −11…−17 %), and **1x is unchanged
-    (4.2 → 4.1), which is the built-in control** — at 1x there is no OS span, so the change *must*
-    be a no-op, and it is.
-    - **And the null got BETTER, which was not the plan: median −23.1 → −23.4 dB, 34 of 44 deeper,
-      0 shallower, worst capture unchanged at −8.6, best −25.6 → −27.0.** All three modes improve
-      (mean Clean −0.54 dB, OD −0.38, Dist −0.17).
-    - **⚠️ But it improved for the WRONG REASON, and that is the load-bearing part.** Per-band, the
-      gain is entirely HF — 2–6 kHz **−0.45 dB (33/40 deeper)** and 6 kHz+ −0.41, with 100–300 Hz and
-      300 Hz–1 k flat (−0.02/−0.03). A base-rate tone stack is *less* faithful to the analog
-      prototype than an oversampled one; it simply droops the top octave, and the plugin was already
-      slightly **hot** up there — which is what `hfTrim` (−1.3 dB @ 4.5 kHz) exists to trim. So this
-      change is silently supplying **the rest of a trim that was under-fitted**, and the null is
-      rewarding it. **Do not read this as "base rate is more accurate".**
-    - **⚠️ Consequence — a double-correction trap is now armed.** `hfTrim` and `warp*` were both fit
-      with the tone stack warp-free at 4x/8x. Anyone re-fitting either one (the rest of v1.5) must
-      re-fit **with this change in place**, or they will correct the same HF excess twice. That is
-      P7's rule for the fifth time: **corrections overlapping in band must be fit in one pass.**
-    - **Left open: `processPre`.** The bigger share (40 ns/sample, all three modes), but it holds
-      Stage 1, whose gain peak *sweeps* 2.8–5.0 kHz with DRIVE — which is exactly why the 2026-06-29
-      note rejected a fixed prewarp. That objection no longer transfers automatically: `setDrive`
-      recomputes coefficients per block, so a **drive-dependent** prewarp is available in a way a
-      fixed one was not. Re-derive before assuming the old rejection still holds.
-    - **Don't quote the span split as a plugin-level saving.** The probe times the channel only; the
-      oversampler's own up/downsample FIR cost is unchanged, so the realisable figure is below the
-      arithmetic — the measured 20 % against a predicted ~24 % is exactly that gap. Size on
-      `PerfBenchmark`, not on the span table.
-  - **⚠️ It CHANGES THE AUDIO and the warp shelf was fitted with the droop in place** — that ordering
-    (early-out → refit `warp*` → judge on the null, never on FR alone) was followed in step 3 and the
-    prediction held: shipping the early-out alone left 2x **+1.76/+2.44/+2.10 dB hot** at 8/12/16 kHz.
-  - **✅ Step 2 MEASURED (2026-07-30). Where the per-sample CPU actually is, one lever shipped free,
-    and the biggest-looking lever KILLED on measurement.** Method: `analysis/perf_split_probe.cpp`
-    built against patched-header variants (the `p9_ceiling_fit` pattern — ~1 s per arm), run
-    back-to-back idle, ≥2 passes, baseline reproducing to ~1 %. Per-sample cost at 8x, one pedal
-    channel: Stage 1 WDF **18.0**, drive/warp/HF shelves **3.4**, **IC_A rail-sat 22.3** (≈18 of it
-    ADAA), WDF clip solve + DC block 7/29/26, IC_B rail + `sw1Ceil` ADAA 7/19/6.5,
-    **`injectEvenHarmonic` 27.6/40/36**, `odLowShelf` 1.5/7.5/1.5, `processPost` 27 (base rate) →
-    channel totals **114 / 166 / 141 ns** (Boost/OD/Dist).
-    - **The headline is where the money goes: the two EMPIRICAL correction blocks cost more than
-      every real circuit solve combined.** In Boost, `injectEvenHarmonic` (27.6) + ADAA overhead (25)
-      = 52.6 ns against 23 ns for Stage 1 + Stage 2. IC_A's rail-sat — added by P9, documented inert
-      (44/44 captures within ±0.02 dB) — costs **more than Stage 1 itself**.
-    - **✅ Shipped: the zero-coefficient injection branch.** `asymBoost` is a compile-time 0 (P2 moved
-      Boost's mid/high evens to the rails) while `asymLowBoost` = −0.017 keeps the low path live, so
-      in Boost the mid/high term was computing `tanh` and multiplying by literal 0.0. Hoisting the
-      coefficient out and skipping the gate tanh + multiply-add is **byte-identical, verified by
-      `cmp` on full-precision dumps over 72 configs (2 channels × 3 modes × 4 drives × 3 tones) plus
-      mid-stream mode changes**. Worth **−6.9 ns of Boost's 44 ns clip span (−16 %), −4 % of the
-      channel**; OD/Dist unchanged. Nine gates + all six ctest gates PASS.
-      - **The other half is NOT free, and the dump probe is what proved it.** Skipping `soft`/`meanSq`
-        too doubles the saving to −12 ns, but `meanSq` is a 50 ms running mean read only when the
-        coefficient is live — so in Boost its only job is to be **warm for a later mode switch**. The
-        first `cmp` failed at exactly one byte: the first sample of the OD segment after a Boost→OD
-        switch. The term it lands in is O(0.03 V) ≈ −31 dB, swelling over 50 ms rather than clicking.
-        **Rule: "multiplied by zero" is not the same as "dead" when the branch also maintains state
-        another mode reads.** Test mid-stream mode changes, not just steady-state renders per mode.
-    - **❌ KILLED: rate-gating ADAA (the 18–22 % lever).** ADAA and oversampling look like two ways to
-      buy the same thing, so "keep it at 1x/2x, drop it at 4x/8x" was the obvious 22 %. Measured with
-      `OSFidelity` (c1) — new section, new `setAdaaEnabled` A/B hook on the channel and processor —
-      ADAA is worth **33.3 / 30.8 / 45.1 / 45.9 dB of alias suppression at 1x / 2x / 4x / 8x.**
-      Oversampling does not subsume it at any factor, because at hard clip the rail knee's series
-      reaches far past the OS Nyquist. Dropped permanently; dsp.md's "in addition to oversampling" was
-      right and is now a number.
-      - **⚠️ And the first version of this measurement said the OPPOSITE — 0.22 dB at 1x, nothing at
-        4x/8x — because the metric was floor-limited.** `OSFidelity` (b)'s broadband harmonic-vs-alias
-        residual moves only −47.6 → −48.8 dB from 1x to 8x, so it is dominated by things that are not
-        aliasing and cannot resolve a lever that acts on aliasing. Fixed by summing **named fold bins**
-        (9 kHz into 48 k → harmonics 3–7 fold to 3/6/12/15/21 kHz, none coinciding with 9 or 18 k), and
-        the new metric self-validates: alias-on falls 37 dB across the OS range. **Rule: before reading
-        a difference off a metric, check the metric responds to the axis you are asking about** — a
-        floor-limited aggregate reads as "no effect" and is indistinguishable from a real null result.
-        Same family as P4's marginalisation trap, one level lower: not the wrong aggregation, the wrong
-        **instrument sensitivity**.
-    - **⚠️ The droop is REAL, is 4 stages deep, and `warp*` has mostly been correcting it — not warp.**
-      `OSFidelity` (c2), small signal (rails never engage, so only the midpoint filter is left):
-      ADAA-off minus ADAA-on at 16 kHz is **+24.08 / +5.00 / +1.20 / +0.30 dB at 1x / 2x / 4x / 8x**,
-      which is **exactly 4.00× the per-stage arithmetic at every rate** — and 4 = **2 op-amp ceilings
-      × 2 series pedal channels** (6 in OD, which has `sw1Ceil` too). So the mechanism is confirmed,
-      not merely plausible. Against (a)'s total 1x deficit, **12.04 of the 13.12 dB at 12 kHz and
-      24.08 of the 32.52 at 16 kHz is ADAA, not bilinear warp** — correcting the shipped attribution
-      in dsp.md. **At 2x the droop (5.00 dB) EXCEEDS the net 2x-vs-8x deviation (−3.51 dB)**, i.e.
-      `warp*` is over-correcting to cover it, so the early-out at 2x without a refit over-brightens
-      16 kHz by ~5 dB. **That refit budget, per rate, is the number step 2 was waiting for** — the
-      early-out is now unblocked and the order stands: early-out → refit `warp*` **and** `hfTrim`
-      together (v1.5 step 1 under-cut `hfTrim`; P7's rule, sixth instance) → judge on the 44-capture
-      null.
-    - **Still open at this point, both judged changes rather than free ones:** a rational `fastTanh`
-      in `injectEvenHarmonic`/`odLowShelf` (estimated −15/−16/−14 ns here — **shipped as step 4,
-      see below, at the actually-measured −10.0/−31.4/−10.5 ns**), and `processPre` → base rate
-      (18 ns ×OS, needs the drive-dependent prewarp — still open). **Do NOT expect a plugin-level
-      saving equal to the span arithmetic** — the oversampler's own FIR is unchanged, which is why
-      v1.5 step 1 delivered 20 % against a predicted 24 %. Size on `PerfBenchmark`, idle, both arms.
-    - **No HQ/Eco button, and the measurements now say so twice.** v1.1 rejected the diode-quality
-      lever; step 2 rejects the ADAA lever. What is left is either free (shipped above), a voicing
-      decision to be judged on the null (not a user control), or the OS factor — which is already two
-      controls. The one thing that changed: 4x/8x are not overpaying for antialiasing after all.
-  - **✅ Step 3 SHIPPED (2026-07-30): the ADAA identity-region early-out + the `warp*` refit it forced.
-    The headline is not the CPU — it is that `warp*`'s base lift falls 10.6 → 1.0 dB, because ~90 % of
-    what that shelf corrected was never bilinear warp.** `MonarchChannel::adaaIdentityEarlyOut`:
-    return `x` when the whole interval [x₋₁, x] is inside the linear region, on all three maps. State
-    is still maintained (F = ½x², no transcendental), so the first sample crossing the knee is still
-    exact and **nothing above the knee changes** — all 33–46 dB of step 2's alias suppression is kept.
-    `OSFidelity` (c2) now reads **0.00 in every cell**. Nine per-stage gates + six ctest gates PASS.
-    - **⚠️⚠️ TWO MORE INVALID INSTRUMENTS, and this is the transferable part — `OSFidelity` (a) and
-      (c2) were both measured ABOVE the clip knee.** Both ran at 0.01 FS; Stage 1's gain peaks near
-      4 kHz, so pin7 sat at ~0.7 V, past `sw1CeilKneeV` = 0.5 V. So the "small-signal FR" was being
-      read **through the soft clipper, in exactly the presence band `warpPivotHz` serves**. The tell
-      in (c2) was arithmetic: the shipped table read +0.09/+2.14 at 4/8 kHz against a predicted
-      1.21/5.00 while matching 12.04/24.08 at 12/16 kHz — two cells that looked like data. The tell in
-      (a) was a disagreement **no filter-model error can produce**: a candidate shelf's measured
-      contribution matched its analytic response to **0.01 dB at 4x and 0.17 at 2x but was off 1.64 dB
-      at 1x/8 kHz, NON-monotonically in frequency**. Both fixed at 5e-4, where the analytic models
-      reproduce every cell. **Three of `OSFidelity`'s four sections have now been caught reading an
-      invalid instrument** ((b) floor-limited, (a) and (c2) above the knee) — the family that started
-      with P4's marginalisation trap, but one level lower: not the wrong aggregation of a good
-      instrument, the wrong **operating point**.
-    - **What the residual warp actually is, once both errors are gone:** −0.14/−0.86/**−3.08** dB at
-      8/12/16 kHz at 1x, ≤0.44 at 2x, ≤0.08 at 4x — i.e. **nothing below 12 kHz at any rate.** Refit
-      (`analysis/v15_warp_refit.py`; weighted to the presence band, constrained to **vanish at 8x** so
-      the accuracy reference is not moved, and constrained so the prewarped pole stays inside
-      Nyquist): scale **10.6 → 1.0**, exp **2.20 → 1.80**, pivot **6500 → 17000**, cap **3.0 → 1.0**.
-      Before → after vs 8x: **1x** −3.46/−13.21/−32.59 → **+0.28/+0.22/−0.75**; **2x**
-      +1.02/−0.47/−3.51 → **+0.08/+0.05/−0.14**; **4x** +0.14/−0.17/−0.75 → **+0.02/+0.01/−0.02**.
-      2x is the LIVE default and 4x the RENDER default, so live playback and bounce now share the
-      whole audible top — the thing the 06-30 recalibration was aiming at and half achieved.
-    - **The pivot move needed a guard the old one never did.** `shelfCoeffs` prewarps the pole to
-      `pivot·√ghi`; at 17 kHz that crosses π/2 at 1x on a **32 kHz** session and returns an
-      **unstable** filter. `prepareLinear` now slides the pivot down with the rate
-      (`warpPoleMaxFrac` = 0.42) — inert at 44.1/48 kHz, binding at 32 kHz (17.0 → 12.7 kHz); verified
-      finite and bounded over {22.05, 32, 44.1, 48, 88.2, 96} kHz × {1,2,4,8}x. `warpMaxDb` = 1.0 is
-      load-bearing for the same reason (at 44.1 kHz 1x the uncapped law asks 1.17 dB).
-    - **Arbiter: NEUTRAL, as predicted.** 44 captures: median **−23.45 → −23.45**, mean +0.01 dB,
-      10 deeper / 11 shallower / 23 unchanged, largest move ±0.3 dB. The null renders at 4x and below
-      8 kHz that path moved ≤0.17 dB; everything the change did lives at 1x/2x or above 8 kHz, where
-      the captures carry ±18 dB of spread. **A null-neutral result is the correct outcome for a change
-      to an internal-consistency axis** — had it moved the null much, the refit would have been
-      absorbing a capture-accuracy error it has no business touching.
-    - **`hfTrim` was benched in the SAME pass (P7's rule) and deliberately NOT moved.** The two
-      instruments disagree in sign and both effects are below what either resolves: the clean sweep
-      says the plugin is ~0.4 dB **dark** (wants less trim), the arbiter says −0.3 dB of HF is 0.023 dB
-      **better** (wants more). The null's preference is `offline_null_probe`'s own documented
-      driven-sweep dulling bias, so neither is actionable. Stays at −1.3 dB @ 4.5 kHz.
-    - **CPU −5.5 / −4.9 / −4.4 ns per channel (−2.8…−5.9 %), which is HALF what §6.1 predicted.**
-      That −12/−13/−11 came from the *total ADAA overhead*, i.e. what you would save if the early-out
-      fired every sample; at a hot operating point it does not, and below the knee the ADAA path was
-      never expensive (½x², no transcendental) — what is removed is a divide and two branches.
-      **Rule: an early-out's saving is a property of the SIGNAL, not of the code it skips.** At plugin
-      level this is inside `PerfBenchmark`'s ±2 %, so **no plugin-level figure is claimed and the
-      README table is unchanged** — §0 rule 2 forbids quoting a single-arm reading against a
-      remembered one.
-  - **✅ Step 4 SHIPPED (2026-07-30): rational `fastTanh` in `injectEvenHarmonic`/`odLowShelf`.**
-    `MonarchChannel::fastTanh` — a Padé [7/6] rational, clamped to exactly ±1 beyond |x| ≥ 4.97 (the
-    raw polynomial diverges unbounded past there; several of these calls saturate hard, e.g.
-    `odGateScale·clipEnv` can exceed 40). Matches `std::tanh` to **<1.2e-5 abs error over [0,4]**,
-    <1e-4 near the clamp — far tighter than the ~1 % (−40 dBc) precision the fitted empirical terms
-    it feeds were tuned to. Swapped into all **four** `std::tanh` calls (`soft`, the mid-band gate's
-    `k`, `softLow`, `odLowShelf`'s `gate`); `railSaturate`/`sw1Ceil` keep exact `std::tanh` (their
-    ADAA antiderivative is `log(cosh)`, not this approximation).
-    - **Measured with the same before/after protocol as step 3** (git-stash the header, rebuild
-      `perf_split_probe` + `PedalRender` per arm, idle, back-to-back, ≥2 runs; `pre`/`post` spans
-      unchanged between arms, confirming isolation to `clip`). CPU **−10.0 / −31.4 / −10.5 ns** of
-      the clip span (Boost/Overdrive/Distortion) — **bigger and less even than the original
-      CPU_AUDIT estimate of −15/−16/−14 ns**, because the call count is mode-gated: Boost hits 2 of
-      the 4 `tanh` calls, Distortion 3, Overdrive all 4 (`asymOD`/`sw1On` both live) — the uniform
-      prior estimate didn't account for that. **Confirmed at plugin level with `PerfBenchmark`**
-      (idle, both arms, ≥2 runs, latencies unchanged) — every OS×mode cell dropped: 8x Boost 15.6 →
-      13.6 %, OD 27.8 → 23.45 %, Dist 21.1 → 18.95 %, render 15.45 → 13.3 %, well outside the ±2 %
-      noise floor at every factor. **README's Performance table updated** (2x ~4–7 → ~4–6 %, 4x
-      ~8–14 → ~7–12 %, 8x ~16–27 → ~14–23 %, render ~15 → ~13 %).
-    - **Arbiter: identical at reported precision, not merely neutral.** The 44-capture null
-      (`run_validation.py`) reads **every one of the 44 captures the same to 0.1 dB**, median
-      unchanged at −23.4. The even-harmonic series (`fr_thd_audit.py evens` — the H2/H4/H6 rms/bias
-      table P3/P3.1 fitted through these exact calls) is **identical to 0.1 dB in all three modes**,
-      silent-cell count unchanged. Nine per-stage gates + six ctest gates + auval PASS.
-    - See `CPU_AUDIT.md` §5c for the full write-up.
+- **v1.0 — Project cleanup.** ✅ Done — repo/docs audited and condensed.
+- **v1.1 — CPU / latency / memory optimization pass.** ✅ Done (2026-06-29).
+- **v1.4 — FR / harmonic accuracy pass.** ✅ Done (2026-07-29). Full findings and the
+  worked P0–P10 plan → `analysis/FR_THD_AUDIT.md`. The ordered plan is finished; all residual
+  gaps are accepted and documented.
+- **v1.5 — CPU pass + the ADAA identity-region droop.** ✅ Done (2026-07-30). Full
+  findings, span split, every lever's measured cost, rejected levers with evidence, and
+  measurement protocol → `analysis/CPU_AUDIT.md`. Steps 1–5 are shipped.
+
+**Audit docs:** `analysis/FR_THD_AUDIT.md` (v1.4 accuracy), `analysis/CPU_AUDIT.md` (v1.5 CPU),
+`analysis/MID_EQ_AUDIT.md` (mid-EQ correction audit), `analysis/VALIDATION_REPORT.md`
+(per-capture null breakdown).
 
 ---
 
@@ -779,241 +72,51 @@ clang-format -i src/**/*.{cpp,h}
 stages, `MonarchChannel`, `processBlock`, and oversampling are done (build.md Validation Gates,
 all PASS, auval PASS). The UI is complete: peripheral shared-look shell (side panels, OS strip,
 resizable window) + the purple/gold `PedalFace`. Factory presets (5) ship via the host's native
-preset browser. Supply-voltage mod (9/12/18V) and rail-saturation ADAA are in. Latest release
-engineering: CI/CD (`.github/workflows/`), cross-platform VST3, and per-platform installers
-(`installer/`) — see README.
+preset browser. Supply-voltage mod (9/12/18V) and rail-saturation ADAA are in. CI/CD
+(`.github/workflows/`), cross-platform VST3, and per-platform installers (`installer/`) — see README.
 
-**Calibration result (Step 11, real-pedal A/B; refreshed v1.5 step 3, 2026-07-30):** the plugin nulls
-against 44 NAM captures (drive G2–G10, tone T2–T8, Clean/OD/Dist) at **−8.6 to −26.9 dB, median
-−23.4 dB**, and is at **−22.0 dB or better on every capture from G2 to G7**. Per-mode at G5 T5:
-Clean **−23.9**, OD **−24.8**, Dist **−23.1**.
-**v1.5 step 1** (Tone/Volume at base rate) deepened 34 of 44 with **0 shallower** — but the gain is
-entirely HF and is compensating an under-fitted `hfTrim`, not added accuracy; see the v1.5 entry
-before re-fitting anything in that band. **v1.5 step 3** (ADAA early-out + `warp*` refit) is
-**null-neutral** (median unchanged, 10 deeper / 11 shallower / 23 unchanged, ≤±0.3 dB) *by design* —
-it fixes the agreement between OS factors, an axis the 4x-rendered null cannot see. Its `hfTrim`
-verdict supersedes step 1's note above: measured on both instruments, the trim is inside the noise
-in both directions and stays at −1.3 dB. (Was −6.6 to −23.2,
-median −16.4→−16.6 after P2/P6. **P7** deepened the mean 2.46 dB and the median 4.9 dB — 24 captures
-deeper by up to 9.1 dB, concentrated at G2–G4 where the double-counted EQ correction lived, 2 shallower
-by ≤0.9 dB, and 18 byte-identical because both refitted instruments are exactly zero at and above drive
-0.55. **P8** then deepened mean and median a further 1.05 dB — 38 of 44 deeper by up to 3.4 dB, 6
-shallower by ≤0.2, and it is the first change to move the **G10 floor**, taking the set's worst capture
-from −6.6 to −8.7 dB. **P9 step 2** then deepened every OD capture by up to 1.1 dB — median −22.6 →
-−22.9 — by fixing the SW-1 diode network's parallel-string `Is` (Clean/Dist byte-identical). **P9
-step 3** then added the SW-1 output ceiling — median **−22.9 → −23.1**, 13 deeper, 30 byte-identical
-(Boost/Dist untouched by construction), 1 shallower, and the worst G2–G7 capture −19.6 → −21.9; its
-one real cost is that **G10 OD now over-corrects** and is the set's worst capture at −8.6. See the
-P9 roadmap entry.) Best
-per-mode null at the labelled mid-gain settings (G5 T5): Clean/Boost −23.3, OD **−24.4**, Dist −22.7 dB.
-Excellent to mid gain; shallower only at very high drive (G8–G10) — an
-accepted device-physics / capture-aliasing residual, not a topology error (every Stage-1 value +
-topology re-traced exact against the Theseus schematic). The 44 captures (`analysis/pedal_export2/`,
-842 MB) are **local-only, gitignored** — re-capture against `analysis/test_signal_48k.wav` to
-reproduce.
+**Calibration result:** the plugin nulls against 44 NAM captures (drive G2–G10, tone T2–T8,
+Clean/OD/Dist) at **−8.6 to −27.0 dB, median −23.4 dB**, and is at **−22.0 dB or better on every
+capture from G2 to G7**. Per-mode at G5 T5: Clean **−23.9**, OD **−24.8**, Dist **−23.1**. The
+match is shallower only at very high drive (G8–G10) — an accepted device-physics / capture-aliasing
+residual, not a topology error. The 44 captures (`analysis/pedal_export2/`, 842 MB) are
+**local-only, gitignored**.
 
-### Experiments tried and rejected (don't re-attempt without new evidence)
-- **Literal 3-terminal DRIVE pot** (wiper=output, pin3→R6→Stage2): over-swings Stage-2 gain (~28 dB
-  total vs measured ~10.6 dB). The 2-terminal rheostat approximation matches the captures *better*.
-- **Sharper op-amp rail-sat knee** (smaller `railKneeMargin`) to bloom the bass at high drive:
-  negligible effect (≤0.007 sample, 0.0 dB on every null/bass metric) — once a swing is over the
-  rail it's clamped regardless of knee shape. The bloom needs more *gain into the rails*, which
-  can't be added circuit-accurately. Reverted.
-- **Rail-sat knee softening for high-drive null** (railV 3.3↔3.6, knee 3.0↔3.18): helps G8/G10
-  ~0.7 dB but costs G6 ~0.9 dB — a wash. Left at the circuit-motivated ±3.3 V / knee 3.0.
-- **Active null optimization at G5** (drive×tone×input-level search per mode): the labelled/nominal
-  settings are already optimal — tuning the heavily-driven segment deeper only trades against the
-  lighter segments. Knob calibration confirmed correct.
-- **Sub-64 Hz LF-extension low-shelf** (`MonarchChannel::lfExt*`, 2026-07-28, v1.4 P1 — code kept,
-  `lfExtEnabled = false`): the deficit is **real** (pedal is +2.7 dB at 20 Hz, present in the raw
-  circuit at every drive/mode) and there is **no topology fix** — `schematic-checker` traced every
-  RC in both schematics including the bias/supply network and nothing lands near 45–55 Hz; the
-  named suspect, the literal 3-terminal DRIVE wiper-tap, uses R6=10k/C5=100n, i.e. the *same*
-  159 Hz corner already modelled as R9/C7. But the empirical shelf **fails**: two fits (+3.5 dB @
-  60 Hz minimising FR rms, and +5.0 dB @ 25 Hz confined to the drive-agreed band) both improved FR
-  error on 33/42 captures while making the **null worse on 27–28/42**, gutting the best matches
-  (G6 T5 Clean −22.0 → −17.7, G7 T5 Dist −17.9 → −13.5).
-  - **Why:** the pedal is louder at 20–40 Hz **and its phase LEADS** (+33° at 20 Hz). A
-    minimum-phase low-shelf adding +3 dB necessarily brings ≈−15° of *lag*, so the magnitude error
-    goes to zero while the phase error grows 33°→48° and the complex residual *grows*
-    (|1.36∠33°−1| = 0.76 → |0.96∠48°−1| = 0.81).
-  - **Proved by direct A/B:** the identical magnitude correction applied offline zero-phase *helps*
-    every case (G6 Dist −19.6→−20.6, G5 OD −21.1→−22.4) while minimum-phase hurts every case. So
-    the reading and the direction were right and only the **instrument** was wrong — but a
-    zero-phase shelf reaching 25 Hz is a multi-thousand-tap FIR (tens of ms latency) for ~0.6 dB.
-    Ruled out on cost.
-  - **⚠️ CORRECTED by P8 (closed 2026-07-29) — "don't re-attempt with any IIR EQ" is WITHDRAWN, and
-    a min-phase IIR fix has now SHIPPED.** The prohibition held for *these two shelves* only: both
-    were fit to zero the **FR magnitude** and both are ~2× the complex-optimal depth. Measured
-    per-band, the phase lead exists **only below ~32 Hz** — from 40–80 Hz the deficit is still
-    +0.5…+2.1 dB and the pedal **lags 3–9°**, exactly what a min-phase low-shelf supplies.
-    Also: not a corner error — reaching +2.7 dB at 20 Hz needs C7 = 137 nF against a 100 nF ±10%
-    part, and a lower corner gives *less* lead, the wrong direction.
-    **The depth axis was never searched with a phase-aware metric — and neither was the DRIVE axis,
-    which is where the answer was.** A *fixed* shelf of any depth is the wrong instrument (it splits
-    by knob: helps G2–G5, hurts G6–G10). P8 shipped the correction by refitting the **existing**
-    `bassBoost*` low-shelf into a hump in drive, adding no new filter at all — median null −21.5 →
-    −22.6 dB. `lfExt*` stays retired and is now redundant rather than merely rejected.
-    See `FR_THD_AUDIT.md` P8.
-  - **Metric lesson (new, and the mirror image of the presence-bump one):** FR rms weights every
-    third-octave band equally and is **blind to phase**; the time-domain null is complex. Note the
-    "no guitar energy below 80 Hz" intuition does **not** apply to this test signal — an
-    exponential sweep carries equal energy per octave, so 20–40 Hz is fully weighted in the null.
-    For anything that can carry phase: **FR generates the hypothesis, the null decides.**
-- **Capture-match tilt shelf** (`TiltShelf`, an artificial fixed high-shelf): retired
-  (`kEnabled=false`) once the corrected Stage-1 Z_lower topology reproduced the EQ tilt
-  circuit-accurately. Code kept for A/B only. (Superseded by the drive-dependent two-shelf
-  correction below — a *fixed* shelf cannot fix a tilt that reverses sign with drive.)
-- **Literal 3-terminal DRIVE wiper-tap as the cause of the low-drive EQ collapse** (2026-06-29):
-  re-derived the full wiper-tap transfer function (pin1→R2→NodeF, wiper=NodeG, pin3→R6→C5→Stage2)
-  numerically — it has the *same* drive-dependence of the Stage-1 tilt as the 2-terminal model
-  (the pot's dual action moves Stage 2's flat *level*, not Stage 1's *tilt*). So the real pedal's
-  drive-INDEPENDENT clean EQ is not explainable by the linear topology; corrected empirically (below).
-- **Low-mid "presence bump" (335 Hz peaking biquad, fixed +4→2.6 dB pre-clip) to add 200–500 Hz
-  body** (2026-07-03, reverted 2026-07-04): the *fixed* bump was a **regression and was reverted** —
-  but the underlying instinct was partly right (see the nuance below). It was fit by a flawed
-  *tilt-corrected-excess* method (straight line through the 100 Hz & 1 kHz shoulders, curvature
-  between = "deficit") which massively overstated the size and got the drive-profile backwards. As a
-  fixed pre-clip bump it was largest at low drive (no deficit there) and compressed away at hard drive
-  (where the deficit is), so the best-fit-gain null got worse everywhere (overall worse ~2–4 dB mean,
-  up to +7.5 dB at low-mid gain; e.g. OD G5 overall −21→−15).
-  - **The nuance (measured 2026-07-04, the authoritative view):** a **small, real, drive-dependent**
-    low-mid deficit DOES exist, but ONLY in hard-driven Overdrive. Farina linear-TF (`analyze.py
-    linear_tf`, which removes the distortion and isolates the linear EQ) vs the captures, normalized at
-    1 kHz, 200–500 Hz: OD G5 = **−0.3 dB at light drive → −1.6 dB at hot drive (−6 dB sweep)**;
-    Clean/Boost +0.5 dB and Distortion −0.3 dB both already match. So the perceived "real pedal has
-    more mids in OD" is CORRECT but it's a ~1.5 dB, drive-gated, OD-only effect — not the 3–4 dB
-    fixed bump that was tried.
-  - **Metric lesson (important):** for a small linear-EQ question, the **Farina `linear_tf`** is the
-    right tool. Both other methods fail here in opposite directions: the tilt-subtraction plot
-    *invented* a large deficit; the best-fit-gain **null test** *masked* the real one (a global gain +
-    the loud fundamental/harmonics swamp a 1–2 dB linear feature — OD G5 nulled deep yet had a real
-    −1.6 dB mid dip). Use `null_test.py` for overall waveform match, `linear_tf` for EQ shape.
-  - **The correct fix that WAS built (2026-07-04, `MonarchChannel::odLowShelf`):** a clip-depth-gated
-    low-shelf on the OD clip output — `gate = sw1On ? tanh(odGateScale·clipEnv) : 0`, 2.0 dB @ 520 Hz,
-    gate 12. OD-only (Boost/Dist byte-identical), inert at normal levels, engages only under hard clip;
-    roughly halves the hot-drive deficit (OD G5 60–500 Hz −1.6→−0.8, overall null −1.2 dB) with the
-    time-domain null neutral at normal levels and worst-case ~+0.3 dB at the G10+hot extreme. See
-    dsp.md "OD clip-depth-gated low-mid restoration".
-  - **Validation-metric lesson (the crux both failures share):** match the metric to the question.
-    `null_test.py` (best-fit-gain, time-domain) = overall waveform match, and it MASKS a small linear
-    feature. Farina `linear_tf` = linear EQ shape, but it MIS-READS a *clip-gated* correction (the
-    gate modulates across the sweep → deconvolution artifact showing a false deficit at moderate
-    drive). So: use `linear_tf` to FIND the linear deficit, but the **time-domain null is the
-    arbiter for validating a clip-gated correction**. The tilt-subtraction excess plot *invented* a
-    deficit and must not be used. The reusable audit encoding all four guardrails is
-    `analysis/mid_eq_audit.py` (→ `analysis/MID_EQ_AUDIT.md`).
+### Performance (v1.5 step 5, 2026-07-30)
 
-### Drive-dependent two-shelf capture-match correction (`MonarchChannel`, 2026-06-29)
-Best-fit-gain-aligned EQ error (plugin vs captures, 40 Hz–16 kHz, every gain/tone) is a clean,
-tone-independent **tilt that reverses with drive**: treble-short at low drive, bass-short/treble-hot
-at high drive, crossing near G4. Corrected with two drive-scaled first-order shelves on Stage 1's
-output (pre-clip): a **treble high-shelf** fading OUT with drive (restores the Stage-1 HF shelf
-`Av=1+Z_upper/Z_lower` lets collapse at low drive — the "engaging it is dark" complaint) and a
-**bass low-shelf** fading IN with drive (counters the bass-bloom-under-drive). Also *improves*
-OD/Dist nulls at mid/high drive (G5 OD −18.4→−23.7, G5 Dist −14.9→−19.1).
+`PerfBenchmark` — one CPU core, 48 kHz, both channels active in series, stereo:
 
-> **⚠️ The treble half of this is RETIRED (v1.4 P7, 2026-07-29).** Its parenthesised rationale above
-> was never measured, and when it was, the captures said the opposite — the plugin was too *bright*
-> at low drive, not too dark. It and the bass-cut bell below were each supplying about half of one
-> correction and were fit independently, so together they over-corrected G2 by ~1.65×. `shelfMaxDb`/
-> `shelfSlopeDb` are now 0; the bell carries the whole job. See the v1.4 P7 roadmap entry and
-> `FR_THD_AUDIT.md` P7.
->
-> **⚠️ The bass half was then REFIT by v1.4 P8 (2026-07-29) and is no longer "fading IN with
-> drive".** It is a **hump**: 85 Hz, 1.2 dB at G2, peaking 3.0 dB at G5, back to 1.75 dB at G10.
-> The monotone ramp was fit to one end of the axis — it counters the high-drive bloom, was measured
-> at high drive, and read as monotone because nothing had measured the low end, where the pedal
-> actually wants +1.2 dB and the ramp gave exactly zero. P8 also folded P1's separate sub-64 Hz
-> LF-extension shelf into this one rather than adding a second instrument to the same band on the
-> same key. See the v1.4 P8 roadmap entry and `FR_THD_AUDIT.md` P8.
+| OS | Boost | Overdrive | Distortion |
+|----|-------|-----------|------------|
+| 1x | 2.1% | 3.8% | 2.8% |
+| 2x | 2.8% | 5.3% | 3.6% |
+| 4x | 4.8% | 9.8% | 6.5% |
+| 8x | 8.6% | 18.8% | 12.1% |
+| render | — | — | 11.1% |
 
-**Low-drive bass-cut bell + fixed HF trim (`MonarchChannel`, 2026-07-04, v1.3):** a later A/B (by ear
-+ harmonic-immune tone bursts) found Boost/Clean ran **~+3 dB too bassy below ~250 Hz at low drive**
-(G2), a bump PEAKING ~180 Hz that reverses to ~−1.8 dB thin by G10. Audible only in Boost (OD/Dist
-clipping masks it). Fixed with a drive-gated **bass cut bell** (`bassCut*`, 185 Hz, Q 0.45 — a WIDE
-bell, refined 07-05 from 160/Q0.7 to flatten the broad 100–330 Hz excess to ±0.2 dB) that fades
-OUT by G5 — a bell not a shelf (a shelf over-cuts sub-100, under-cuts the 150–220 peak). Validated:
-driven-sweep nulls **improve 1–2.8 dB at G2–G4 in ALL three modes**; only cost is a small clean-sweep
-(below-playing-level) regression at G2/G3 leaving them at −15…−18 dB (the excess is level-dependent, a
-knob-keyed cut can't fully separate the quiet clean sweep from playing level).
-**v1.4 P7 (2026-07-29) refit it** — Q 0.45→**0.50**, off-drive 0.5→**0.55**, slope 13.0→**10.909**,
-max 4.6→**6.0**, pivot 185 unchanged — so it now carries the retired treble shelf's share too. That
-also **dissolved the clean-sweep regression noted above** — G2/G3 clean-sweep nulls −14…−18 →
-**−23…−25**. So that regression was not the level-dependence it was attributed to; it was the
-double-counted correction, showing up worst on the one sweep where no clipping masked it. (The
-level-dependence hypothesis was never tested against the alternative — it was the only one on offer
-at the time.) A separate **fixed HF-trim
-high-shelf** (`hfTrim*`, −1.3 dB @ 4.5 kHz) eases the slightly-hot top end to match the captures within
-~0.3 dB across 2–4.5 kHz (above that the captures roll off/alias — 6 kHz has a spurious −15 dB dip — so
-the trim is conservative and by-ear-confirmable, NOT fit to those artifacts). See dsp.md drive-shelf section.
+### Accepted residuals
 
-> **Deferred note — Red drive-shelf keying:** these drive-dependent EQ shelves are keyed to the raw DRIVE
-> knob and fit to the Yellow captures. On Red, gain/clipping/harmonics track the ACTUAL gain (so Red@d ≈
-> Yellow@(d+1⁄6) there), but the knob-keyed EQ correction does NOT shift by 1⁄6 → Red over-cuts the low
-> mids ~1–2 dB at LOW drive. Left as-is (Red has no NAM reference; unvalidatable either way). Potential
-> fix + rationale in dsp.md drive-shelf section ("Deferred refinement — Red drive-shelf keying").
+- **Sub-32 Hz shortfall** (~2 dB at 20 Hz). Not a topology error; the pedal's phase *leads*
+  below ~32 Hz, so no minimum-phase filter matches. P1 tried, P8 narrowed it significantly.
+  Documented in `FR_THD_AUDIT.md` P1/P8.
+- **G8–G10 clip-path behaviour** — the OD ceiling over-corrects at G10 (wrong-signed by
+  construction: the pedal's OD compresses *less* at G10 while a level-keyed ceiling bites
+  *more*). About half is target-side noise (the pedal's OD curve varies 1.19 dB across TONE,
+  a knob that categorically cannot affect it). P10 step 3 measured the target's floor and
+  accepted the residual. See `FR_THD_AUDIT.md` P9/P10.
+- **HF harmonic difference above 8 kHz** (tone-stage rolloff; the captures' own 4–6 kHz energy
+  is partly NAM aliasing).
+- **Per-mode capture-level normalization** — A/B and null tests must re-gain per mode.
+- **Red drive-shelf keying** — drive-dependent EQ shelves are knob-keyed and Yellow-fitted.
+  Red has no NAM reference; ~1–2 dB low-mid over-cut at low drive. Deferred. See dsp.md.
+- **Diode-stage ADAA** — chowdsp_wdf doesn't support it for nonlinear root solves. 4x
+  oversampling on render is sufficient in the meantime.
 
-### Linear stages run oversampled — top-octave warp fix (2026-06-29)
-The remaining top-octave deficit (16 kHz ~−3.8 dB at every setting) was first wrongly blamed on NAM
-capture aliasing — but NAM captures null to ~−50 dB and ARE accurate up there. It's **bilinear-
-transform frequency warping** of the base-rate linear WDF solve (16 kHz deficit collapses −2.4 dB
-@48k → −0.2 @96k → ~0 @192k when the linear stages run faster). Fixed by running the **whole channel
-oversampled** (not just the clip span): both `prepareLinear` and `prepareClip` re-prep at the OS
-rate. **Render/2x+ paths now match 50 Hz–16 kHz within ~1.2 dB at all gain/tone** (worst ~2.3 dB at
-the tone-down top-octave corner). A **rate-scaled warp high-shelf** (`warp*` in MonarchChannel,
-DC-normalized) corrects the residual finite-rate droop. **Recalibrated 2026-06-30:** it was
-previously self-disabled by 2x (`×(48k/rate)^4`), which left the live default (2x) ~2–3 dB darker on
-top than the render path (4x/8x) — a tone difference between playback and bounce. It's now FIT to the
-warp-free-baseline-vs-8x deficit so **2x and 4x match 8x** through the audible top (DC–8 kHz ≤0.2 dB,
-12 kHz ~0.4 dB; only the 16 kHz edge is ~1.8 dB short at 2x — a first-order shelf can't reach Nyquist
-without over-brightening the 6–8 kHz presence band, so the moderate 6.5 k pivot is deliberate). The
-DC-normalization (divide by H(z=1)) holds low/mid at exact unity at every rate (without it the
-near-Nyquist prewarp droops the whole spectrum, several dB at 1x). CPU cost: the
-linear WDF now runs at the OS rate too (relevant to the v1.1 perf pass).
+### Performance measurement protocol
 
-> **⚠️⚠️ MOSTLY WRONG, corrected by v1.5 step 3 (2026-07-30) — this whole section's headline number
-> was not bilinear warp.** Two errors compounded: **(1)** the ADAA identity-region droop supplied
-> 24 of the 32.5 dB of the 1x/16 kHz deficit (dsp.md's ADAA section), and **(2)** the instrument that
-> measured the deficit, `OSFidelity` (a), ran at 0.01 FS in Overdrive — where Stage 1's ~4 kHz gain
-> peak puts pin7 past the 0.5 V `sw1Ceil` knee, so it was reading the **soft clipper**, not a linear
-> FR, in exactly the presence band the 6.5 k pivot was chosen for. Fix the droop at source and the
-> level, and the **true residual warp is −0.14/−0.86/−3.08 dB at 8/12/16 kHz at 1x and ≤0.44 at 2x —
-> nothing below 12 kHz at any rate.** `warp*`'s base lift refit 10.6 → **1.0 dB**, pivot 6.5 k →
-> **17 k**; 1x now lands within 0.75 dB of 8x and 2x within **0.14**, so **1x is no longer the
-> "approximate-top" mode** (it is still the low-CPU one). What survives from the paragraph above:
-> running the linear stages oversampled is right, and the DC normalization is load-bearing. See
-> CPU_AUDIT.md §5b.
-
-### Accepted residuals (un-modeled second-order device physics, per user pref for circuit accuracy)
-- **Sub-32 Hz shortfall (~2 dB at 20 Hz, near-constant across drive)** and the **LF THD gap it
-  causes** (40 Hz, G10 Clean, −6 dB sweep: pedal 35.6% vs plugin 4.7%). Not a topology error.
-  **Narrowed by P8 (done 2026-07-29)** from "sub-64 Hz, ~2.7 dB, and strongly drive-dependent" —
-  refitting `bassBoost*` into a hump more than halved the drive-dependence of the 20 Hz error
-  (−3.23…+2.95 → −2.12…+0.59 dB). What is left is genuinely stuck: an 85 Hz first-order shelf deep
-  enough to reach 20 Hz overshoots 80 Hz, and below ~32 Hz the pedal's phase *leads*, so no
-  minimum-phase filter matches it at all. See `FR_THD_AUDIT.md` P1/P8.
-- ~~**OD compresses ~3–4 dB lighter than the real pedal at hot input**~~ — **✅ FIXED for G2–G7 by
-  v1.4 P9 step 3 (2026-07-29)**, and it was never a flat offset or a spectral shape: it was a
-  missing **CEILING**, now supplied by `MonarchChannel::sw1Ceil*` on pin7 in OD. OD comp-curve rms
-  over G2–G7 1.33 → 0.40 dB, better at every drive G2–G8. The "tilt at every drive" and the THD
-  roll-off once filed here were the **same defect seen through FR** (both measured on OD's clean
-  sweep, which carries 1.4–6 % THD and is not a linear instrument) — so they are gone too.
-  **⚠️ The G8–G10 remainder was investigated by P10 step 3 (2026-07-29) and is now an ACCEPTED
-  residual, not an open lead.** About half of G10's 2.4 dB comp error is target-side (the pedal's own
-  OD curve varies 1.19 dB across TONE, a knob that cannot affect it), the error sits in the middle of
-  the level range where no ceiling asymptote reaches, and both alternative shapes tried buy G10 by
-  giving up G2–G7. Do not re-open it without re-captured references at more tone settings.
-  **What remains is G8–G10, where the ceiling now OVER-corrects** (G10 comp error +2.25 → −2.83 dB,
-  driven-sweep nulls 1.0–2.0 dB shallower, G10 T2 OD the set's worst at −8.6): the pedal's own OD
-  compresses *less* at G10 than at G7 while a level-keyed ceiling bites *more* there, so it is
-  wrong-signed by construction and not fixable with that instrument. This is the **same G8–G10
-  drive-keyed residual** as P6's `driveMakeup` cap and P10, not a separate one. See the P9 entry.
-- A small genuine HF-harmonic difference >8 kHz (tone-stage rolloff); the captures' own 4–6 kHz
-  energy is partly NAM aliasing (the plugin's 8× anti-aliased clip is the more-correct version).
-- Per-mode capture levels are **normalized** (Boost/OD/Dist sit at the same level, physically
-  impossible at fixed volume) — A/B and null tests must re-gain per mode. The plugin's
-  Boost>OD>Dist hierarchy is physically correct (diode-clamp ratios).
+`PerfBenchmark` is load-sensitive. Protocol: rebuild both arms, measure back-to-back, ≥2
+passes, nothing else running. Keep a no-op control arm (1x) — if it moves, the measurement is
+contaminated. Never compare two numbers taken at different times. See `CPU_AUDIT.md` §0.
 
 ---
 
@@ -1025,7 +128,7 @@ linear WDF now runs at the OS rate too (relevant to the v1.1 perf pass).
 | Stage 1 (IC_A) | Non-inverting — no `PolarityInverterT`; two-one-port solve (no R-type matrix) |
 | Stage 1 Z_lower | C4(10n) series [ R4(27k) ∥ (R5(33k) + C3(10n)) ] — Theseus topology |
 | Stage 1 Z_upper | (floor + DRIVE 0–100k) ∥ C2(100pF); Av(s) = 1 + Z_upper/Z_lower, DC gain 1 |
-| Stage 1 feedback floor | **Yellow R2∥R3 ≈ 990 Ω** (stock) / **Red ≈ 17.7 k** (tamed Hi-Gain = R6_floor + DRIVE_max/6; voicing choice over the literal R2=100k — shifts Red's drive curve +⅙ knob, i.e. Red@d≈Yellow@(d+1/6); an earlier +⅓ tame A/B'd as still too hot). `hiGain` ctor flag |
+| Stage 1 feedback floor | **Yellow R2∥R3 ≈ 990 Ω** (stock) / **Red ≈ 17.7 k** (tamed Hi-Gain = R6_floor + DRIVE_max/6; voicing choice over the literal R2=100k — shifts Red's drive curve +⅙ knob, i.e. Red@d≈Yellow@(d+1/6). `hiGain` ctor flag |
 | Input coupling cap | 22n (Theseus; matsumin 10n — both sub-audio) |
 | Stage 2 (IC_B) | **Inverting** ×−22 (R10 220k / R9 10k); inversion via op-amp VCVS terminals; HPF 159 Hz (C7 100n) |
 | Soft-clip SW-1 | MA856 ×4 = `[D4+D5]∥[D2+D3]` ≡ ONE `DiodePairT` n_eff=2·1.512≈3.024, Is=7.74e-13; +R11(6.8k), branch ∥ R10 |
@@ -1040,15 +143,20 @@ linear WDF now runs at the OS rate too (relevant to the v1.1 perf pass).
 | Calibration | `circuitVoltsPerFS = 0.87` (real circuit volts internally, not normalized) |
 | Oversampling | live 1/2/4/8x default **2x**; render default **4x** (auto via `isNonRealtime()`); wraps the **whole channel** (linear stages too, to kill near-Nyquist bilinear warp); bypassed channels skip it |
 
+---
+
 ## Three Most Likely Implementation Mistakes
 
 1. **`DiodeT` instead of `DiodePairT`** — both clipping stages use symmetric matched pairs.
 2. **Audio taper on DRIVE or TONE** — both are linear (B-taper). Only VOL is audio taper.
 3. **Reading an R-type output off a source port** — read passive ports only (the source port
-   2-point-averages → a spurious HF droop; this once dragged Stage 1's peak down ~880 Hz). And
-   Stage 2's inversion lives in the VCVS terminal assignment — the gate is the measured −22 gain.
+    2-point-averages → a spurious HF droop; this once dragged Stage 1's peak down ~880 Hz). And
+    Stage 2's inversion lives in the VCVS terminal assignment — the gate is the measured −22 gain.
+
+---
 
 ## Real-Pedal Calibration Harness (`analysis/`)
+
 - NAM captures (`analysis/pedal_export2/*.wav`, local-only) of a real KOT (single stock/Yellow
   channel) at labelled settings (e.g. "G6 T5 OD" = drive 60%, tone 50%, Overdrive).
 - `test_signal_48k.wav` (the input) ← `gen_test_signal.py`. Schematics: `KoT_schematic_matsumin`,
@@ -1059,36 +167,57 @@ linear WDF now runs at the OS rate too (relevant to the v1.1 perf pass).
   (volume/knob/sample-rate/aliasing for axes with no hardware reference), `null_optimize.py`.
 - `comprehensive_report.py` (renders all 44 captures → `reports/comprehensive_data.json`: FR, THD
   and H2–H7 per band per sweep level) + `dashboard_gen.py` (→ `reports/dashboard.html`).
-  `fr_thd_audit.py` reads that JSON and produces the tables in **`FR_THD_AUDIT.md`** (the v1.4
-  findings + plan) — its `raw` view strips `driveShelf()` to separate a mis-tuned correction shelf
-  from a real circuit gap, its `alias` view shows which bands are not measurable at all, and its
-  `evens` view is the whole-set even-harmonic rms/bias table P3/P3.1 are judged on (`--base
-  OLD.json` prints before/after; the `silent` column counts cells where the plugin has *no* even
-  mechanism engaged, which is what the Boost rows are actually reporting — see P3.2).
+  `fr_thd_audit.py` reads that JSON and produces the tables in **`FR_THD_AUDIT.md`** — its `raw`
+  view strips `driveShelf()` to separate a mis-tuned correction shelf from a real circuit gap, its
+  `evens` view is the whole-set even-harmonic rms/bias table.
 - `p31_harm_floor.py` measures the **capture chain's harmonic noise floor** by gating the Farina IR
-  at fractional orders (between the harmonic impulses). Run it before fitting any quiet harmonic —
-  it is what proved the H4/H6 targets were real signal (39 dB median margin) and not noise.
-- **Absolute levels are a PER-CAPTURE property on EVERY axis** (2026-07-29, widened by P10 step 2):
-  each of the 44 captures is an independently trained NAM model, so no two share an absolute-level
-  calibration and nothing makes an offset knob-*selective*. Hold **both** knobs fixed when comparing
-  levels; only x-axis quantities (the clip knee), self-anchored shapes and dBc ratios cross captures.
-  The visible instance is a flat capture-side gain varying ~5 dB with the TONE knob (−3.2/−1.3/+1.8 dB
-  at T2/T5/T8, identical in all three modes, frequency-flat) — proven not to be the tone stack, since
-  at 100 Hz the pot is a plain series R into the load so LF *must* rise with TONE and the pedal's
-  falls. Invisible to the null and to the FR shape tables. **Never read a knob-indexed level
-  difference as a plugin defect** — P10 step 1 read a drive-indexed one as a falling ceiling and
-  step 2 withdrew it. See FR_THD_AUDIT.md P10 steps 1–2.
-- **Bands that are NOT trustworthy:** FR above ~8 kHz (±18 dB capture-side spread) and THD above
-  ~5 kHz (Farina is H2-only there; the discrete-tone fallback aliases onto the fundamental at 6 and
-  8 kHz — the captures read up to 291% THD). Don't fit anything to them. See FR_THD_AUDIT.md §4.
-- **CPU harnesses → `analysis/CPU_AUDIT.md` §8.** `perf_split_probe.cpp` (per-sample cost by SPAN, the
-  tool that tells an aliasing cost from a merely-inaccurate one) and **`byte_identity_probe.cpp`** —
-  full-precision dumps over every mode × drive × tone × channel **plus mid-stream mode changes**,
-  compared with `cmp`, so a "byte-identical" claim is verified rather than asserted. Use it for every
-  such claim: v1.5 step 2's whole 38 MB dump differed in **one byte**, the first sample after a
-  Boost→OD switch, because the branch being skipped also maintained state OD reads.
-- `tools/PedalRender` renders a WAV through the real processor (Yellow-only) for A/B:
-  `PedalRender in.wav out.wav drive tone vol pres clip`.
+  at fractional orders.
+- `p6_peak_fit.py` (FR-peak + compression-tilt subset harness), `shape_audit.py` (FR error *shape*
+  cross-tab), `p7_eq_refit.py` (drive-keyed EQ set refit), `offline_null_probe.py` (score EQ
+  hypotheses without rebuilding).
+- `p9_ceiling_fit.py` + `p9_pin7_probe.cpp` (P9 clip-path analysis: `static` = admissibility
+  test, `floor` = resolvability, `need` = right shape), `p9_od_compression.py` (decay and knee
+  analysis). All `p9_*` views read `/tmp/monarch_renders`.
+- **CPU harnesses** → `analysis/CPU_AUDIT.md` §8. `perf_split_probe.cpp` (per-sample cost by
+  SPAN) and `byte_identity_probe.cpp` (full-precision dumps with `cmp`, including mid-stream mode
+  changes).
+- `tools/PedalRender` renders a WAV through the real processor (Yellow-only) for A/B.
+- **Absolute levels are a per-capture property on every axis** — each of the 44 captures is an
+  independently trained NAM model. Only x-axis quantities (clip knee), self-anchored shapes, and
+  dBc ratios cross captures. Never read a knob-indexed level difference as a plugin defect.
+- **Bands not trustworthy:** FR above ~8 kHz (±18 dB capture-side spread) and THD above ~5 kHz.
+
+### Key rules discovered during calibration
+
+These are hard-won guardrails from v1.4/v1.5 — violating any of them has been shown to produce
+wrong results. Full context in `FR_THD_AUDIT.md` and `CPU_AUDIT.md`.
+
+1. **FR generates the hypothesis, the null decides.** FR rms is blind to phase and weights
+   every band equally; the time-domain null is complex. For anything that can carry phase, use
+   FR to find a candidate and the null to score it.
+2. **Corrections that overlap in band AND in keying must be fit in one pass.** Fitting them
+   independently over-corrects (P7/P8/step 1/step 3/step 5 — seven instances).
+3. **An aggregate metric is a screen, not a verdict.** Decompose it along the axis you mean to
+   fix before believing an improvement (P4/P6/P10 step 3 — five instances in the marginalisation
+   family).
+4. **Check your instrument before reading a difference off it.** A floor-limited aggregate reads
+   as "no effect"; a "linear" instrument can be nonlinear at the far end of its axis (P7/P10);
+   three of `OSFidelity`'s four sections have been caught above the clip knee. The observable
+   must respond to the axis you are asking about.
+5. **Guard both ends of a curve before reading anything off it.** A plateau needs a flat top,
+   a tail needs unit slope (P10 step 2 — nine items had read these segments without either
+   check).
+6. **Count observables against unknowns before naming a defect.** P10 step 2 proved a
+   suspected ceiling error was algebraically degenerate with a per-capture level offset.
+7. **`PerfBenchmark` is load-sensitive.** Never measure right after a build; protocol in
+   `CPU_AUDIT.md` §0.
+8. **"Multiplied by zero" is not "dead"** when the branch maintains state another mode reads.
+   Test mid-stream mode changes, not just steady-state renders per mode.
+9. **An early-out's saving is a property of the signal, not of the code it skips.**
+10. **An output-bounded check cannot see a blowup upstream of a clipper.** Assert the node,
+    not the output.
+
+---
 
 ## References
 

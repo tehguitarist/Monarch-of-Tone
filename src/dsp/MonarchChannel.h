@@ -64,6 +64,28 @@ public:
     // at 4x/8x. Judge on the 44-capture null, never on FR alone. Compile-time so the A/B is exact.
     static constexpr bool postAtBaseRate = true;
 
+    // ---- Stage 1 at BASE rate (v1.5 step 5, 2026-07-30) ---------------------------------------
+    // The same rule, applied to the other linear span. Stage 1 is a linear WDF — it cannot alias, so
+    // the OS span only ever bought it a smaller bilinear warp, at **18.0 ns/sample paid ×OS** (§1),
+    // the largest single remaining oversampled-linear cost. Per output frame at 8x that is 126 ns of
+    // 729/1137/938 (Boost/OD/Dist) = **17.3 / 11.1 / 13.4 %** of the channel.
+    //
+    // Only Stage 1 moves. `processPre`'s other two blocks stay oversampled and MUST: IC_A's rail-sat
+    // is a genuine nonlinearity (NodeG reaches 2.36-5.93 V against a +3.9/−2.7 V ceiling from G6 up),
+    // and `driveShelf` sits downstream of it, so it cannot be hoisted upstream without changing what
+    // the ceiling sees. The split is therefore Stage 1 | [rail-sat → driveMakeup → driveShelf].
+    //
+    // ⚠ It is a VOICING change confined to the top octave, and it is DRIVE-dependent — which is the
+    // one thing the on-record objection got right, for the wrong reason.
+    // `analysis/v15_stage1_warp_probe.cpp` (validated against the shipped `Stage1_FreqResponse` gate
+    // to 0.01 dB / 18 Hz) measures the cost as ≤0.02 dB at and below 6 kHz at EVERY drive and rate,
+    // then at drive 1.0: −0.16 dB at 8 kHz, −0.84 at 12 kHz, −2.58 at 16 kHz (8x; 2x −0.13/−0.68/
+    // −2.17). At drive 0.5 the 16 kHz figure is only −1.05, so the deficit's DEPTH tracks the knob.
+    // The peak is NOT the problem: it moves ≤0.062 octaves and its GAIN is identical to 0.01 dB at
+    // every rate and drive, so there is nothing there for a prewarp to chase.
+    // Judge on the 44-capture null, never on FR alone. Compile-time so the A/B is exact.
+    static constexpr bool preAtBaseRate = true;
+
     // ---- ADAA identity-region early-out (v1.5 step 3, 2026-07-30) -----------------------------
     // First-order ADAA of the IDENTITY map is not the identity — it is a half-sample delay plus a
     // one-zero rolloff, and that is arithmetic, not a hypothesis. Below the knee `railAntideriv`
@@ -540,11 +562,70 @@ public:
     // pivot·√ghi, so at 1x on a low session rate (32 kHz) tan() would cross Nyquist and the
     // filter would be unstable. warpMaxDb = 1.0 is load-bearing for the same reason — at 44.1 kHz
     // 1x the uncapped law asks for 1.17 dB, and the cap is what keeps the pole where it was fit.
+    //
+    // ⚠⚠⚠ RETIRED by v1.5 step 5 (2026-07-30) — `warpScaleDb = 0`, compiled out via the DERIVED
+    // `warpShelfEnabled` (the trebleShelfEnabled pattern, so the audio path and the header-parsing
+    // harnesses cannot disagree). Not a retune: this shelf is keyed to the OS RATE, and step 5 moved
+    // Stage 1 to the BASE rate, which removes the rate-dependence AT SOURCE. Stage 1 was ~97 % of all
+    // the remaining bilinear warp in the plugin: with it at the base rate and this shelf disabled,
+    // `OSFidelity` (a) puts 1x within 0.26 dB of 8x at 16 kHz (2x within 0.06) — three times better
+    // than the +0.28/−0.75 that shipped WITH the shelf in step 3. So there is no rate disagreement
+    // left for it to correct, and leaving it in is a pure over-correction: measured, it puts 1x
+    // +2.23 dB ABOVE 8x at 16 kHz.
+    //
+    // The physical defect did not disappear — it became ABSOLUTE (present at every OS factor,
+    // including render) and is keyed to DRIVE, not to rate. See s1Warp* below, which replaces it.
     static constexpr double warpPivotHz = 17000.0; // warp-correction high-shelf centre (Hz)
-    static constexpr double warpScaleDb = 1.0;    // base HF lift at 48k; ×(48k/rate)^warpExp
+    static constexpr double warpScaleDb = 0.0;    // RETIRED step 5 (was 1.0) — see above
     static constexpr double warpExp = 1.80;       // rate falloff, refit 2026-07-30 (was 2.20)
     static constexpr double warpMaxDb = 1.0;      // cap — also the Nyquist-safety bound, see above
     static constexpr double warpPoleMaxFrac = 0.42; // prewarped pole ≤ this × the design rate
+    static constexpr bool warpShelfEnabled = (warpScaleDb > 0.0);
+
+    // ---- Stage-1 base-rate warp correction (drive-keyed high-shelf, v1.5 step 5, 2026-07-30) ----
+    // Replaces the rate-keyed `warp*` above. With Stage 1 at the base rate (`preAtBaseRate`) its
+    // bilinear top-octave droop no longer shrinks with the OS factor, so the correction has to be
+    // keyed to what actually sets the droop — and that is the DRIVE knob, through the circuit:
+    // Z_upper is `R_leg ∥ C2(100 pF)`, so C2's corner is `1/(2π·R_leg·C2)` = 75.8 kHz at drive 0.2
+    // but 15.8 kHz at drive 1.0. It walks INTO the top octave as DRIVE rises, and bilinear-warping a
+    // corner that close to Nyquist is the whole mechanism.
+    //
+    // KEYED ON R_leg, NOT ON THE KNOB — which is what makes it correct on RED for free. Every other
+    // drive-keyed instrument here (`bassCut*`, `bassBoost*`, `driveMakeup`) is keyed to the raw knob
+    // and fitted to the Yellow captures, which is why dsp.md carries a standing "deferred refinement"
+    // note about Red being mis-keyed by 1/6 of a knob turn. This law reads Red's 17.7 k floor
+    // directly, so ONE expression covers both channels; the fit was scored over both at once.
+    //
+    // THE LIFT HAS ZERO FITTED SHAPE — only `s1WarpLift0` scales it. The bilinear warp of a one-pole
+    // at `fc`, read at the shelf's own pivot, is `10·log10((1+(f̃/fc)²)/(1+(pivot/fc)²))` with
+    // `f̃ = (rate/π)·tan(π·pivot/rate)`: closed form, no free parameters. `s1WarpLift0` converts that
+    // one-pole prediction to the composite `Av = 1 + Z_upper/Z_lower` (the deficit is C2's warp seen
+    // THROUGH the gain stage, not C2's warp alone).
+    //
+    // ⚠ The TARGET is exact and the null CANNOT arbitrate it — the one EQ fit in this project with a
+    // right answer. `analysis/v15_stage1_warp_probe.cpp fit` emits base-rate vs an 8x-of-base solve of
+    // the SAME filter (residual warp ~1/64 of what is measured): no captures, no NAM model, no noise.
+    // The 44-capture null renders at 4x and the whole effect is above 8 kHz, where the captures carry
+    // ±18 dB of spread — so the null's only job here is to confirm nothing ELSE moved. Harness:
+    // `analysis/v15_s1warp_fit.py`.
+    //
+    // ⚠ `s1WarpLift0 = 0.40` is DELIBERATELY BELOW the harness's weighted optimum (0.545), and the
+    // reason is a metric-weighting trap. That weighting scores 4–11 kHz at 3–4×, where the raw deficit
+    // is already ~0 — so it credits the 14–16 kHz repair almost nothing while charging full price for
+    // presence-band over-correction, and its "best" answer costs +0.3…+0.40 dB at 6–10 kHz (series
+    // pair) to buy the last 20 %. At 0.40 the 6–10 kHz residual stays ≤0.23 dB — below what any
+    // instrument in this project resolves, so it cannot be double-corrected later by `hfTrim` (4.5 kHz)
+    // or a P7 refit, which are the two things in this band. Series pair @48 kHz, 16 kHz, G2→G10:
+    // deficit −1.0…−5.4 dB → residual −0.4…−2.7. Read the aggregate as a screen, the cells as the
+    // verdict (FR_THD_AUDIT.md P10 step 3's rule).
+    //
+    // Accepted undershoot: above ~0.36·rate the warp DIVERGES toward Nyquist (+9.1 dB at 22.6 kHz on
+    // a 48 kHz session) while a first-order shelf flattens out at its own lift. Out of the audio band
+    // — not fitted, deliberately.
+    static constexpr double s1WarpPivotHz = 16000.0; // high-shelf centre (Hz) — the pole guard's ceiling
+    static constexpr double s1WarpLift0 = 0.40;      // scales the analytic one-pole warp prediction
+    static constexpr double s1WarpC2 = 100.0e-12;    // Stage-1 Z_upper HF cap — the corner that warps
+    static constexpr bool s1WarpEnabled = (s1WarpLift0 > 0.0);
 
     // ---- Overdrive clip-depth-gated low-mid restoration (2026-07-04) --------------------------
     // Farina linear-TF audit vs the captures (analysis/mid_eq_audit.py) shows the Overdrive channel
@@ -662,40 +743,53 @@ public:
     // factor change. `rate` here is that effective (oversampled) rate; for standalone/1x it == base.
     //
     // `postRate` is the rate the Tone/Volume span runs at, which is NOT necessarily `rate` — see
-    // `postAtBaseRate`. It defaults to `rate` so a caller that wants the whole channel at one rate
-    // (the standalone probes in analysis/) needs no change and gets the pre-v1.5 behaviour exactly.
-    void prepareLinear (double rate, double postRate = 0.0)
+    // `postAtBaseRate`. `preRate` is the same for Stage 1 — see `preAtBaseRate`. BOTH default to
+    // `rate` so a caller that wants the whole channel at one rate (the standalone probes in
+    // analysis/, the per-stage tests, 1x) needs no change and gets the pre-v1.5 behaviour exactly.
+    //
+    // NOTE `rate` remains the SHELF design rate (`shBaseRate`): `driveShelf` — bass cut/boost, warp,
+    // HF trim — lives downstream of IC_A's rail-sat and so stays in the oversampled span even when
+    // Stage 1 does not. Only `stage1` itself moves with `preRate`.
+    void prepareLinear (double rate, double postRate = 0.0, double preRate = 0.0)
     {
         if (postRate <= 0.0)
             postRate = rate;
-        stage1.prepare (rate);
+        if (preRate <= 0.0)
+            preRate = rate;
+        stage1.prepare (preRate);
         tone.prepare (postRate);
         volume.prepare (postRate);
         shBaseRate = rate;
+        s1Rate = preRate;
+        // Stage-1 warp shelf: rate AND drive keyed, so it is designed here and re-designed per block
+        // in setDrive. 0.5 matches Stage1's own ctor drive, so a caller that never calls setDrive
+        // (the per-stage tests, the analysis/ probes) still gets a coherent filter.
+        updateS1Warp (0.5);
         // Unity pass-through until setDrive() runs. Keyed off bassCutOffDrive rather than a literal
         // 0.5: P7 moved the bell's zero to 0.55, which silently made the old `0.5` a −0.55 dB bell.
         // Harmless either way (setDrive() runs every block before processing, and the filter state
         // is zeroed just below), but a hardcoded number here goes stale the moment a law is retuned.
         updateDriveShelf (bassCutOffDrive);
-        // Bilinear-warp top-octave correction: rate-only, tracks the measured 1x/2x/4x→8x deficit
-        // so the live (2x) and render (4x/8x) paths share the same top octave (see warp* consts).
-        const double warpDb = std::min (warpMaxDb, warpScaleDb * std::pow (48000.0 / shBaseRate, warpExp));
-        // Nyquist guard on the PIVOT (v1.5 step 3). shelfCoeffs prewarps the pole to pivot·√ghi;
-        // at 17 kHz that clears Nyquist comfortably at 44.1/48 kHz but NOT at a 32 kHz session
-        // running 1x, where tan() would cross π/2, flip sign and hand back an unstable filter.
-        // Slide the pivot down with the rate instead: inert at every rate this was fitted at
-        // (48 k needs 19.0 kHz of headroom, 44.1 k needs 17.5), graceful below them.
-        const double warpGhi = std::pow (10.0, warpDb / 20.0);
-        const double warpPivot = std::min (warpPivotHz, warpPoleMaxFrac * shBaseRate / std::sqrt (warpGhi));
-        shelfCoeffs (1.0, warpGhi, warpPivot, wsB0, wsB1, wsA1);
-        // DC-normalize the warp shelf: a prewarped first-order high-shelf with a pivot up near the
-        // (oversampled) Nyquist loses unity DC gain — the whole spectrum droops a few tenths of a dB
-        // (and several dB at 1x), an audible broadband tone/level shift. Dividing by the measured DC
-        // gain restores exact unity at DC at every rate, so we can place the pivot high enough to
-        // reach the 16 kHz deficit while the low/mid stay untouched. H(z=1) = (b0+b1)/(1+a1).
-        const double wsDc = (wsB0 + wsB1) / (1.0 + wsA1);
-        wsB0 /= wsDc;
-        wsB1 /= wsDc;
+        // Bilinear-warp top-octave correction: rate-only, tracked the measured 1x/2x/4x→8x deficit so
+        // the live (2x) and render (4x/8x) paths shared the same top octave. RETIRED by step 5, which
+        // removed that rate-dependence at source; the replacement is drive-keyed and lives in
+        // updateS1Warp. See the warp*/s1Warp* consts.
+        if constexpr (warpShelfEnabled)
+        {
+            const double warpDb = std::min (warpMaxDb, warpScaleDb * std::pow (48000.0 / shBaseRate, warpExp));
+            // Nyquist guard on the PIVOT (v1.5 step 3). shelfCoeffs prewarps the pole to pivot·√ghi;
+            // at 17 kHz that clears Nyquist comfortably at 44.1/48 kHz but NOT at a 32 kHz session
+            // running 1x, where tan() would cross π/2, flip sign and hand back an unstable filter.
+            // Slide the pivot down with the rate instead.
+            const double warpGhi = std::pow (10.0, warpDb / 20.0);
+            const double warpPivot = std::min (warpPivotHz, warpPoleMaxFrac * shBaseRate / std::sqrt (warpGhi));
+            shelfCoeffs (1.0, warpGhi, warpPivot, wsB0, wsB1, wsA1);
+            // DC-normalize: a prewarped first-order high-shelf with a pivot up near Nyquist loses unity
+            // DC gain and droops the whole spectrum. H(z=1) = (b0+b1)/(1+a1).
+            const double wsDc = (wsB0 + wsB1) / (1.0 + wsA1);
+            wsB0 /= wsDc;
+            wsB1 /= wsDc;
+        }
         // LF extension: fixed, drive- and mode-independent low-shelf (glo=lift, ghi=1). Rate-only,
         // so it belongs here rather than in updateDriveShelf. See the lfExt* constants.
         shelfCoeffs (std::pow (10.0, lfExtDb / 20.0), 1.0, lfExtPivotHz, leB0, leB1, leA1);
@@ -703,7 +797,8 @@ public:
         shelfCoeffs (std::pow (10.0, odShelfMaxDb / 20.0), 1.0, odShelfPivotHz, olB0, olB1, olA1);
         // Fixed HF-trim high-shelf (drive-independent): eases the slightly-hot top end (glo=1, ghi=cut).
         shelfCoeffs (1.0, std::pow (10.0, hfTrimDb / 20.0), hfTrimPivotHz, htB0, htB1, htA1);
-        hsX1 = hsY1 = lsX1 = lsY1 = wsX1 = wsY1 = olX1 = olY1 = htX1 = htY1 = bcX1 = bcX2 = bcY1 = bcY2 = leX1 = leY1 = 0.0;
+        hsX1 = hsY1 = lsX1 = lsY1 = wsX1 = wsY1 = swX1 = swY1 = olX1 = olY1 = htX1 = htY1 = bcX1 = bcX2 = bcY1 = bcY2 =
+            leX1 = leY1 = 0.0;
     }
 
     void prepareClip (double clipRate)
@@ -754,7 +849,8 @@ public:
         sw1CeilXprev = 0.0;
         sw1CeilFprev = 0.0;
         railMean = 0.0;
-        hsX1 = hsY1 = lsX1 = lsY1 = wsX1 = wsY1 = olX1 = olY1 = htX1 = htY1 = bcX1 = bcX2 = bcY1 = bcY2 = leX1 = leY1 = 0.0;
+        hsX1 = hsY1 = lsX1 = lsY1 = wsX1 = wsY1 = swX1 = swY1 = olX1 = olY1 = htX1 = htY1 = bcX1 = bcX2 = bcY1 = bcY2 =
+            leX1 = leY1 = 0.0;
     }
 
     // ---- Parameter setters (call per block; tapers applied inside each stage) ----
@@ -762,6 +858,7 @@ public:
     {
         stage1.setDrive (d);
         updateDriveShelf (d); // drive-dependent Stage-1 voicing correction (see shelf* consts)
+        updateS1Warp (d);     // Stage-1 base-rate warp correction, keyed on R_leg (see s1Warp* consts)
         const double makeupDb = std::min (driveMakeupMaxDb,
                                           std::max (0.0, driveMakeupSlopeDb * (d - driveMakeupOnset)));
         driveMakeup = std::pow (10.0, makeupDb / 20.0); // see driveMakeup* consts
@@ -832,17 +929,37 @@ public:
     // here (before driveShelf, i.e. at NodeG) because that is where the real pot's second action
     // feeds Stage 2. Stage 1 is linear, so this cannot change Stage 1's own voicing — only the
     // level presented to the clip stages, which is exactly what the measurement says is short.
-    inline double processPre (double x) noexcept
+    // Split at the Stage-1 boundary so Stage 1 can run at the base rate (`preAtBaseRate`) while the
+    // rail-sat and the shelves stay oversampled. `processPre` composes the two, so the single-rate
+    // path (1x, the per-stage tests, the analysis/ probes, `processSample`) is bit-identical to
+    // before this split — the only caller that separates them is PluginProcessor's OS path.
+    inline double processStage1 (double x) noexcept
     {
-        double nodeG = stage1.processSample (x);
+        const double g = stage1.processSample (x);
+        if constexpr (! s1WarpEnabled)
+            return g;
+        // Corrects Stage 1's OWN bilinear top-octave droop, so it belongs here, at Stage 1's rate and
+        // before the nonlinearity — the clipper should see the corrected spectrum. See s1Warp* consts.
+        const double y = swB0 * g + swB1 * swX1 - swA1 * swY1;
+        swX1 = g;
+        swY1 = y;
+        return y;
+    }
+
+    inline double processPreOs (double nodeG) noexcept
+    {
         // IC_A has the SAME output ceiling as IC_B and the model never applied it (v1.4 P9).
         // It sits here, BEFORE driveMakeup, because that is the physical order: NodeG is IC_A's
         // output pin, and the DRIVE pot's second action (which driveMakeup stands in for) is a
         // divider hung off that pin — it can only attenuate what IC_A already produced.
+        // It is also why Stage 1 is the ONLY thing that can leave the OS span here: this is a
+        // nonlinearity, and everything after it is downstream of the nonlinearity.
         if (stage1RailsEnabled)
             nodeG = railSaturateADAA (nodeG, s1RailXprev, s1RailFprev);
         return driveShelf (driveMakeup * nodeG);
     }
+
+    inline double processPre (double x) noexcept { return processPreOs (processStage1 (x)); }
 
     // Oversampled nonlinear span: Stage2 (or SW1 soft clip) → op-amp rail-sat → SW2 (or pass)
     // → V(node_HC). This is the ONLY part that should run at the oversampled rate.
@@ -1096,14 +1213,19 @@ private:
     // First-order shelf coeffs (bilinear, prewarped — mirrors TiltShelf). `glo`/`ghi` are the
     // LF/HF linear-gain asymptotes, `pivot` the geometric centre. ghi=glo → exact unity passthrough.
     // Writes b0/b1/a1. A high-shelf sets glo=1; a low-shelf sets ghi=1.
-    void shelfCoeffs (double glo, double ghi, double pivot, double& b0, double& b1, double& a1) const noexcept
+    // `rate` defaults to shBaseRate (the oversampled span's rate, where all but one of these live).
+    // The Stage-1 warp shelf must pass the BASE rate — it runs inside Stage 1's own span.
+    void shelfCoeffs (double glo, double ghi, double pivot, double& b0, double& b1, double& a1,
+                      double rate = 0.0) const noexcept
     {
+        if (rate <= 0.0)
+            rate = shBaseRate;
         const double rt = std::sqrt (ghi / glo);
         const double fz = pivot / rt; // zero
         const double fp = pivot * rt; // pole
-        const double K = 2.0 * shBaseRate;
-        const double wz = K * std::tan (M_PI * fz / shBaseRate);
-        const double wp = K * std::tan (M_PI * fp / shBaseRate);
+        const double K = 2.0 * rate;
+        const double wz = K * std::tan (M_PI * fz / rate);
+        const double wp = K * std::tan (M_PI * fp / rate);
         const double a0 = K + wp;
         a1 = (wp - K) / a0;
         b0 = ghi * (K + wz) / a0;
@@ -1129,6 +1251,42 @@ private:
     // fades OUT with drive (retired by P7), a bass BOOST low-shelf that HUMPS with drive (peaking at
     // bassPeakDrive — P8), and a bass CUT bell that fades OUT with drive (low-drive low-mid excess).
     // All on Stage 1's output.
+    // Stage-1 base-rate warp correction (see s1Warp* consts). Designed at `s1Rate`, NOT shBaseRate —
+    // it corrects Stage 1's own bilinear warp and so has to live at Stage 1's rate. Drive-keyed
+    // through the physical R_leg, so it is called from setDrive, and rate-keyed too, so prepareLinear
+    // must call it after setting s1Rate.
+    void updateS1Warp (double drive01) noexcept
+    {
+        if constexpr (! s1WarpEnabled)
+            return;
+        const double rleg = stage1.floorResistance() + std::min (1.0, std::max (0.0, drive01)) * Stage1::DRIVE_max;
+        const double fc = 1.0 / (2.0 * M_PI * rleg * s1WarpC2);          // C2's corner — the drive axis
+        // ⚠ TWO clamps, and the FIRST one is not optional. The lift law itself contains
+        // tan(π·pivot/rate), so the pivot has to be inside Nyquist BEFORE the lift is computed — at a
+        // 32 kHz session 16 kHz IS Nyquist and that tan diverges, taking the lift, ghi and the whole
+        // filter with it (measured: Stage 1's output reaches 7e6). The retired warp* clamped only
+        // after, which was safe there ONLY because its lift came from a rate power law that never
+        // touches tan. Copying the clamp's placement instead of its reasoning is what reproduced this.
+        const double pivot0 = std::min (s1WarpPivotHz, warpPoleMaxFrac * s1Rate);
+        const double ftil = (s1Rate / M_PI) * std::tan (M_PI * pivot0 / s1Rate); // prewarped pivot
+        const double liftDb = std::max (0.0, s1WarpLift0
+                                                 * 10.0 * std::log10 ((1.0 + (ftil / fc) * (ftil / fc))
+                                                                      / (1.0 + (pivot0 / fc) * (pivot0 / fc))));
+        const double ghi = std::pow (10.0, liftDb / 20.0);
+        // Second clamp — the pole guard the retired warp* also had, and it BINDS HARDER here: this
+        // shelf is live at every OS factor and its lift rises with drive, so the prewarped pole
+        // pivot·√ghi moves with the knob. Both clamps are inert at 44.1/48/88.2/96 kHz (16 kHz needs
+        // ≤17.6 kHz of headroom against 18.5 available at 44.1 k), so nothing that was fitted moves.
+        const double pivot = std::min (pivot0, warpPoleMaxFrac * s1Rate / std::sqrt (ghi));
+        shelfCoeffs (1.0, ghi, pivot, swB0, swB1, swA1, s1Rate);
+        // DC-normalize (H(z=1) = (b0+b1)/(1+a1)), exactly as the retired warp* did: a prewarped
+        // first-order high-shelf with a pivot up near Nyquist loses unity DC gain and droops the whole
+        // spectrum, which is a broadband level shift rather than the top-octave fix intended.
+        const double dc = (swB0 + swB1) / (1.0 + swA1);
+        swB0 /= dc;
+        swB1 /= dc;
+    }
+
     void updateDriveShelf (double drive01) noexcept
     {
         const double trebleDb = std::max (0.0, shelfMaxDb - shelfSlopeDb * drive01);          // HF lift
@@ -1164,9 +1322,13 @@ private:
             leX1 = c;
             leY1 = e;
         }
-        const double w = wsB0 * e + wsB1 * wsX1 - wsA1 * wsY1; // bilinear-warp top-octave correction
-        wsX1 = e;
-        wsY1 = w;
+        double w = e;
+        if constexpr (warpShelfEnabled) // RETIRED step 5 — Stage 1 at base rate killed it at source
+        {
+            w = wsB0 * e + wsB1 * wsX1 - wsA1 * wsY1;
+            wsX1 = e;
+            wsY1 = w;
+        }
         const double y = htB0 * w + htB1 * htX1 - htA1 * htY1; // fixed HF trim (ease the top toward captures)
         htX1 = w;
         htY1 = y;
@@ -1281,6 +1443,9 @@ private:
     double hsB0 { 1.0 }, hsB1 { 0.0 }, hsA1 { 0.0 }, hsX1 { 0.0 }, hsY1 { 0.0 };
     double lsB0 { 1.0 }, lsB1 { 0.0 }, lsA1 { 0.0 }, lsX1 { 0.0 }, lsY1 { 0.0 };
     double wsB0 { 1.0 }, wsB1 { 0.0 }, wsA1 { 0.0 }, wsX1 { 0.0 }, wsY1 { 0.0 };
+    // Stage-1 base-rate warp shelf (sw*) — designed at s1Rate, applied inside processStage1.
+    double s1Rate { 48000.0 };
+    double swB0 { 1.0 }, swB1 { 0.0 }, swA1 { 0.0 }, swX1 { 0.0 }, swY1 { 0.0 };
     double htB0 { 1.0 }, htB1 { 0.0 }, htA1 { 0.0 }, htX1 { 0.0 }, htY1 { 0.0 }; // fixed HF-trim high-shelf
     double leB0 { 1.0 }, leB1 { 0.0 }, leA1 { 0.0 }, leX1 { 0.0 }, leY1 { 0.0 }; // fixed LF-extension low-shelf
     double bcB0 { 1.0 }, bcB1 { 0.0 }, bcB2 { 0.0 }, bcA1 { 0.0 }, bcA2 { 0.0 };  // drive-gated bass-cut bell

@@ -380,21 +380,299 @@ indistinguishable by the project's own arbiters.
 
 ---
 
+## 5d. Step 5 — Stage 1 at the base rate (2026-07-30). Null-NEUTRAL and the last big linear span,
+but it leaves a measured top-octave deficit whose correction is still an open decision
+
+`MonarchChannel::preAtBaseRate` + `processStage1` / `processPreOs`. §2's rule applied to the other
+linear span: Stage 1 is a linear WDF, so it cannot alias, and the OS span only ever bought it a
+smaller bilinear warp — at **18.0 ns/sample paid ×OS**, the largest such block in §1.
+
+**Only Stage 1 moves, and that is forced, not chosen.** `processPre`'s other two blocks are
+IC_A's rail-sat — a genuine nonlinearity, NodeG reaching 2.36–5.93 V against a +3.9/−2.7 V ceiling
+from G6 up — and `driveShelf`, which sits *downstream* of it. So the only admissible cut is
+`Stage 1 | [rail-sat → driveMakeup → driveShelf]`. `processPre` still composes both halves, so every
+single-rate caller (1x, the per-stage tests, the `analysis/` probes, `processSample`) is bit-identical
+to before the split, and `PluginProcessor` is the only caller that separates them.
+
+### The gate, run BEFORE building anything: `analysis/v15_stage1_warp_probe.cpp`
+
+Validated against the shipped `Stage1_FreqResponse` gate to **0.01 dB and 18 Hz** (it reports 12.66 dB
+@ 6340 Hz at 2x; the probe 12.66 @ 6322) — so it is the same instrument, not a new one. Cost of the
+change, Stage 1 at 48 kHz vs Stage 1 at the span's rate, **one** pedal channel:
+
+| drive | 8 kHz | 12 kHz | 16 kHz |
+|---|---|---|---|
+| 0.2 | +0.01 | −0.04 | −0.24 |
+| 0.5 | −0.03 | −0.29 | −1.21 |
+| 0.7 | −0.08 | −0.51 | −1.86 |
+| 1.0 | −0.16 | −0.84 | **−2.58** |
+
+**≤0.02 dB at and below 6 kHz at every drive and every rate.** The 1x row is the built-in control —
+at 1x there is no OS span, so the change must be a no-op, and it reads 0.00 in every cell.
+
+**The peak is NOT what moves**, which retires the on-record blocker. §6.3 recorded the objection as
+"Stage 1's gain peak sweeps 2.8–5.0 kHz with DRIVE, so no fixed prewarp can correct it." Measured, the
+peak's **gain is identical to 0.01 dB** at every rate and drive and its frequency moves **≤0.062
+octaves**. There was never anything there for a prewarp to chase.
+
+**What is drive-dependent is the deficit's DEPTH, and the circuit says why.** Z_upper is
+`R_leg ∥ C2(100 pF)`, so C2's corner is `1/(2π R_leg C2)`: **75.8 kHz at drive 0.2, 31.2 at 0.5,
+15.8 at 1.0** — it walks *into* the top octave as DRIVE rises. The deficit is C2's own rolloff being
+bilinear-warped, not a diffuse "warp".
+
+**Confirmed on the real processor, three independent routes agreeing to 0.02 dB.** `OSFidelity` (a)'s
+1x row rose **+0.10 / +0.77 / +2.98 dB** at 8/12/16 kHz. Predicted from the probe: Yellow@0.5
+(−0.03/−0.29/−1.21) **plus Red**, whose 17.7 k floor makes it ≈ Yellow@0.67 (−0.07/−0.47/−1.75), two
+channels in series → **−0.10/−0.76/−2.96**. (⚠ The flat **+0.15 dB** that (a) shows at 1x across
+100 Hz–4 kHz is **pre-existing** — present in the baseline arm too. It was nearly mis-attributed to
+this change by reading §5b's *documented* 8/12/16 kHz figures instead of rebuilding the baseline. §0
+rule 2 applies to fidelity numbers, not just CPU ones.)
+
+### ❌ REJECTED on measurement: prewarping C2 (`analysis/v15_stage1_warp_probe.cpp` + variant header)
+
+The obvious "fix it at source" move, in the spirit of §5b — and it has real appeal: choose
+`C2' = 1/(R_leg·K·tan(ω₀/K))` so C2's corner lands at the right *digital* frequency, computed in
+`setDrive`, **zero fitted parameters**. It does not work:
+
+| drive | 16 kHz before | C2-prewarped |
+|---|---|---|
+| 0.2 | −0.24 | −0.13 |
+| 0.5 | −1.21 | **+0.61** |
+| 0.7 | −1.86 | **+1.37** |
+| 1.0 | −2.58 | −0.10 |
+
+`|max|` improves only 2.58 → 1.37 dB, and it buys that by turning a **consistent, monotone** deficit
+into a **sign-inconsistent, non-monotone** one — much harder for any downstream shelf to absorb. Worse,
+it **displaces the peak**: `d_oct` ≤0.062 → **0.30–0.55 octaves**, peak gain ≤0.01 → **+0.30 dB**.
+Matching one corner does not match `Av = 1 + Z_upper/Z_lower`.
+
+> **The rule it adds, and it inverts the objection it was testing.** The 2026-06-29 note said a prewarp
+> fails *because* the peak sweeps with drive. The truth is the reverse: the peak was already
+> **rate-immune**, and **prewarping is what moves it**. A single-element prewarp is not a free
+> "fix at source" — it is a one-frequency fit inside a composite transfer function, and it pays for the
+> corner it pins with error everywhere else.
+
+### The arbiter: NEUTRAL
+
+44 captures (`run_validation.py --captures analysis/pedal_export2`): median **−23.45 → −23.45 dB**,
+range −26.9…−8.6 → **−27.0…−8.6**, mean **+0.002 dB**, **9 deeper / 26 unchanged / 9 shallower**,
+largest move ±0.2 dB either way. Nine per-stage gates + all six ctest gates PASS.
+
+Per-band null is where the change becomes visible, and it is confined to exactly one band:
+
+| band | mean Δ | deeper / shallower / same |
+|---|---|---|
+| 100–300 Hz | −0.007 | 6 / 6 / 32 |
+| 300 Hz–1 k | −0.036 | 6 / 5 / 33 |
+| 1–2 k | +0.159 | 11 / 8 / 25 |
+| 2–6 k | +0.048 | 18 / 15 / 11 |
+| **6 k+** | **+0.141** | **11 / 28 / 5** |
+
+`6k+` is the only band where more captures got *shallower* than deeper — the expected signature, and
+nothing below 6 kHz moved.
+
+> ⚠ **`run_validation.py`'s "FR RMS err" moved and it is the wrong instrument to read here** — mean
+> **+0.266 dB**, worst **+2.54** (G10 T5 Dist). `analyze.frequency_response` averages third-octave
+> centres from **25 Hz to 20 kHz with equal weight**, so **4 of its 30 bands (10k/12.5k/16k/20k) sit
+> above the ~8 kHz limit** where the captures carry ±18 dB of spread — and G10 is exactly where the
+> measured deficit is deepest. The probe puts the change at ≤0.32 dB at 8 kHz for both channels
+> combined, which cannot produce a 2.54 dB rms move; the top four bands can. The per-band **null** is
+> the arbiter and it says the trustworthy region did not move. (A trust-band-restricted FR
+> recomputation was **not** run — it needs before-arm renders.)
+
+### ⚠️ What is NOT settled, and why nothing is claimed as finished
+
+1. **`warp*` structurally CANNOT correct this, and that is the load-bearing discovery.**
+   `v15_warp_refit.py`'s fit is **constrained to vanish at 8x** — deliberately, so the shelf cannot
+   re-voice the render path while buying the low factors. But Stage 1 now runs at the base rate at
+   **every** factor, so this deficit is present **at 8x too**. `warp*` corrects *rate disagreement*;
+   this needs a **rate-independent, drive-keyed** term. Different instrument, same band → P7's
+   overlapping-corrections rule applies, and `hfTrim` (4.5 kHz, fixed) is in that band as well, so any
+   fit has to put all three on the bench in one pass. **Seventh instance.**
+2. **The plugin-level CPU figure is NOT measured.** Channel arithmetic from the measured 18.0 ns,
+   per output frame as `N×(pre+clip)+post` (§1's "channel total" is a mixed-unit per-sample sum and
+   must not be used for this):
+
+   | OS | Boost | Overdrive | Distortion |
+   |----|-------|-----------|------------|
+   | 8x | −126 ns = **17.3 %** | **11.1 %** | **13.4 %** |
+   | 4x | −54 ns = **14.3 %** | **9.3 %** | **11.2 %** |
+   | 2x | −18 ns = **8.9 %** | **5.9 %** | **7.1 %** |
+
+   Realisation ran ~83 % in §2 (20 % delivered against 24 % predicted) because the oversampler's own
+   FIR is untouched, so expect ~14/9/11 % at 8x. **The first attempt to measure it was discarded**:
+   run immediately after a build, it returned 8x Overdrive *below* 8x Boost and a render row swinging
+   11.4 → 40.3 → 13.9 % within one arm. Interleaving the arms does **not** rescue this — §0 rule 2's
+   hazard is random contention, not monotone drift.
+
+**Status: superseded by §5e**, which resolved both (1) and (2) — the drive-keyed term was fitted, and
+the plugin-level measurement was subsequently taken (2026-07-30, see §5e). The measured 8x figures
+(8.6/18.8/12.1 %) beat the arithmetic prediction (11.7/21.3/16.9 %), likely because retiring
+`warp*` also removes its per-OS-sample shelf computation.
+
+---
+
+## 5e. Step 5, part 2 — `warp*` RETIRED and replaced by a drive-keyed shelf. The headline is not the
+shelf: it is that Stage 1 was ~97 % of all the bilinear warp in the plugin, so a *rate*-keyed
+correction was never the right instrument
+
+`MonarchChannel::s1Warp*` + `updateS1Warp`, with `warpScaleDb` → 0 behind a derived
+`warpShelfEnabled`. §5d left one decision open; this is it, taken and measured.
+
+### Why `warp*` had to go, and why it is a retirement rather than a refit
+
+`warp*` is keyed to the **OS rate**. Step 5 moved Stage 1 to the **base** rate, which removes the
+rate-dependence *at source* — and Stage 1 turns out to have been essentially all of it. With Stage 1
+at the base rate and this shelf **disabled**, `OSFidelity` (a) reads 1x −0.18 / −0.24 / −0.26 dB at
+8/12/16 kHz (was −0.29 / −1.01 / −3.23), 2x ≤0.06. So the factors already agree to a quarter of a dB
+with **no shelf at all** — better than the ±0.28/−0.75 that shipped *with* the shelf in step 3.
+Leaving it in is then a pure over-correction: measured, **1x reads +2.23 dB ABOVE 8x** at 16 kHz.
+
+> **The rule: when a correction's keying is removed at source, the correction does not need retuning —
+> it needs deleting.** Step 3 refit this shelf 10.6 → 1.0 dB after the ADAA droop was removed, and the
+> instinct here was to refit it again. That is wrong twice over: its *key* (rate) no longer indexes the
+> defect at all, and a refit would have kept a live instrument in a band where two others already sit.
+> **Fourth time a `warp*` number has been attributed to the wrong mechanism** (06-30 fit, step 3's ADAA
+> collision, step 3's above-the-knee instrument, and now its keying).
+
+### What replaced it, and why the drive axis is the circuit's own
+
+The defect did not disappear when the rate-dependence did — it became **absolute** (present at every
+factor, render included) and **drive**-keyed. Z_upper is `R_leg ∥ C2(100 pF)`, so C2's corner
+`1/(2π·R_leg·C2)` runs **75.8 kHz at G2 → 15.8 kHz at G10**: it walks *into* the top octave as DRIVE
+rises, and bilinear-warping a corner that near Nyquist is the whole mechanism.
+
+`s1WarpPivotHz` = 16 kHz, `s1WarpLift0` = **0.40**, DC-normalized, applied **inside `processStage1` at
+the base rate** — not in `driveShelf`, which runs at the OS rate. A correction for Stage 1's own warp
+has to live at Stage 1's rate.
+
+* **Keyed on `R_leg`, not on the knob — which makes it right on RED for free.** Every other drive-keyed
+  instrument here (`bassCut*`, `bassBoost*`, `driveMakeup`) is knob-keyed and Yellow-fitted, which is
+  what dsp.md's standing "Red drive-shelf keying" note is about. This law reads Red's 17.7 k floor
+  directly, so **one expression covers both channels**, and the fit was scored over both at once. It
+  does not add to that deferred mismatch.
+* **Zero fitted shape.** The warp of a one-pole at `fc` read at the pivot is closed form;
+  `s1WarpLift0` only rescales it to the composite `Av = 1 + Z_upper/Z_lower`. **Verified: the shipped
+  C++ matches the analytic law to 0.01 dB in all 24 (channel × rate × drive) cells.**
+* **The target is EXACT, and this is the one EQ fit in the project where FR both generates *and*
+  decides.** `v15_stage1_warp_probe fit` emits base-rate vs an **8x-of-base solve of the same filter**
+  (own residual warp ~1/64 of what is measured): no captures, no NAM model, no noise. The null renders
+  at 4x and the effect is above 8 kHz where the captures carry ±18 dB — its only job is to confirm
+  nothing *else* moved. Harness `analysis/v15_s1warp_fit.py`.
+
+### ⚠️ 0.40 is deliberately below the harness's own optimum (0.545) — a metric-weighting trap
+
+The harness weights 4–11 kHz at 3–4× to protect the presence band. But the raw deficit there is already
+~0, so that weighting **credits the 14–16 kHz repair almost nothing while charging full price for
+presence-band over-correction**: its weighted rms only moves 0.329 → 0.262 dB, which reads as "the
+shelf barely helps". Decomposed into cells it is nothing like that. Series pair (Yellow+Red), 48 kHz:
+
+| `lift0` | 6–10 kHz cost | 16 kHz residual, G2→G10 |
+|---|---|---|
+| 0 (no shelf) | — | −1.0 … −5.4 |
+| **0.40 (shipped)** | **≤ +0.23** | **−0.4 … −2.7** |
+| 0.545 (weighted-best) | +0.30 … +0.40 | −0.2 … −1.7 |
+
+0.545 spends 0.3–0.4 dB of presence band to buy the last 20 %. At 0.40 the 6–10 kHz residual stays
+below what any instrument here resolves, so it **cannot be double-corrected later** by `hfTrim`
+(4.5 kHz) or a P7 refit — the two things in that band. **Aggregate is a screen, cells are the verdict**
+(P10 step 3's rule), and the weighting itself is the fifth instance of the marginalisation family.
+
+### ⚠️⚠️ A real instability was found and fixed BEFORE shipping — and the gate written for it was
+verified BLIND. This is the transferable part of step 5.
+
+The lift law contains `tan(π·pivot/rate)`. On a **32 kHz** session the 16 kHz pivot lands exactly on
+Nyquist, that tan diverges, and **Stage 1's output reaches ~5e6**. Cause: the pivot was clamped only
+*after* the lift was computed — which is how the retired `warp*` did it, safely, because *its* lift came
+from a rate power law that never touches tan. **Copying a clamp's placement instead of its reasoning is
+what reproduced this.** Fixed with two clamps: a rate-only `pivot0 = min(pivot, 0.42·rate)` *before* the
+lift, then the existing pole guard after. Both are inert at 44.1/48/88.2/96 kHz — all 24 fitted cells
+re-verified bit-identical, so nothing that was fitted moved, and the in-flight null render stayed valid.
+
+**The gate is the lesson.** A session-rate × OS-factor sweep was added to `ControlSweep` for this, and
+then tested against the broken arm: it **PASSED**. The plugin's *output* never moves when Stage 1
+blows up, because the diode clipper clamps ±1.64 V — output stays ~0.26 while the node is at 5e6.
+
+> **An output-bounded check cannot see a blowup upstream of a clipper. The clipper is a perfect mask.**
+> So the bound has to be asserted on the **node**, and it now is: `FullChain_DualChannel` reads NodeG
+> over {22.05, 32, 44.1, 48, 88.2, 96} kHz × {1,2,4,8}x × 11 drives × both channels (worst |NodeG| =
+> **2.89 V** good arm, **6.03e6** broken → FAIL). On the broken arm *every other check in that suite
+> still reported "ok"* — the mask made visible. Two prior audit items claimed "verified finite over
+> {22.05…96} kHz × {1,2,4,8}x" **by hand and left no gate behind**; this is that check made permanent.
+> Same family as `OSFidelity`'s three invalid-instrument findings, one level lower again: not the wrong
+> aggregation, not the wrong operating point — **the wrong observable**.
+
+The `ControlSweep` rate sweep was kept anyway: it is cheap and it is real added coverage (nothing else
+there ran at any rate but 48 kHz), but it is **not** the guard for this defect and must not be read as
+one.
+
+### The arbiter: NEUTRAL, as designed
+
+44 captures. **vs step 5 bare:** median **−23.45 → −23.45**, mean **+0.011 dB**, 2 deeper / 36
+unchanged / 6 shallower, largest move ±0.2 dB. FR rms err mean **−0.200 dB** (i.e. FR improved, the
+expected direction). **vs the committed pre-step-5 baseline:** median **−23.45 → −23.45**, range
+−26.9…−8.6 → **−27.0…−8.6**, mean +0.014 dB, 8 deeper / 25 unchanged / 11 shallower.
+
+Per-band vs committed, the change is confined to where it should be: 100–300 Hz **−0.025**, 300 Hz–1 k
+−0.025, 1–2 k +0.052, 2–6 k +0.034, **6 k+ +0.214** (29 of 44 shallower) — the residual top-octave
+darkening, registering only in the band the captures cannot arbitrate. Nine per-stage gates + all six
+ctest gates PASS.
+
+> **A null-neutral result is the correct outcome here**, for the same reason as step 3: this is an
+> internal-consistency axis measured against an exact reference. Had the null moved much, the fit would
+> have been absorbing a capture-accuracy error it has no business touching.
+
+### Plugin-level CPU, measured 2026-07-30
+
+`PerfBenchmark` (§0 rule 2 protocol: idle, both arms rebuilt, back-to-back, ≥2 passes). The
+arithmetic prediction was ~14/9/11 % at 8x; the realized figures are larger, likely because
+retiring `warp*` (rate-keyed shelf computation at every OS sample) saves more than Stage 1's
+span alone:
+
+| OS | Boost | Overdrive | Distortion |
+|----|-------|-----------|------------|
+| 1x | 2.1 % | 3.8 % | 2.8 % |
+| 2x | 2.8 % | 5.3 % | 3.6 % |
+| 4x | 4.8 % | 9.8 % | 6.5 % |
+| 8x | 8.6 % | 18.8 % | 12.1 % |
+| render | — | — | 11.1 % |
+
+1x is the built-in control — Boost moved 2.25 → 2.1 % (step 4 → step 5), within the ±2 %
+noise floor. All OS factors ≥2× show clear improvement. README's Performance table updated
+from these figures.
+
+**`hfTrim` was left at −1.3 dB** and was *not* re-fit: the shipped shelf's contribution
+at 4.5 kHz is ~+0.08 dB, an order below what either instrument resolves, so P7's joint-fit rule is
+satisfied by inspection rather than by a refit.
+
+---
+
 ## 6. Open levers, in order
 
 The gate on all of them: **FR generates the hypothesis, the 44-capture null decides.**
 
-### 6.3 `processPre` → base rate
+### 6.3 `processPre` → base rate — **✅ SHIPPED as step 5. See §5d (the move) and §5e (the EQ).**
 
-The largest remaining oversampled-linear share (Stage 1's 18 ns + 3.4 ns of shelves, paid ×OS). Blocked
-historically because Stage 1's gain peak *sweeps* 2.8–5.0 kHz with DRIVE, which is why the 2026-06-29
-note rejected a fixed prewarp. **That objection no longer transfers automatically:** `setDrive`
-recomputes coefficients per block, so a **drive-dependent** prewarp is available in a way a fixed one
-was not. Re-derive before assuming the old rejection holds.
+Superseded by §5d, which corrects this entry's framing on two counts:
 
-Cheap sub-case, if wanted separately: the shelves are all LTI and commute with Stage 1, so `driveShelf`
-could run at the base rate *before* the upsampler. Only 3.4 ns, and it changes the shelves' design rate
-(hence their response), so the risk/reward is poor. Not recommended on its own.
+* **Only Stage 1 can move**, not `processPre` — IC_A's rail-sat is a nonlinearity and `driveShelf` is
+  downstream of it. So the prize is **18.0 ns**, not the span's 43.7.
+* **The "peak sweeps with DRIVE" objection is retired**, but not the way this entry expected. The peak
+  turns out to be **rate-immune** (≤0.062 oct, ≤0.01 dB), so no prewarp was needed for it — and a C2
+  prewarp, the drive-dependent one this entry invited, was built and **rejected**: it is what *creates*
+  peak displacement (0.30–0.55 oct). §5d.
+
+Both parts shipped and **null-neutral** (median −23.45 unchanged either way). The decision this entry
+left open was resolved in §5e: the drive-keyed term was fitted and `warp*` **retired** — it could not
+have done the job, since its fit vanishes at 8x while this deficit is present at 8x, and more
+fundamentally its *key* (rate) no longer indexes the defect. `hfTrim` stays at −1.3 dB (the new shelf
+contributes ~+0.08 dB at 4.5 kHz, below what any instrument resolves). **Plugin-level CPU measured 2026-07-30** at 8.6/18.8/12.1 % (Boost/OD/Dist) — see §5e for the
+full `PerfBenchmark` table. The arithmetic prediction was ~14/9/11 %; the realised savings are
+larger, likely because retiring `warp*` also removes its per-OS-sample shelf computation.
+
+Cheap sub-case, still untouched: the shelves are LTI and commute with Stage 1, so `driveShelf` could
+also run at the base rate. Only 3.4 ns, and it changes the shelves' design rate (hence their response),
+so the risk/reward is poor. Not recommended on its own.
 
 ### 6.4 Not worth it / do not re-attempt
 

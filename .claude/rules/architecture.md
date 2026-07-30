@@ -78,16 +78,25 @@ sample; the "skip DSP when bypassed" CPU optimisation is in the oversampling pat
 
 ## Oversampling
 
-One `juce::dsp::Oversampling` per channel, wrapping **Stage 1 + the clip span** (linear Stage 1 + clip
-span) so Stage 1's near-Nyquist bilinear warp shrinks with the OS factor (see dsp.md
-"Linear stages run oversampled"). Factor change → reinit both oversamplers + re-`prepareLinear`/
-`prepareClip` at the OS rate, at next block start (one-block gap acceptable).
-`oversampler.initProcessing(samplesPerBlock)` in prepareToPlay.
+One `juce::dsp::Oversampling` per channel, wrapping **the clip span only** — as of v1.5 **both** linear
+spans have left it. Factor change → reinit both oversamplers + re-`prepareLinear`/`prepareClip`, at next
+block start (one-block gap acceptable). `oversampler.initProcessing(samplesPerBlock)` in prepareToPlay.
 
-**Tone/Volume (`processPost`) run at the BASE rate, after the downsample** (v1.5,
+**Tone/Volume (`processPost`) run at the BASE rate, after the downsample** (v1.5 step 1,
 `MonarchChannel::postAtBaseRate`) — they are linear and cannot alias, so the OS span bought them only
 warp accuracy for 24 % of the per-sample channel cost. CPU −20 % at 4x/8x, 1x unchanged by
-construction. `prepareLinear (clipRate, baseSampleRate)` carries the split. See dsp.md.
+construction.
+
+**Stage 1 runs at the BASE rate too, BEFORE the upsampler** (v1.5 step 5,
+`MonarchChannel::preAtBaseRate`) — same rule, and it was the largest such block (18.0 ns/sample paid
+×OS). `processPre` is split into `processStage1` (base rate) and `processPreOs` (IC_A's rail-sat →
+`driveMakeup` → `driveShelf`, still oversampled). **Only Stage 1 could move, and that is forced:** the
+rail-sat is a genuine nonlinearity and `driveShelf` is downstream of it. `processPre` still composes
+both, so every single-rate caller (1x, the per-stage tests, the `analysis/` probes) is bit-identical to
+before the split; `PluginProcessor` is the only caller that separates them.
+
+`prepareLinear (clipRate, postRate = baseSampleRate, preRate = baseSampleRate)` carries both splits —
+each defaults to `clipRate`, so a caller wanting one rate for everything needs no change. See dsp.md.
 
 ## prepareToPlay Responsibilities
 
