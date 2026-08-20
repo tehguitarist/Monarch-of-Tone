@@ -198,7 +198,12 @@ jobs:
   macos-intel:
     name: macOS (Intel) (AU + VST3)
     needs: prepare
-    runs-on: macos-13
+    # GitHub's macos-13 (Intel-hosted) runner pool has become unreliable/near-retired — jobs can
+    # sit in "waiting for a runner" indefinitely. Build the Intel slice by CROSS-COMPILING on the
+    # Apple Silicon runner instead (Xcode's clang + the macOS SDK support this natively via
+    # -DCMAKE_OSX_ARCHITECTURES=x86_64 below) — no Intel hardware needed, and it's not subject to
+    # that pool's availability.
+    runs-on: macos-latest
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
       HAS_APPLE_SIGNING: ${{ secrets.APPLE_CERT_P12_BASE64 != '' }}
