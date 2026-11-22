@@ -2,6 +2,8 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include "Assets.h"
+
 /**
  * Shared LookAndFeel for the Monarch of Tone plugin. The peripheral elements (halo trim knob,
  * oversampling combo boxes, bypass footswitch) match a sibling plugin's look exactly — see the
@@ -58,6 +60,9 @@ public:
     static constexpr juce::uint32 cKnobBlack = 0xFF161019u;     // knob cap base
 
 private:
+    // Keeps the graded artwork alive while an editor exists, and frees it when the last one closes (see Assets.h).
+    juce::SharedResourcePointer<MonarchAssets::GradedArt> gradedArt;
+
     void drawTrimHalo (juce::Graphics&, juce::Rectangle<float> bounds, float sliderPos,
                        float startAngle, float endAngle);
     void drawKnobImage (juce::Graphics&, const juce::Image&, juce::Rectangle<float> bounds,
