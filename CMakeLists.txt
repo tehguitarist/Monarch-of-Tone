@@ -1,10 +1,17 @@
 cmake_minimum_required(VERSION 3.15)
 
-project(MonarchOfTone VERSION 1.4.1)
+# The deployment target MUST be set before project(): CMake reads it there, and a later set() is silently ignored
+# (the build then takes the runner's own OS as its minimum, e.g. macOS 26, and loads on nothing older).
+set(CMAKE_OSX_DEPLOYMENT_TARGET "10.13" CACHE STRING "Minimum macOS deployment target")
+# Windows: link the C/C++ runtime statically (/MT), so the plug-in does not depend on the Visual C++ Redistributable
+# installed on the user's machine (a plug-in built with a newer MSVC than the user's redistributable fails to load or
+# crashes). Needs CMP0091 (NEW from cmake_minimum_required 3.15); must precede the targets, so JUCE.
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
+project(MonarchOfTone VERSION 1.4.2)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_OSX_DEPLOYMENT_TARGET "10.13" CACHE STRING "Minimum macOS deployment target")
 
 # -Wall -Wextra on GCC/Clang; MSVC doesn't understand those flags (it would just warn D9002
 # and ignore them), so give it the equivalent /W4 instead — same warning level on every CI OS.
