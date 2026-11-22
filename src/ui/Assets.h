@@ -54,36 +54,35 @@ inline juce::Image adjustBrightnessContrast (const juce::Image& src, float contr
     return result;
 }
 
-// Graded variants (computed once, cached) — main knobs +10% contrast/-10% brightness, presence
-// trim +15%/-15%, background texture +10% contrast/-15% brightness (tweaks 2026-06-22).
-inline const juce::Image& bakeliteKnobGraded()
+// Do NOT cache images in function-local or namespace-scope statics. A static outlives the editor and is destroyed when the
+// plug-in DLL is unloaded, under the Windows loader lock. JUCE 9's Direct2D images release GPU resources in their destructor,
+// and the graphics driver can wait on its own threads, which need that same lock: the host then hangs on closing the plug-in
+// (REAPER "Unloading track", Gig Performer; see Tommy#2). The graded art is owned by GradedArt below, shared by the open
+// editors through a juce::SharedResourcePointer that the look-and-feel holds, so it is freed when the last editor closes,
+// while JUCE and the driver are still alive. The accessors return an Image by value (a cheap reference-counted handle).
+// Graded variants — main knobs +10% contrast/-10% brightness, presence trim +15%/-15%, background texture +10% contrast/
+// -15% brightness (tweaks 2026-06-22; texture also -12%,+5%,+3%,+5% brightness). Computed once per open-editor lifetime.
+struct GradedArt
 {
-    static const juce::Image img = adjustBrightnessContrast (bakeliteKnob(), 1.10f, 0.90f);
-    return img;
-}
-inline const juce::Image& presenceKnobGraded()
+    GradedArt();
+    juce::Image bakelite, presence, texture, switchUp, footUp, footDown;
+};
+
+inline GradedArt::GradedArt()
+    :
+      bakelite (adjustBrightnessContrast (MonarchAssets::bakeliteKnob (), 1.10f, 0.90f)),
+      presence (adjustBrightnessContrast (MonarchAssets::presenceKnob (), 1.15f, 0.85f)),
+      texture (adjustBrightnessContrast (MonarchAssets::texture (), 1.21f, 0.84940857f)),
+      switchUp (adjustBrightnessContrast (MonarchAssets::switchUp (), 1.10f, 0.90f)),
+      footUp (adjustBrightnessContrast (MonarchAssets::footswitchUp (), 1.0f, 0.90f)),
+      footDown (adjustBrightnessContrast (MonarchAssets::footswitchDown (), 1.0f, 0.90f))
 {
-    static const juce::Image img = adjustBrightnessContrast (presenceKnob(), 1.15f, 0.85f);
-    return img;
 }
-inline const juce::Image& textureGraded()
-{
-    static const juce::Image img = adjustBrightnessContrast (texture(), 1.21f, 0.84940857f); // -15%,-12%,+5%,+3%,+5% brightness; +10% contrast
-    return img;
-}
-inline const juce::Image& switchUpGraded()
-{
-    static const juce::Image img = adjustBrightnessContrast (switchUp(), 1.10f, 0.90f);
-    return img;
-}
-inline const juce::Image& footswitchUpGraded()
-{
-    static const juce::Image img = adjustBrightnessContrast (footswitchUp(), 1.0f, 0.90f);
-    return img;
-}
-inline const juce::Image& footswitchDownGraded()
-{
-    static const juce::Image img = adjustBrightnessContrast (footswitchDown(), 1.0f, 0.90f);
-    return img;
-}
+
+inline juce::Image bakeliteKnobGraded () { return juce::SharedResourcePointer<GradedArt>()->bakelite; }
+inline juce::Image presenceKnobGraded () { return juce::SharedResourcePointer<GradedArt>()->presence; }
+inline juce::Image textureGraded () { return juce::SharedResourcePointer<GradedArt>()->texture; }
+inline juce::Image switchUpGraded () { return juce::SharedResourcePointer<GradedArt>()->switchUp; }
+inline juce::Image footswitchUpGraded () { return juce::SharedResourcePointer<GradedArt>()->footUp; }
+inline juce::Image footswitchDownGraded () { return juce::SharedResourcePointer<GradedArt>()->footDown; }
 } // namespace MonarchAssets
