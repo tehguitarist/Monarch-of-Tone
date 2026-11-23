@@ -60,13 +60,20 @@ else()
     set(MONARCH_FORMATS VST3 Standalone)
 endif()
 
+# LV2 is built on Linux only (an empty value elsewhere, so the FORMATS list below is unchanged).
+set(PLUGIN_LV2_FORMAT "")
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(PLUGIN_LV2_FORMAT LV2)
+endif()
+
 juce_add_plugin(Monarch
     COMPANY_NAME "Leigh Pierce"
     BUNDLE_ID "com.leighpierce.monarchoftone"
     PLUGIN_MANUFACTURER_CODE LeP1
     PLUGIN_CODE Mon1
     VERSION ${PROJECT_VERSION}
-    FORMATS ${MONARCH_FORMATS}
+    FORMATS ${MONARCH_FORMATS} ${PLUGIN_LV2_FORMAT}
+    LV2URI "https://github.com/tehguitarist/Monarch-of-Tone"   # permanent: hosts identify the plug-in by it
     PRODUCT_NAME "Monarch of Tone"
     COPY_PLUGIN_AFTER_BUILD TRUE
 )

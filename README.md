@@ -121,7 +121,7 @@ own machine (see below).
 ## Building
 
 **Requirements:** CMake 3.15+, a C++17 compiler. AU + VST3 + Standalone on macOS 10.13+; VST3 +
-Standalone on Windows and Linux (see [Known limitations](#known-limitations)).
+Standalone on Windows and Linux (plus LV2 on Linux) (see [Known limitations](#known-limitations)).
 
 ```bash
 git clone https://github.com/tehguitarist/Monarch-of-Tone.git
@@ -196,7 +196,7 @@ guided installer. Six files total:
 |---|---|---|
 | macOS | `Monarch-of-Tone-X.Y.Z-macOS.zip` — AU + VST3 | `Monarch-of-Tone-X.Y.Z-macOS-Installer.pkg` — lets you choose AU, VST3, or both (both checked by default) |
 | Windows | `Monarch-of-Tone-X.Y.Z-Windows.zip` — VST3 | `Monarch-of-Tone-X.Y.Z-Windows-Installer.exe` — VST3 only (no AU on Windows) |
-| Linux | `Monarch-of-Tone-X.Y.Z-Linux.zip` — VST3 | `Monarch-of-Tone-X.Y.Z-Linux-Installer.deb` — VST3 only (no AU on Linux) |
+| Linux | `Monarch-of-Tone-X.Y.Z-Linux.zip` — VST3 + LV2 | `Monarch-of-Tone-X.Y.Z-Linux-Installer.deb` — VST3 + LV2 (no AU on Linux) |
 
 ### Installer (recommended)
 

@@ -460,7 +460,7 @@ jobs:
             dist/*.exe
 
   linux:
-    name: Linux (VST3)
+    name: Linux (VST3, LV2)
     needs: prepare
     runs-on: ubuntu-22.04
     env:
@@ -483,14 +483,16 @@ jobs:
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
-      - name: Build VST3
-        run: cmake --build build --config Release --target Monarch_VST3 --parallel
+      - name: Build VST3 and LV2
+        run: |
+          cmake --build build --config Release --target Monarch_VST3 --parallel
+          cmake --build build --config Release --target Monarch_LV2 --parallel
 
       - name: Package zip
         run: |
           mkdir -p dist
           cd build/Monarch_artefacts/Release
-          zip -r "$GITHUB_WORKSPACE/dist/Monarch-of-Tone-${VERSION}-Linux.zip" VST3
+          zip -r "$GITHUB_WORKSPACE/dist/Monarch-of-Tone-${VERSION}-Linux.zip" VST3 LV2
           cd "$GITHUB_WORKSPACE"
 
       - name: Build installer
