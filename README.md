@@ -4,7 +4,7 @@
 [![License](https://img.shields.io/badge/License-AGPLv3-blue.svg)](https://opensource.org/license/agpl-v3)
 [![Downloads](https://img.shields.io/github/downloads/tehguitarist/Monarch-of-Tone/total)](https://somsubhra.github.io/github-release-stats/?username=tehguitarist&repository=Monarch-of-Tone&page=1&per_page=30)
 
-A circuit-accurate, dual-channel overdrive plugin (AU/VST3, JUCE 8) modelled directly
+A circuit-accurate, dual-channel overdrive plugin (AU/VST3, plus LV2 on Linux; JUCE 8) modelled directly
 from the schematic of a boutique two-in-one Bluesbreaker-derived pedal — the kind of
 "holy grail" overdrive that's notoriously hard to get hold of and even harder to clone by ear.
 Monarch of Tone isn't a vibe-matched approximation: every gain stage, filter pole, and diode
@@ -134,6 +134,7 @@ git submodule update --init --recursive
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --target Monarch_AU       # Audio Unit (macOS only)
 cmake --build build --target Monarch_VST3     # VST3 (macOS/Windows/Linux)
+cmake --build build --target Monarch_LV2      # LV2 (Linux only)
 cmake --build build --target Monarch_Standalone
 ```
 
@@ -206,7 +207,7 @@ guided installer. Six files total:
 - **Windows:** run the `.exe` and follow the prompts. Installs the VST3 to
   `%COMMONPROGRAMFILES%\VST3\Monarch of Tone.vst3`. Includes an uninstaller.
 - **Linux:** `sudo dpkg -i Monarch-of-Tone-X.Y.Z-Linux-Installer.deb` installs the VST3 to
-  `/usr/lib/vst3/Monarch of Tone.vst3`.
+  `/usr/lib/vst3/Monarch of Tone.vst3` and the LV2 to `/usr/lib/lv2/Monarch of Tone.lv2`.
 
 ### Manual (zip)
 
@@ -216,7 +217,7 @@ Unzip and copy the plugin bundle(s) to your system's plugin folder yourself:
   `/Library/Audio/Plug-Ins/Components/` for all users), `Monarch of Tone.vst3` →
   `~/Library/Audio/Plug-Ins/VST3/` (or `/Library/Audio/Plug-Ins/VST3/`).
 - **Windows:** `Monarch of Tone.vst3` → `C:\Program Files\Common Files\VST3\`.
-- **Linux:** `Monarch of Tone.vst3` → `~/.vst3/` (or `/usr/lib/vst3/` for all users).
+- **Linux:** `Monarch of Tone.vst3` → `~/.vst3/` (or `/usr/lib/vst3/` for all users); `Monarch of Tone.lv2` → `~/.lv2/` (or `/usr/lib/lv2/`).
 
 > **macOS signing:** release artifacts, including the `.pkg` installer wrapper itself, are signed
 > with a Developer ID certificate and notarized by Apple — no Gatekeeper warning on first launch
